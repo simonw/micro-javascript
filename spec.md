@@ -159,31 +159,33 @@ Based on mquickjs_opcode.h, the VM uses these opcodes:
 - [x] Copy test files from mquickjs
 - [x] Create basic pytest test harness
 - [x] Write this spec
-- [ ] Create base value types (values.py)
-- [ ] Create token types (tokens.py)
-- [ ] Implement lexer (lexer.py)
+- [x] Create base value types (values.py)
+- [x] Create token types (tokens.py)
+- [x] Implement lexer (lexer.py) - 54 TDD tests passing
 
 ### Phase 2: Parser
-- [ ] Implement expression parser
-- [ ] Implement statement parser
-- [ ] Implement function parsing
-- [ ] Implement object/array literal parsing
+- [x] Implement expression parser
+- [x] Implement statement parser
+- [x] Implement function parsing
+- [x] Implement object/array literal parsing
+- [x] AST node types (ast_nodes.py) - 59 TDD tests passing
 
 ### Phase 3: Compiler
-- [ ] Implement bytecode generation
-- [ ] Implement scope analysis
-- [ ] Implement closure compilation
+- [x] Implement bytecode generation
+- [x] Implement scope analysis
+- [x] Implement closure compilation
 - [ ] Implement optimizations
 
 ### Phase 4: Virtual Machine
-- [ ] Implement VM core
-- [ ] Implement memory limits
-- [ ] Implement time limits
+- [x] Implement VM core (vm.py)
+- [x] Implement JSContext public API (context.py)
+- [ ] Implement memory limits (basic structure exists)
+- [ ] Implement time limits (basic structure exists)
 - [ ] Implement garbage collector
 
 ### Phase 5: Built-in Objects
-- [ ] Object
-- [ ] Array
+- [ ] Object (basic)
+- [ ] Array (basic)
 - [ ] String
 - [ ] Number
 - [ ] Boolean
@@ -194,7 +196,7 @@ Based on mquickjs_opcode.h, the VM uses these opcodes:
 - [ ] Error types
 - [ ] Date (Date.now only)
 - [ ] TypedArrays
-- [ ] console
+- [x] console (basic log)
 
 ### Phase 6: Testing
 - [ ] Make test_language.js pass

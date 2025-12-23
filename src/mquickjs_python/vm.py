@@ -176,17 +176,14 @@ class VM:
             frame.locals[arg] = self.stack[-1]
 
         elif op == OpCode.LOAD_NAME:
-            name = frame.func.constants[arg] if arg < len(frame.func.constants) else None
-            if name is None or not isinstance(name, str):
-                # Name stored in a separate list
-                name = self._get_name(frame, arg)
+            name = frame.func.constants[arg]
             if name in self.globals:
                 self.stack.append(self.globals[name])
             else:
                 raise JSReferenceError(f"{name} is not defined")
 
         elif op == OpCode.STORE_NAME:
-            name = self._get_name(frame, arg)
+            name = frame.func.constants[arg]
             self.globals[name] = self.stack[-1]
 
         # Properties

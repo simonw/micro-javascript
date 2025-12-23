@@ -9,6 +9,16 @@ Based on: https://github.com/bellard/mquickjs
 
 __version__ = "0.1.0"
 
-# Public API will be exported here once implemented
-# from .context import JSContext
-# from .errors import JSError, MemoryLimitError, TimeLimitError
+from .context import JSContext
+from .errors import JSError, JSSyntaxError, MemoryLimitError, TimeLimitError
+from .values import UNDEFINED, NULL
+
+__all__ = [
+    "JSContext",
+    "JSError",
+    "JSSyntaxError",
+    "MemoryLimitError",
+    "TimeLimitError",
+    "UNDEFINED",
+    "NULL",
+]

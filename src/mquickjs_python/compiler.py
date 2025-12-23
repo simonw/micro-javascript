@@ -52,12 +52,28 @@ class Compiler:
 
     def compile(self, node: Program) -> CompiledFunction:
         """Compile a program to bytecode."""
-        for stmt in node.body:
+        body = node.body
+
+        # Compile all statements except the last one
+        for stmt in body[:-1] if body else []:
             self._compile_statement(stmt)
 
-        # Implicit return undefined
-        self._emit(OpCode.LOAD_UNDEFINED)
-        self._emit(OpCode.RETURN)
+        # For the last statement, handle specially to return its value
+        if body:
+            last_stmt = body[-1]
+            if isinstance(last_stmt, ExpressionStatement):
+                # Compile expression without popping - its value becomes the return
+                self._compile_expression(last_stmt.expression)
+                self._emit(OpCode.RETURN)
+            else:
+                self._compile_statement(last_stmt)
+                # Implicit return undefined
+                self._emit(OpCode.LOAD_UNDEFINED)
+                self._emit(OpCode.RETURN)
+        else:
+            # Empty program returns undefined
+            self._emit(OpCode.LOAD_UNDEFINED)
+            self._emit(OpCode.RETURN)
 
         return CompiledFunction(
             name="<program>",

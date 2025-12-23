@@ -49,6 +49,7 @@ class Compiler:
         self.locals: List[str] = []
         self.loop_stack: List[LoopContext] = []
         self.functions: List[CompiledFunction] = []
+        self._in_function: bool = False  # Track if we're compiling inside a function
 
     def compile(self, node: Program) -> CompiledFunction:
         """Compile a program to bytecode."""
@@ -112,11 +113,9 @@ class Compiler:
         return len(self.constants) - 1
 
     def _add_name(self, name: str) -> int:
-        """Add a name and return its index."""
-        if name in self.names:
-            return self.names.index(name)
-        self.names.append(name)
-        return len(self.names) - 1
+        """Add a name and return its index (stored in constants)."""
+        # Store names in constants so VM can look them up
+        return self._add_constant(name)
 
     def _add_local(self, name: str) -> int:
         """Add a local variable and return its slot."""
@@ -149,13 +148,20 @@ class Compiler:
         elif isinstance(node, VariableDeclaration):
             for decl in node.declarations:
                 name = decl.id.name
-                self._add_local(name)
                 if decl.init:
                     self._compile_expression(decl.init)
                 else:
                     self._emit(OpCode.LOAD_UNDEFINED)
-                slot = self._get_local(name)
-                self._emit(OpCode.STORE_LOCAL, slot)
+
+                if self._in_function:
+                    # Inside function: use local variable
+                    self._add_local(name)
+                    slot = self._get_local(name)
+                    self._emit(OpCode.STORE_LOCAL, slot)
+                else:
+                    # At program level: use global variable
+                    idx = self._add_name(name)
+                    self._emit(OpCode.STORE_NAME, idx)
                 self._emit(OpCode.POP)
 
         elif isinstance(node, IfStatement):
@@ -426,12 +432,14 @@ class Compiler:
         old_constants = self.constants
         old_locals = self.locals
         old_loop_stack = self.loop_stack
+        old_in_function = self._in_function
 
         # New state for function
         self.bytecode = []
         self.constants = []
         self.locals = [p.name for p in params]
         self.loop_stack = []
+        self._in_function = True
 
         # Compile function body
         for stmt in body.body:
@@ -454,6 +462,7 @@ class Compiler:
         self.constants = old_constants
         self.locals = old_locals
         self.loop_stack = old_loop_stack
+        self._in_function = old_in_function
 
         return func
 

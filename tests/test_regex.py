@@ -573,10 +573,12 @@ class TestErrorHandling:
         with pytest.raises(RegExpError):
             RegExp("*abc")
 
-    def test_invalid_escape(self):
-        """Invalid escape sequence."""
-        with pytest.raises(RegExpError):
-            RegExp(r"\c")  # Invalid control escape
+    def test_control_escape_without_letter(self):
+        """Control escape without a letter is treated as literal \\c."""
+        # Per JS spec, \c without a letter is an identity escape in non-unicode mode
+        regex = RegExp(r"\c")
+        assert regex.test("\\c")  # Matches literal backslash + c
+        assert not regex.test("c")  # Doesn't match just c
 
 
 class TestReDoSProtection:

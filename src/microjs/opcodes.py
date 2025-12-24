@@ -9,8 +9,10 @@ class OpCode(IntEnum):
     # Stack operations
     POP = auto()          # Pop and discard top of stack
     DUP = auto()          # Duplicate top of stack
+    DUP2 = auto()         # Duplicate top two stack items: a, b -> a, b, a, b
     SWAP = auto()         # Swap top two stack items
     ROT3 = auto()         # Rotate 3 items: a, b, c -> b, c, a
+    ROT4 = auto()         # Rotate 4 items: a, b, c, d -> b, c, d, a
 
     # Constants
     LOAD_CONST = auto()   # Load constant from pool: arg = constant index

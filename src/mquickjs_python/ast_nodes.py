@@ -50,6 +50,13 @@ class NullLiteral(Node):
 
 
 @dataclass
+class RegexLiteral(Node):
+    """Regex literal: /pattern/flags"""
+    pattern: str
+    flags: str
+
+
+@dataclass
 class Identifier(Node):
     """Identifier: variable names, property names"""
     name: str

@@ -6,7 +6,7 @@ from .tokens import Token, TokenType
 from .errors import JSSyntaxError
 from .ast_nodes import (
     Node, Program, NumericLiteral, StringLiteral, BooleanLiteral, NullLiteral,
-    Identifier, ThisExpression, ArrayExpression, ObjectExpression, Property,
+    RegexLiteral, Identifier, ThisExpression, ArrayExpression, ObjectExpression, Property,
     UnaryExpression, UpdateExpression, BinaryExpression, LogicalExpression,
     ConditionalExpression, AssignmentExpression, SequenceExpression,
     MemberExpression, CallExpression, NewExpression,
@@ -637,6 +637,13 @@ class Parser:
         # Function expression
         if self._match(TokenType.FUNCTION):
             return self._parse_function_expression()
+
+        # Regex literal - when we see / in primary expression context, it's a regex
+        if self._check(TokenType.SLASH):
+            regex_token = self.lexer.read_regex_literal()
+            self.current = self.lexer.next_token()  # Move past the regex
+            pattern, flags = regex_token.value
+            return RegexLiteral(pattern, flags)
 
         raise self._error(f"Unexpected token: {self.current.type.name}")
 

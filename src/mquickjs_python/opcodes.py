@@ -105,6 +105,10 @@ class OpCode(IntEnum):
 
     # Closures
     MAKE_CLOSURE = auto() # Create closure: arg = function index
+    LOAD_CLOSURE = auto() # Load from closure: arg = closure slot (for inner function)
+    STORE_CLOSURE = auto() # Store to closure: arg = closure slot (for inner function)
+    LOAD_CELL = auto()    # Load from cell: arg = cell slot (for outer function)
+    STORE_CELL = auto()   # Store to cell: arg = cell slot (for outer function)
 
 
 def disassemble(bytecode: bytes, constants: list) -> str:

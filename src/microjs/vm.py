@@ -9,7 +9,7 @@ from .opcodes import OpCode
 from .compiler import CompiledFunction
 from .values import (
     UNDEFINED, NULL, JSUndefined, JSNull, JSValue,
-    JSObject, JSArray, JSFunction, JSRegExp, JSTypedArray,
+    JSObject, JSArray, JSFunction, JSRegExp, JSTypedArray, JSArrayBuffer,
     to_boolean, to_number, to_string, js_typeof,
 )
 from .errors import (
@@ -890,6 +890,11 @@ class VM:
 
         key_str = to_string(key) if not isinstance(key, str) else key
 
+        if isinstance(obj, JSArrayBuffer):
+            if key_str == "byteLength":
+                return obj.byteLength
+            return obj.get(key_str)
+
         if isinstance(obj, JSTypedArray):
             # Typed array index access
             try:
@@ -900,6 +905,15 @@ class VM:
                 pass
             if key_str == "length":
                 return obj.length
+            if key_str == "BYTES_PER_ELEMENT":
+                return obj._element_size
+            if key_str == "buffer":
+                # Return the underlying buffer if it exists
+                return getattr(obj, '_buffer', UNDEFINED)
+            # Built-in typed array methods
+            typed_array_methods = ["toString", "join", "subarray", "set"]
+            if key_str in typed_array_methods:
+                return self._make_typed_array_method(obj, key_str)
             return obj.get(key_str)
 
         if isinstance(obj, JSArray):
@@ -1439,6 +1453,57 @@ class VM:
         methods = {
             "test": test_fn,
             "exec": exec_fn,
+        }
+        return methods.get(method, lambda *args: UNDEFINED)
+
+    def _make_typed_array_method(self, arr: JSTypedArray, method: str) -> Any:
+        """Create a bound typed array method."""
+        def toString_fn(*args):
+            # Join elements with comma
+            return ",".join(str(arr.get_index(i)) for i in range(arr.length))
+
+        def join_fn(*args):
+            separator = to_string(args[0]) if args else ","
+            return separator.join(str(arr.get_index(i)) for i in range(arr.length))
+
+        def subarray_fn(*args):
+            begin = int(to_number(args[0])) if len(args) > 0 else 0
+            end = int(to_number(args[1])) if len(args) > 1 else arr.length
+
+            # Handle negative indices
+            if begin < 0:
+                begin = max(0, arr.length + begin)
+            if end < 0:
+                end = max(0, arr.length + end)
+
+            # Clamp to bounds
+            begin = min(begin, arr.length)
+            end = min(end, arr.length)
+
+            # Create new typed array of same type
+            result = type(arr)(max(0, end - begin))
+            for i in range(begin, end):
+                result.set_index(i - begin, arr.get_index(i))
+            # Share the same buffer if the original has one
+            if hasattr(arr, '_buffer'):
+                result._buffer = arr._buffer
+            return result
+
+        def set_fn(*args):
+            # TypedArray.set(array, offset)
+            source = args[0] if args else UNDEFINED
+            offset = int(to_number(args[1])) if len(args) > 1 else 0
+
+            if isinstance(source, (JSArray, JSTypedArray)):
+                for i in range(source.length):
+                    arr.set_index(offset + i, source.get_index(i))
+            return UNDEFINED
+
+        methods = {
+            "toString": toString_fn,
+            "join": join_fn,
+            "subarray": subarray_fn,
+            "set": set_fn,
         }
         return methods.get(method, lambda *args: UNDEFINED)
 

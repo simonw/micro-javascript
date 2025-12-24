@@ -71,11 +71,11 @@ PASSING_TESTS = {
     "test_number",
     "test_math",
     "test_json",
+    "test_typed_array",
 }
 
 # Tests that are known to fail (with reasons)
 FAILING_TESTS = {
-    "test_typed_array": "TypedArray.toString not implemented",
     "test_global_eval": "Indirect eval doesn't create global variables",
     "test_regexp": "Invalid control character escape in regex",
     "test_line_column_numbers": "Line/column tracking not implemented",

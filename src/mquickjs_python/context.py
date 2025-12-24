@@ -410,9 +410,14 @@ class JSContext:
 
     def _create_error_constructor(self, error_name: str) -> JSCallableObject:
         """Create an Error constructor (Error, TypeError, SyntaxError, etc.)."""
+        # Add prototype first so it can be captured in closure
+        error_prototype = JSObject()
+        error_prototype.set("name", error_name)
+        error_prototype.set("message", "")
+
         def error_constructor(*args):
             message = args[0] if args else UNDEFINED
-            err = JSObject()
+            err = JSObject(error_prototype)  # Set prototype
             err.set("message", to_string(message) if message is not UNDEFINED else "")
             err.set("name", error_name)
             err.set("stack", "")  # Stack trace placeholder
@@ -421,10 +426,6 @@ class JSContext:
         constructor = JSCallableObject(error_constructor)
         constructor._name = error_name
 
-        # Add prototype
-        error_prototype = JSObject()
-        error_prototype.set("name", error_name)
-        error_prototype.set("message", "")
         error_prototype.set("constructor", constructor)
         constructor.set("prototype", error_prototype)
 

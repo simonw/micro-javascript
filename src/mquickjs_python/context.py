@@ -1,5 +1,6 @@
 """JavaScript execution context."""
 
+import json
 import math
 import random
 from typing import Any, Dict, Optional
@@ -49,6 +50,9 @@ class JSContext:
 
         # Math object
         self._globals["Math"] = self._create_math_object()
+
+        # JSON object
+        self._globals["JSON"] = self._create_json_object()
 
     def _console_log(self, *args: JSValue) -> None:
         """Console.log implementation."""
@@ -212,6 +216,35 @@ class JSContext:
         math_obj.set("sign", sign_fn)
 
         return math_obj
+
+    def _create_json_object(self) -> JSObject:
+        """Create the JSON global object."""
+        json_obj = JSObject()
+        ctx = self  # Reference for closures
+
+        def parse_fn(*args):
+            text = to_string(args[0]) if args else ""
+            try:
+                py_value = json.loads(text)
+                return ctx._to_js(py_value)
+            except json.JSONDecodeError as e:
+                from .errors import JSSyntaxError
+                raise JSSyntaxError(f"JSON.parse: {e}")
+
+        def stringify_fn(*args):
+            value = args[0] if args else UNDEFINED
+            # Convert JS value to Python for json.dumps
+            py_value = ctx._to_python(value)
+            try:
+                return json.dumps(py_value, separators=(',', ':'))
+            except (TypeError, ValueError) as e:
+                from .errors import JSTypeError
+                raise JSTypeError(f"JSON.stringify: {e}")
+
+        json_obj.set("parse", parse_fn)
+        json_obj.set("stringify", stringify_fn)
+
+        return json_obj
 
     def eval(self, code: str) -> Any:
         """Evaluate JavaScript code and return the result.

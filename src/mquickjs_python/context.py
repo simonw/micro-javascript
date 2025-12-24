@@ -70,6 +70,9 @@ class JSContext:
         # RegExp constructor
         self._globals["RegExp"] = self._create_regexp_constructor()
 
+        # Function constructor
+        self._globals["Function"] = self._create_function_constructor()
+
         # Global number functions
         self._globals["isNaN"] = self._global_isnan
         self._globals["isFinite"] = self._global_isfinite
@@ -635,6 +638,60 @@ class JSContext:
             return JSRegExp(pattern, flags)
 
         return JSCallableObject(regexp_constructor_fn)
+
+    def _create_function_constructor(self) -> JSCallableObject:
+        """Create the Function constructor for dynamic function creation."""
+        from .values import JSFunction
+
+        def function_constructor_fn(*args):
+            if not args:
+                # new Function() - empty function
+                body = ""
+                params = []
+            else:
+                # All args are strings
+                str_args = [to_string(arg) for arg in args]
+                # Last argument is the body, rest are parameter names
+                body = str_args[-1]
+                params = str_args[:-1]
+
+            # Create a function expression to parse
+            param_str = ", ".join(params)
+            source = f"(function({param_str}) {{ {body} }})"
+
+            # Parse and compile
+            try:
+                parser = Parser(source)
+                ast = parser.parse()
+                compiler = Compiler()
+                bytecode_module = compiler.compile(ast)
+
+                # The result should be a function expression wrapped in a program
+                # We need to extract the function from the bytecode
+                # Execute the expression to get the function object
+                vm = VM(self.memory_limit, self.time_limit)
+                vm.globals = self._globals
+                result = vm.run(bytecode_module)
+
+                if isinstance(result, JSFunction):
+                    return result
+                else:
+                    # Fallback: return a simple empty function
+                    return JSFunction("anonymous", params, bytes(), {})
+            except Exception as e:
+                from .errors import JSError
+                raise JSError(f"SyntaxError: {str(e)}")
+
+        fn_constructor = JSCallableObject(function_constructor_fn)
+
+        # Function.prototype - add basic methods
+        fn_prototype = JSObject()
+
+        # These are implemented in VM's _get_property for JSFunction
+        # but we still set them here for completeness
+        fn_constructor.set("prototype", fn_prototype)
+
+        return fn_constructor
 
     def _global_isnan(self, *args) -> bool:
         """Global isNaN - converts argument to number first."""

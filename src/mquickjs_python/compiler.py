@@ -37,6 +37,7 @@ class LoopContext:
     break_jumps: List[int] = field(default_factory=list)
     continue_jumps: List[int] = field(default_factory=list)
     label: Optional[str] = None
+    is_loop: bool = True  # False for switch statements (break only, no continue)
 
 
 class Compiler:
@@ -85,25 +86,42 @@ class Compiler:
             num_locals=len(self.locals),
         )
 
+    # Opcodes that use 16-bit arguments (jumps and jump-like)
+    _JUMP_OPCODES = frozenset([OpCode.JUMP, OpCode.JUMP_IF_FALSE, OpCode.JUMP_IF_TRUE, OpCode.TRY_START])
+
     def _emit(self, opcode: OpCode, arg: Optional[int] = None) -> int:
         """Emit an opcode, return its position."""
         pos = len(self.bytecode)
         self.bytecode.append(opcode)
         if arg is not None:
-            self.bytecode.append(arg)
+            if opcode in self._JUMP_OPCODES:
+                # 16-bit little-endian for jump targets
+                self.bytecode.append(arg & 0xFF)
+                self.bytecode.append((arg >> 8) & 0xFF)
+            else:
+                self.bytecode.append(arg)
         return pos
 
     def _emit_jump(self, opcode: OpCode) -> int:
-        """Emit a jump instruction, return position for patching."""
+        """Emit a jump instruction, return position for patching.
+
+        Uses 16-bit (2 byte) little-endian offset.
+        """
         pos = len(self.bytecode)
         self.bytecode.append(opcode)
-        self.bytecode.append(0)  # Placeholder
+        self.bytecode.append(0)  # Low byte placeholder
+        self.bytecode.append(0)  # High byte placeholder
         return pos
 
-    def _patch_jump(self, pos: int) -> None:
-        """Patch a jump instruction to jump to current position."""
-        offset = len(self.bytecode)
-        self.bytecode[pos + 1] = offset
+    def _patch_jump(self, pos: int, target: Optional[int] = None) -> None:
+        """Patch a jump instruction to jump to target (or current position).
+
+        Uses 16-bit (2 byte) little-endian offset.
+        """
+        if target is None:
+            target = len(self.bytecode)
+        self.bytecode[pos + 1] = target & 0xFF  # Low byte
+        self.bytecode[pos + 2] = (target >> 8) & 0xFF  # High byte
 
     def _add_constant(self, value: Any) -> int:
         """Add a constant and return its index."""
@@ -197,7 +215,7 @@ class Compiler:
                 self._patch_jump(pos)
             # Patch continue jumps
             for pos in loop_ctx.continue_jumps:
-                self.bytecode[pos + 1] = loop_start
+                self._patch_jump(pos, loop_start)
 
             self.loop_stack.pop()
 
@@ -218,7 +236,7 @@ class Compiler:
                 self._patch_jump(pos)
             # Patch continue jumps
             for pos in loop_ctx.continue_jumps:
-                self.bytecode[pos + 1] = continue_target
+                self._patch_jump(pos, continue_target)
 
             self.loop_stack.pop()
 
@@ -260,7 +278,7 @@ class Compiler:
             for pos in loop_ctx.break_jumps:
                 self._patch_jump(pos)
             for pos in loop_ctx.continue_jumps:
-                self.bytecode[pos + 1] = continue_target
+                self._patch_jump(pos, continue_target)
 
             self.loop_stack.pop()
 
@@ -280,9 +298,13 @@ class Compiler:
             if isinstance(node.left, VariableDeclaration):
                 decl = node.left.declarations[0]
                 name = decl.id.name
-                self._add_local(name)
-                slot = self._get_local(name)
-                self._emit(OpCode.STORE_LOCAL, slot)
+                if self._in_function:
+                    self._add_local(name)
+                    slot = self._get_local(name)
+                    self._emit(OpCode.STORE_LOCAL, slot)
+                else:
+                    idx = self._add_name(name)
+                    self._emit(OpCode.STORE_NAME, idx)
                 self._emit(OpCode.POP)
             elif isinstance(node.left, Identifier):
                 name = node.left.name
@@ -293,6 +315,25 @@ class Compiler:
                     idx = self._add_name(name)
                     self._emit(OpCode.STORE_NAME, idx)
                 self._emit(OpCode.POP)
+            elif isinstance(node.left, MemberExpression):
+                # for (obj.prop in ...) or for (obj[key] in ...)
+                # After FOR_IN_NEXT: stack has [..., iterator, key]
+                # We need for SET_PROP: obj, prop, key -> value (leaves value on stack)
+                # Compile obj and prop first, then rotate key to top
+                self._compile_expression(node.left.object)
+                if node.left.computed:
+                    self._compile_expression(node.left.property)
+                else:
+                    idx = self._add_constant(node.left.property.name)
+                    self._emit(OpCode.LOAD_CONST, idx)
+                # Stack is now: [..., iterator, key, obj, prop]
+                # We need: [..., iterator, obj, prop, key]
+                # ROT3 on (key, obj, prop) gives (obj, prop, key)
+                self._emit(OpCode.ROT3)
+                self._emit(OpCode.SET_PROP)
+                self._emit(OpCode.POP)  # Pop the result of SET_PROP
+            else:
+                raise NotImplementedError(f"Unsupported for-in left: {type(node.left).__name__}")
 
             self._compile_statement(node.body)
 
@@ -300,22 +341,50 @@ class Compiler:
             self._patch_jump(jump_done)
             self._emit(OpCode.POP)  # Pop iterator
 
+            # Patch break and continue jumps
             for pos in loop_ctx.break_jumps:
                 self._patch_jump(pos)
+            for pos in loop_ctx.continue_jumps:
+                self._patch_jump(pos, loop_start)
 
             self.loop_stack.pop()
 
         elif isinstance(node, BreakStatement):
             if not self.loop_stack:
                 raise SyntaxError("'break' outside of loop")
-            ctx = self.loop_stack[-1]
+
+            # Find the right loop context (labeled or innermost)
+            target_label = node.label.name if node.label else None
+            ctx = None
+            for loop_ctx in reversed(self.loop_stack):
+                if target_label is None or loop_ctx.label == target_label:
+                    ctx = loop_ctx
+                    break
+
+            if ctx is None:
+                raise SyntaxError(f"label '{target_label}' not found")
+
             pos = self._emit_jump(OpCode.JUMP)
             ctx.break_jumps.append(pos)
 
         elif isinstance(node, ContinueStatement):
             if not self.loop_stack:
                 raise SyntaxError("'continue' outside of loop")
-            ctx = self.loop_stack[-1]
+
+            # Find the right loop context (labeled or innermost loop, not switch)
+            target_label = node.label.name if node.label else None
+            ctx = None
+            for loop_ctx in reversed(self.loop_stack):
+                # Skip non-loop contexts (like switch) unless specifically labeled
+                if not loop_ctx.is_loop and target_label is None:
+                    continue
+                if target_label is None or loop_ctx.label == target_label:
+                    ctx = loop_ctx
+                    break
+
+            if ctx is None:
+                raise SyntaxError(f"label '{target_label}' not found")
+
             pos = self._emit_jump(OpCode.JUMP)
             ctx.continue_jumps.append(pos)
 
@@ -380,7 +449,7 @@ class Compiler:
 
             # Case bodies
             case_positions = []
-            loop_ctx = LoopContext()  # For break statements
+            loop_ctx = LoopContext(is_loop=False)  # For break statements only
             self.loop_stack.append(loop_ctx)
 
             for i, case in enumerate(node.cases):
@@ -393,10 +462,10 @@ class Compiler:
 
             # Patch jumps to case bodies
             for pos, idx in jump_to_body:
-                self.bytecode[pos + 1] = case_positions[idx]
+                self._patch_jump(pos, case_positions[idx])
             if default_jump:
                 pos, idx = default_jump
-                self.bytecode[pos + 1] = case_positions[idx]
+                self._patch_jump(pos, case_positions[idx])
 
             # Patch break jumps
             for pos in loop_ctx.break_jumps:
@@ -405,7 +474,7 @@ class Compiler:
             self.loop_stack.pop()
 
         elif isinstance(node, FunctionDeclaration):
-            # Compile function and add to locals
+            # Compile function
             func = self._compile_function(node.id.name, node.params, node.body)
             func_idx = len(self.functions)
             self.functions.append(func)
@@ -415,10 +484,30 @@ class Compiler:
             self._emit(OpCode.MAKE_CLOSURE, func_idx)
 
             name = node.id.name
-            self._add_local(name)
-            slot = self._get_local(name)
-            self._emit(OpCode.STORE_LOCAL, slot)
+            if self._in_function:
+                # Inside function: use local variable
+                self._add_local(name)
+                slot = self._get_local(name)
+                self._emit(OpCode.STORE_LOCAL, slot)
+            else:
+                # At program level: use global variable
+                idx = self._add_name(name)
+                self._emit(OpCode.STORE_NAME, idx)
             self._emit(OpCode.POP)
+
+        elif isinstance(node, LabeledStatement):
+            # Create a loop context for the label
+            loop_ctx = LoopContext(label=node.label.name)
+            self.loop_stack.append(loop_ctx)
+
+            # Compile the labeled body
+            self._compile_statement(node.body)
+
+            # Patch break jumps that target this label
+            for pos in loop_ctx.break_jumps:
+                self._patch_jump(pos)
+
+            self.loop_stack.pop()
 
         else:
             raise NotImplementedError(f"Cannot compile statement: {type(node).__name__}")
@@ -435,9 +524,10 @@ class Compiler:
         old_in_function = self._in_function
 
         # New state for function
+        # Locals: params first, then 'arguments' reserved slot
         self.bytecode = []
         self.constants = []
-        self.locals = [p.name for p in params]
+        self.locals = [p.name for p in params] + ["arguments"]
         self.loop_stack = []
         self._in_function = True
 

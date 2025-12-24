@@ -54,6 +54,6 @@ def test_mquickjs_js(name: str, path: Path):
     Watch for xfail tests that start passing!
     """
     source = path.read_text(encoding="utf-8")
-    ctx = JSContext()
+    ctx = JSContext(time_limit=2.0)  # Timeout to avoid infinite loops
     # Execute the script - if it throws, the test fails
     ctx.eval(source)

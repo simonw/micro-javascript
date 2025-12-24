@@ -307,3 +307,22 @@ class TestGlobalAccess:
         ctx.eval("var myVar = 100")
         result = ctx.get("myVar")
         assert result == 100
+"""Test void operator."""
+import pytest
+from mquickjs_python import JSContext
+
+class TestVoidOperator:
+    def test_void_returns_undefined(self):
+        ctx = JSContext()
+        result = ctx.eval("void 0")
+        assert result is None or str(result) == "undefined"
+
+    def test_void_expression(self):
+        ctx = JSContext()
+        result = ctx.eval("void (1 + 2)")
+        assert result is None or str(result) == "undefined"
+
+    def test_void_function_call(self):
+        ctx = JSContext()
+        result = ctx.eval("var x = 0; void (x = 5); x")
+        assert result == 5  # Side effect happens, but void returns undefined

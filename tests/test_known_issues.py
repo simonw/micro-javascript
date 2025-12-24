@@ -181,13 +181,8 @@ class TestRegexCharacterClass:
         result = ctx.eval('/[\\b]/.test("\\x08")')
         assert result is True
 
-    @pytest.mark.xfail(reason="String literal \\b not parsed as backspace")
     def test_backspace_string_literal(self):
-        """String literal \\b should be parsed as backspace character.
-
-        Issue: In JavaScript string literals, \\b is the backspace character
-        (same as \\x08). Currently it seems to be handled differently.
-        """
+        """String literal \\b should be parsed as backspace character."""
         ctx = JSContext(time_limit=5.0)
         # Both should be backspace
         result = ctx.eval('/[\\b]/.test("\\b")')

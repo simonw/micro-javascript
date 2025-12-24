@@ -76,10 +76,10 @@ PASSING_TESTS = {
 
 # Tests that are known to fail (with reasons)
 FAILING_TESTS = {
-    "test_global_eval": "Indirect eval doesn't create global variables",
-    "test_regexp": "Invalid control character escape in regex",
+    "test_global_eval": "Indirect eval doesn't run in global scope",
+    "test_regexp": "Capture groups inside repetitions not reset correctly",
     "test_line_column_numbers": "Line/column tracking not implemented",
-    "test_large_eval_parse_stack": "Large parsing stack not tested",
+    "test_large_eval_parse_stack": "Deeply nested parsing not implemented",
 }
 
 

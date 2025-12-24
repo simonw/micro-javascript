@@ -372,11 +372,13 @@ class RegexParser:
                 # Positive lookahead (?=...)
                 self._advance()
                 is_lookahead = True
+                capturing = False  # Lookahead itself is not a capturing group
                 positive = True
             elif next_ch == '!':
                 # Negative lookahead (?!...)
                 self._advance()
                 is_lookahead = True
+                capturing = False  # Lookahead itself is not a capturing group
                 positive = False
             elif next_ch == '<':
                 self._advance()
@@ -385,11 +387,13 @@ class RegexParser:
                     # Positive lookbehind (?<=...)
                     self._advance()
                     is_lookbehind = True
+                    capturing = False  # Lookbehind itself is not a capturing group
                     positive = True
                 elif next_ch2 == '!':
                     # Negative lookbehind (?<!...)
                     self._advance()
                     is_lookbehind = True
+                    capturing = False  # Lookbehind itself is not a capturing group
                     positive = False
                 else:
                     raise RegExpError("Invalid group syntax")
@@ -458,7 +462,8 @@ class RegexParser:
             if ctrl is not None and (ctrl.isalpha()):
                 self._advance()
                 return Char(chr(ord(ctrl.upper()) - 64))
-            raise RegExpError("Invalid control character escape")
+            # Non-letter after \c: treat as literal \c (backslash + c)
+            return Alternative([Char('\\'), Char('c')])
 
         # Simple escapes
         escape_map = {

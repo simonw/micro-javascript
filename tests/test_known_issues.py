@@ -151,16 +151,8 @@ class TestRegexCaptureGroups:
 class TestRegexAlternation:
     """Tests for regex alternation behavior."""
 
-    @pytest.mark.xfail(reason="Alternation with empty alternative doesn't match correctly")
     def test_empty_alternative_in_repetition(self):
-        """Empty alternative in repeated group should work correctly.
-
-        Issue: Pattern /(?:|[\\w])+([0-9])/ should match '123a23' fully,
-        capturing '3' in group 1. The (?:|[\\w])+ means: match either
-        empty string or a word character, one or more times.
-
-        Currently matches only '1' with capture '1'.
-        """
+        """Empty alternative in repeated group should work correctly."""
         ctx = JSContext(time_limit=5.0)
         result = ctx.eval('/(?:|[\\w])+([0-9])/.exec("123a23")')
         expected = ['123a23', '3']

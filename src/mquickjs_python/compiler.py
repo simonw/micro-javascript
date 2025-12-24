@@ -65,18 +65,10 @@ class Compiler:
         for stmt in body[:-1] if body else []:
             self._compile_statement(stmt)
 
-        # For the last statement, handle specially to return its value
+        # For the last statement, compile with completion value semantics
         if body:
-            last_stmt = body[-1]
-            if isinstance(last_stmt, ExpressionStatement):
-                # Compile expression without popping - its value becomes the return
-                self._compile_expression(last_stmt.expression)
-                self._emit(OpCode.RETURN)
-            else:
-                self._compile_statement(last_stmt)
-                # Implicit return undefined
-                self._emit(OpCode.LOAD_UNDEFINED)
-                self._emit(OpCode.RETURN)
+            self._compile_statement_for_value(body[-1])
+            self._emit(OpCode.RETURN)
         else:
             # Empty program returns undefined
             self._emit(OpCode.LOAD_UNDEFINED)
@@ -638,10 +630,16 @@ class Compiler:
 
             name = node.id.name
             if self._in_function:
-                # Inside function: use local variable
-                self._add_local(name)
-                slot = self._get_local(name)
-                self._emit(OpCode.STORE_LOCAL, slot)
+                # Inside function: use local or cell variable
+                cell_idx = self._get_cell_var(name)
+                if cell_idx is not None:
+                    # Variable is captured - store in cell
+                    self._emit(OpCode.STORE_CELL, cell_idx)
+                else:
+                    # Regular local
+                    self._add_local(name)
+                    slot = self._get_local(name)
+                    self._emit(OpCode.STORE_LOCAL, slot)
             else:
                 # At program level: use global variable
                 idx = self._add_name(name)
@@ -664,6 +662,53 @@ class Compiler:
 
         else:
             raise NotImplementedError(f"Cannot compile statement: {type(node).__name__}")
+
+    def _compile_statement_for_value(self, node: Node) -> None:
+        """Compile a statement leaving its completion value on the stack.
+
+        This is used for eval semantics where the last statement's value is returned.
+        """
+        if isinstance(node, ExpressionStatement):
+            # Expression statement: value is the expression's value
+            self._compile_expression(node.expression)
+
+        elif isinstance(node, BlockStatement):
+            # Block statement: value is the last statement's value
+            if not node.body:
+                self._emit(OpCode.LOAD_UNDEFINED)
+            else:
+                # Compile all but last normally
+                for stmt in node.body[:-1]:
+                    self._compile_statement(stmt)
+                # Compile last for value
+                self._compile_statement_for_value(node.body[-1])
+
+        elif isinstance(node, IfStatement):
+            # If statement: value is the chosen branch's value
+            self._compile_expression(node.test)
+            jump_false = self._emit_jump(OpCode.JUMP_IF_FALSE)
+
+            self._compile_statement_for_value(node.consequent)
+
+            if node.alternate:
+                jump_end = self._emit_jump(OpCode.JUMP)
+                self._patch_jump(jump_false)
+                self._compile_statement_for_value(node.alternate)
+                self._patch_jump(jump_end)
+            else:
+                jump_end = self._emit_jump(OpCode.JUMP)
+                self._patch_jump(jump_false)
+                self._emit(OpCode.LOAD_UNDEFINED)  # No else branch returns undefined
+                self._patch_jump(jump_end)
+
+        elif isinstance(node, EmptyStatement):
+            # Empty statement: value is undefined
+            self._emit(OpCode.LOAD_UNDEFINED)
+
+        else:
+            # Other statements: compile normally, then push undefined
+            self._compile_statement(node)
+            self._emit(OpCode.LOAD_UNDEFINED)
 
     def _find_required_free_vars(self, body: Node, local_vars: set) -> set:
         """Find all free variables required by this function including pass-through.
@@ -784,9 +829,17 @@ class Compiler:
         return func
 
     def _compile_function(
-        self, name: str, params: List[Identifier], body: BlockStatement
+        self, name: str, params: List[Identifier], body: BlockStatement,
+        is_expression: bool = False
     ) -> CompiledFunction:
-        """Compile a function."""
+        """Compile a function.
+
+        Args:
+            name: Function name (empty for anonymous)
+            params: Parameter list
+            body: Function body
+            is_expression: If True and name is provided, make name available inside body
+        """
         # Save current state
         old_bytecode = self.bytecode
         old_constants = self.constants
@@ -805,12 +858,26 @@ class Compiler:
         self.bytecode = []
         self.constants = []
         self.locals = [p.name for p in params] + ["arguments"]
+
+        # For named function expressions, add the function name as a local
+        # This allows recursive calls like: var f = function fact(n) { return n <= 1 ? 1 : n * fact(n-1); }
+        if is_expression and name:
+            self.locals.append(name)
+
         self.loop_stack = []
         self._in_function = True
 
         # Collect all var declarations to know the full locals set
         local_vars_set = set(self.locals)
         self._collect_var_decls(body, local_vars_set)
+        # Update locals list with collected vars
+        for var in local_vars_set:
+            if var not in self.locals:
+                self.locals.append(var)
+
+        # Push current locals to outer scope stack BEFORE finding free vars
+        # This is needed so nested functions can find their outer variables
+        self._outer_locals.append(self.locals[:])
 
         # Find variables captured by inner functions
         captured = self._find_captured_vars(body, local_vars_set)
@@ -819,6 +886,9 @@ class Compiler:
         # Find all free variables needed (including pass-through for nested functions)
         required_free = self._find_required_free_vars(body, local_vars_set)
         self._free_vars = list(required_free)
+
+        # Pop the outer scope we pushed
+        self._outer_locals.pop()
 
         # Compile function body
         for stmt in body.body:
@@ -949,32 +1019,64 @@ class Compiler:
             # ++x or x++
             if isinstance(node.argument, Identifier):
                 name = node.argument.name
-                slot = self._get_local(name)
-                if slot is not None:
-                    self._emit(OpCode.LOAD_LOCAL, slot)
+                inc_op = OpCode.INC if node.operator == "++" else OpCode.DEC
+
+                # Check if it's a cell var (local that's captured by inner function)
+                cell_slot = self._get_cell_var(name)
+                if cell_slot is not None:
+                    self._emit(OpCode.LOAD_CELL, cell_slot)
                     if node.prefix:
-                        self._emit(OpCode.INC if node.operator == "++" else OpCode.DEC)
+                        self._emit(inc_op)
                         self._emit(OpCode.DUP)
-                        self._emit(OpCode.STORE_LOCAL, slot)
+                        self._emit(OpCode.STORE_CELL, cell_slot)
                         self._emit(OpCode.POP)
                     else:
                         self._emit(OpCode.DUP)
-                        self._emit(OpCode.INC if node.operator == "++" else OpCode.DEC)
-                        self._emit(OpCode.STORE_LOCAL, slot)
+                        self._emit(inc_op)
+                        self._emit(OpCode.STORE_CELL, cell_slot)
                         self._emit(OpCode.POP)
                 else:
-                    idx = self._add_name(name)
-                    self._emit(OpCode.LOAD_NAME, idx)
-                    if node.prefix:
-                        self._emit(OpCode.INC if node.operator == "++" else OpCode.DEC)
-                        self._emit(OpCode.DUP)
-                        self._emit(OpCode.STORE_NAME, idx)
-                        self._emit(OpCode.POP)
+                    slot = self._get_local(name)
+                    if slot is not None:
+                        self._emit(OpCode.LOAD_LOCAL, slot)
+                        if node.prefix:
+                            self._emit(inc_op)
+                            self._emit(OpCode.DUP)
+                            self._emit(OpCode.STORE_LOCAL, slot)
+                            self._emit(OpCode.POP)
+                        else:
+                            self._emit(OpCode.DUP)
+                            self._emit(inc_op)
+                            self._emit(OpCode.STORE_LOCAL, slot)
+                            self._emit(OpCode.POP)
                     else:
-                        self._emit(OpCode.DUP)
-                        self._emit(OpCode.INC if node.operator == "++" else OpCode.DEC)
-                        self._emit(OpCode.STORE_NAME, idx)
-                        self._emit(OpCode.POP)
+                        # Check if it's a free variable (from outer scope)
+                        closure_slot = self._get_free_var(name)
+                        if closure_slot is not None:
+                            self._emit(OpCode.LOAD_CLOSURE, closure_slot)
+                            if node.prefix:
+                                self._emit(inc_op)
+                                self._emit(OpCode.DUP)
+                                self._emit(OpCode.STORE_CLOSURE, closure_slot)
+                                self._emit(OpCode.POP)
+                            else:
+                                self._emit(OpCode.DUP)
+                                self._emit(inc_op)
+                                self._emit(OpCode.STORE_CLOSURE, closure_slot)
+                                self._emit(OpCode.POP)
+                        else:
+                            idx = self._add_name(name)
+                            self._emit(OpCode.LOAD_NAME, idx)
+                            if node.prefix:
+                                self._emit(inc_op)
+                                self._emit(OpCode.DUP)
+                                self._emit(OpCode.STORE_NAME, idx)
+                                self._emit(OpCode.POP)
+                            else:
+                                self._emit(OpCode.DUP)
+                                self._emit(inc_op)
+                                self._emit(OpCode.STORE_NAME, idx)
+                                self._emit(OpCode.POP)
             else:
                 raise NotImplementedError("Update expression on non-identifier")
 
@@ -1141,7 +1243,7 @@ class Compiler:
 
         elif isinstance(node, FunctionExpression):
             name = node.id.name if node.id else ""
-            func = self._compile_function(name, node.params, node.body)
+            func = self._compile_function(name, node.params, node.body, is_expression=True)
             func_idx = len(self.functions)
             self.functions.append(func)
 

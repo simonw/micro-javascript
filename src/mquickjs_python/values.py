@@ -210,6 +210,20 @@ class JSObject:
         return f"JSObject({self._properties})"
 
 
+class JSCallableObject(JSObject):
+    """JavaScript object that is also callable (for constructors like Number, String, Boolean)."""
+
+    def __init__(self, call_fn, prototype: Optional["JSObject"] = None):
+        super().__init__(prototype)
+        self._call_fn = call_fn
+
+    def __call__(self, *args):
+        return self._call_fn(*args)
+
+    def __repr__(self) -> str:
+        return f"JSCallableObject({self._properties})"
+
+
 class JSArray(JSObject):
     """JavaScript array."""
 

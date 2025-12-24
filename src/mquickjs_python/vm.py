@@ -1621,9 +1621,9 @@ class VM:
             self._invoke_js_function(constructor, args, obj)
             # Result is the new object (or returned value if object)
             self.stack.append(obj)
-        elif isinstance(constructor, JSObject) and hasattr(constructor, '_callable'):
-            # Built-in constructor (like RegExp)
-            result = constructor._callable(*args)
+        elif isinstance(constructor, JSObject) and hasattr(constructor, '_call_fn'):
+            # Built-in constructor (like Object, Array, RegExp)
+            result = constructor._call_fn(*args)
             self.stack.append(result)
         else:
             raise JSTypeError(f"{constructor} is not a constructor")

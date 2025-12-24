@@ -18,6 +18,21 @@ from .errors import (
 )
 
 
+def js_round(x: float, ndigits: int = 0) -> float:
+    """Round using JavaScript-style 'round half away from zero' instead of Python's 'round half to even'."""
+    if ndigits == 0:
+        if x >= 0:
+            return math.floor(x + 0.5)
+        else:
+            return math.ceil(x - 0.5)
+    else:
+        multiplier = 10 ** ndigits
+        if x >= 0:
+            return math.floor(x * multiplier + 0.5) / multiplier
+        else:
+            return math.ceil(x * multiplier - 0.5) / multiplier
+
+
 @dataclass
 class ClosureCell:
     """A cell for closure variable - allows sharing between scopes."""
@@ -940,7 +955,7 @@ class VM:
 
         if isinstance(obj, (int, float)):
             # Number methods
-            if key_str in ("toFixed", "toString"):
+            if key_str in ("toFixed", "toString", "toExponential", "toPrecision", "valueOf"):
                 return self._make_number_method(obj, key_str)
             return UNDEFINED
 
@@ -1332,9 +1347,113 @@ class VM:
                 return "-" + self._number_to_base(-n, radix)
             return self._number_to_base(n, radix)
 
+        def toExponential(*args):
+            import math
+            if args and args[0] is not UNDEFINED:
+                digits = int(to_number(args[0]))
+            else:
+                digits = None
+
+            if math.isnan(n):
+                return "NaN"
+            if math.isinf(n):
+                return "-Infinity" if n < 0 else "Infinity"
+
+            if digits is None:
+                # Default precision - minimal representation
+                # Use repr-style formatting and convert to exponential
+                if n == 0:
+                    return "0e+0"
+                sign = "-" if n < 0 else ""
+                abs_n = abs(n)
+                exp = int(math.floor(math.log10(abs_n)))
+                mantissa = abs_n / (10 ** exp)
+                # Format mantissa without trailing zeros
+                mantissa_str = f"{mantissa:.15g}".rstrip('0').rstrip('.')
+                exp_sign = "+" if exp >= 0 else ""
+                return f"{sign}{mantissa_str}e{exp_sign}{exp}"
+            else:
+                if digits < 0 or digits > 100:
+                    raise JSReferenceError("toExponential() digits out of range")
+                # Round to specified digits
+                if n == 0:
+                    return "0" + ("." + "0" * digits if digits > 0 else "") + "e+0"
+                sign = "-" if n < 0 else ""
+                abs_n = abs(n)
+                exp = int(math.floor(math.log10(abs_n)))
+                mantissa = abs_n / (10 ** exp)
+                # Round mantissa to specified digits using JS-style rounding
+                rounded = js_round(mantissa, digits)
+                if rounded >= 10:
+                    rounded /= 10
+                    exp += 1
+                if digits == 0:
+                    mantissa_str = str(int(js_round(rounded)))
+                else:
+                    mantissa_str = f"{rounded:.{digits}f}"
+                exp_sign = "+" if exp >= 0 else ""
+                return f"{sign}{mantissa_str}e{exp_sign}{exp}"
+
+        def toPrecision(*args):
+            import math
+            if not args or args[0] is UNDEFINED:
+                if isinstance(n, float) and n.is_integer():
+                    return str(int(n))
+                return str(n)
+
+            precision = int(to_number(args[0]))
+            if precision < 1 or precision > 100:
+                raise JSReferenceError("toPrecision() precision out of range")
+
+            if math.isnan(n):
+                return "NaN"
+            if math.isinf(n):
+                return "-Infinity" if n < 0 else "Infinity"
+
+            if n == 0:
+                if precision == 1:
+                    return "0"
+                return "0." + "0" * (precision - 1)
+
+            sign = "-" if n < 0 else ""
+            abs_n = abs(n)
+            exp = int(math.floor(math.log10(abs_n)))
+
+            # Decide if we use exponential or fixed notation
+            if exp < -6 or exp >= precision:
+                # Use exponential notation
+                mantissa = abs_n / (10 ** exp)
+                rounded = js_round(mantissa, precision - 1)
+                if rounded >= 10:
+                    rounded /= 10
+                    exp += 1
+                if precision == 1:
+                    mantissa_str = str(int(js_round(rounded)))
+                else:
+                    mantissa_str = f"{rounded:.{precision - 1}f}"
+                exp_sign = "+" if exp >= 0 else ""
+                return f"{sign}{mantissa_str}e{exp_sign}{exp}"
+            else:
+                # Use fixed notation
+                # Calculate digits after decimal
+                if exp >= 0:
+                    decimal_places = max(0, precision - exp - 1)
+                else:
+                    decimal_places = precision - 1 - exp
+                rounded = js_round(abs_n, decimal_places)
+                if decimal_places <= 0:
+                    return f"{sign}{int(rounded)}"
+                return f"{sign}{rounded:.{decimal_places}f}"
+
+        def valueOf(*args):
+            return n
+
         methods = {
             "toFixed": toFixed,
             "toString": toString,
+            "toExponential": toExponential,
+            "toPrecision": toPrecision,
+            "valueOf": valueOf,
         }
         return methods.get(method, lambda *args: UNDEFINED)
 

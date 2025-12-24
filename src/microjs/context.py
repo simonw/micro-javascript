@@ -79,6 +79,9 @@ class JSContext:
         self._globals["parseInt"] = self._global_parseint
         self._globals["parseFloat"] = self._global_parsefloat
 
+        # eval function
+        self._globals["eval"] = self._create_eval_function()
+
     def _console_log(self, *args: JSValue) -> None:
         """Console.log implementation."""
         print(" ".join(to_string(arg) for arg in args))
@@ -692,6 +695,33 @@ class JSContext:
         fn_constructor.set("prototype", fn_prototype)
 
         return fn_constructor
+
+    def _create_eval_function(self):
+        """Create the global eval function."""
+        ctx = self  # Reference for closure
+
+        def eval_fn(*args):
+            if not args:
+                return UNDEFINED
+            code = args[0]
+            if not isinstance(code, str):
+                # If not a string, return the argument unchanged
+                return code
+
+            try:
+                parser = Parser(code)
+                ast = parser.parse()
+                compiler = Compiler()
+                bytecode_module = compiler.compile(ast)
+
+                vm = VM(ctx.memory_limit, ctx.time_limit)
+                vm.globals = ctx._globals
+                return vm.run(bytecode_module)
+            except Exception as e:
+                from .errors import JSError
+                raise JSError(f"EvalError: {str(e)}")
+
+        return eval_fn
 
     def _global_isnan(self, *args) -> bool:
         """Global isNaN - converts argument to number first."""

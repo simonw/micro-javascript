@@ -47,7 +47,13 @@ class JSContext:
         # Basic type constructors (minimal implementations)
         self._globals["Object"] = self._create_object_constructor()
         self._globals["Array"] = self._create_array_constructor()
-        self._globals["Error"] = self._error_constructor
+        self._globals["Error"] = self._create_error_constructor("Error")
+        self._globals["TypeError"] = self._create_error_constructor("TypeError")
+        self._globals["SyntaxError"] = self._create_error_constructor("SyntaxError")
+        self._globals["ReferenceError"] = self._create_error_constructor("ReferenceError")
+        self._globals["RangeError"] = self._create_error_constructor("RangeError")
+        self._globals["URIError"] = self._create_error_constructor("URIError")
+        self._globals["EvalError"] = self._create_error_constructor("EvalError")
 
         # Math object
         self._globals["Math"] = self._create_math_object()
@@ -351,12 +357,27 @@ class JSContext:
 
         return arr_constructor
 
-    def _error_constructor(self, message: JSValue = UNDEFINED) -> JSObject:
-        """Error constructor."""
-        err = JSObject()
-        err.set("message", to_string(message) if message is not UNDEFINED else "")
-        err.set("name", "Error")
-        return err
+    def _create_error_constructor(self, error_name: str) -> JSCallableObject:
+        """Create an Error constructor (Error, TypeError, SyntaxError, etc.)."""
+        def error_constructor(*args):
+            message = args[0] if args else UNDEFINED
+            err = JSObject()
+            err.set("message", to_string(message) if message is not UNDEFINED else "")
+            err.set("name", error_name)
+            err.set("stack", "")  # Stack trace placeholder
+            return err
+
+        constructor = JSCallableObject(error_constructor)
+        constructor._name = error_name
+
+        # Add prototype
+        error_prototype = JSObject()
+        error_prototype.set("name", error_name)
+        error_prototype.set("message", "")
+        error_prototype.set("constructor", constructor)
+        constructor.set("prototype", error_prototype)
+
+        return constructor
 
     def _create_math_object(self) -> JSObject:
         """Create the Math global object."""

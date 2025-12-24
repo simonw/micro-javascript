@@ -5,13 +5,36 @@ from typing import Any, List, Optional, Union
 
 
 @dataclass
+class SourceLocation:
+    """Source location information for AST nodes."""
+    line: int = 0
+    column: int = 0
+
+
+@dataclass
 class Node:
     """Base class for all AST nodes."""
+
+    def __post_init__(self):
+        # Source location - can be set by parser after creation
+        # Using __post_init__ avoids dataclass field ordering issues
+        if not hasattr(self, '_loc'):
+            self._loc: Optional[SourceLocation] = None
+
+    @property
+    def loc(self) -> Optional[SourceLocation]:
+        return getattr(self, '_loc', None)
+
+    @loc.setter
+    def loc(self, value: Optional[SourceLocation]):
+        self._loc = value
 
     def to_dict(self) -> dict:
         """Convert node to dictionary for testing/serialization."""
         result = {"type": self.__class__.__name__}
         for key, value in self.__dict__.items():
+            if key.startswith('_'):
+                continue  # Skip private attributes like _loc
             if isinstance(value, Node):
                 result[key] = value.to_dict()
             elif isinstance(value, list):

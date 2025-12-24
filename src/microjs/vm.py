@@ -2206,8 +2206,30 @@ class VM:
         else:
             raise JSTypeError(f"{constructor} is not a constructor")
 
+    def _get_source_location(self) -> Tuple[Optional[int], Optional[int]]:
+        """Get the source location (line, column) for the current instruction."""
+        if not self.call_stack:
+            return None, None
+        frame = self.call_stack[-1]
+        source_map = getattr(frame.func, 'source_map', None)
+        if source_map:
+            # Find the closest source location at or before current IP
+            # Walk backwards from current IP to find a mapped position
+            for ip in range(frame.ip, -1, -1):
+                if ip in source_map:
+                    return source_map[ip]
+        return None, None
+
     def _throw(self, exc: JSValue) -> None:
         """Throw an exception."""
+        # Try to add source location to error object
+        if isinstance(exc, JSObject):
+            line, column = self._get_source_location()
+            if line is not None:
+                exc.set("lineNumber", line)
+            if column is not None:
+                exc.set("columnNumber", column)
+
         if self.exception_handlers:
             frame_idx, catch_ip = self.exception_handlers.pop()
 

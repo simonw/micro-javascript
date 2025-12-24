@@ -275,3 +275,69 @@ class JSFunction:
 
     def __repr__(self) -> str:
         return f"[Function: {self.name}]" if self.name else "[Function (anonymous)]"
+
+
+class JSRegExp(JSObject):
+    """JavaScript RegExp object."""
+
+    def __init__(self, pattern: str, flags: str = "", poll_callback=None):
+        super().__init__()
+        from .regex import RegExp as InternalRegExp, MatchResult
+
+        self._internal = InternalRegExp(pattern, flags, poll_callback)
+        self._pattern = pattern
+        self._flags = flags
+
+        # Set properties
+        self.set("source", pattern)
+        self.set("flags", flags)
+        self.set("global", "g" in flags)
+        self.set("ignoreCase", "i" in flags)
+        self.set("multiline", "m" in flags)
+        self.set("dotAll", "s" in flags)
+        self.set("unicode", "u" in flags)
+        self.set("sticky", "y" in flags)
+        self.set("lastIndex", 0)
+
+    @property
+    def lastIndex(self) -> int:
+        return self.get("lastIndex") or 0
+
+    @lastIndex.setter
+    def lastIndex(self, value: int):
+        self.set("lastIndex", value)
+        self._internal.lastIndex = value
+
+    def test(self, string: str) -> bool:
+        """Test if the pattern matches the string."""
+        self._internal.lastIndex = self.lastIndex
+        result = self._internal.test(string)
+        self.lastIndex = self._internal.lastIndex
+        return result
+
+    def exec(self, string: str):
+        """Execute a search for a match."""
+        self._internal.lastIndex = self.lastIndex
+        result = self._internal.exec(string)
+        self.lastIndex = self._internal.lastIndex
+
+        if result is None:
+            return NULL
+
+        # Convert to JSArray with match result properties
+        arr = JSArray()
+        for i in range(len(result)):
+            val = result[i]
+            if val is None:
+                arr._elements.append(UNDEFINED)
+            else:
+                arr._elements.append(val)
+
+        # Add match result properties
+        arr.set("index", result.index)
+        arr.set("input", result.input)
+
+        return arr
+
+    def __repr__(self) -> str:
+        return f"/{self._pattern}/{self._flags}"

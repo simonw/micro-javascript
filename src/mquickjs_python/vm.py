@@ -9,7 +9,7 @@ from .opcodes import OpCode
 from .compiler import CompiledFunction
 from .values import (
     UNDEFINED, NULL, JSUndefined, JSNull, JSValue,
-    JSObject, JSArray, JSFunction,
+    JSObject, JSArray, JSFunction, JSRegExp,
     to_boolean, to_number, to_string, js_typeof,
 )
 from .errors import (
@@ -697,6 +697,16 @@ class VM:
                 return self._make_array_method(obj, key_str)
             return obj.get(key_str)
 
+        if isinstance(obj, JSRegExp):
+            # RegExp methods and properties
+            if key_str in ("test", "exec"):
+                return self._make_regexp_method(obj, key_str)
+            # RegExp properties
+            if key_str in ("source", "flags", "global", "ignoreCase", "multiline",
+                          "dotAll", "unicode", "sticky", "lastIndex"):
+                return obj.get(key_str)
+            return UNDEFINED
+
         if isinstance(obj, JSObject):
             # Built-in Object methods
             if key_str in ("toString", "hasOwnProperty"):
@@ -940,6 +950,22 @@ class VM:
         methods = {
             "toString": toString_fn,
             "hasOwnProperty": hasOwnProperty_fn,
+        }
+        return methods.get(method, lambda *args: UNDEFINED)
+
+    def _make_regexp_method(self, re: JSRegExp, method: str) -> Any:
+        """Create a bound RegExp method."""
+        def test_fn(*args):
+            string = to_string(args[0]) if args else ""
+            return re.test(string)
+
+        def exec_fn(*args):
+            string = to_string(args[0]) if args else ""
+            return re.exec(string)
+
+        methods = {
+            "test": test_fn,
+            "exec": exec_fn,
         }
         return methods.get(method, lambda *args: UNDEFINED)
 
@@ -1289,6 +1315,10 @@ class VM:
             self._invoke_js_function(constructor, args, obj)
             # Result is the new object (or returned value if object)
             self.stack.append(obj)
+        elif isinstance(constructor, JSObject) and hasattr(constructor, '_callable'):
+            # Built-in constructor (like RegExp)
+            result = constructor._callable(*args)
+            self.stack.append(result)
         else:
             raise JSTypeError(f"{constructor} is not a constructor")
 

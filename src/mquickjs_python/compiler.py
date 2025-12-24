@@ -4,7 +4,7 @@ from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from .ast_nodes import (
     Node, Program, NumericLiteral, StringLiteral, BooleanLiteral, NullLiteral,
-    Identifier, ThisExpression, ArrayExpression, ObjectExpression, Property,
+    RegexLiteral, Identifier, ThisExpression, ArrayExpression, ObjectExpression, Property,
     UnaryExpression, UpdateExpression, BinaryExpression, LogicalExpression,
     ConditionalExpression, AssignmentExpression, SequenceExpression,
     MemberExpression, CallExpression, NewExpression,
@@ -783,6 +783,11 @@ class Compiler:
 
         elif isinstance(node, NullLiteral):
             self._emit(OpCode.LOAD_NULL)
+
+        elif isinstance(node, RegexLiteral):
+            # Store (pattern, flags) tuple as constant
+            idx = self._add_constant((node.pattern, node.flags))
+            self._emit(OpCode.BUILD_REGEX, idx)
 
         elif isinstance(node, Identifier):
             name = node.name

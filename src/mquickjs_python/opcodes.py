@@ -33,6 +33,7 @@ class OpCode(IntEnum):
     # Arrays/Objects
     BUILD_ARRAY = auto()  # Build array from stack: arg = element count
     BUILD_OBJECT = auto() # Build object from stack: arg = property count
+    BUILD_REGEX = auto()  # Build regex from constant: constant index points to (pattern, flags) tuple
 
     # Arithmetic
     ADD = auto()
@@ -124,7 +125,7 @@ def disassemble(bytecode: bytes, constants: list) -> str:
             OpCode.LOAD_LOCAL, OpCode.STORE_LOCAL,
             OpCode.JUMP, OpCode.JUMP_IF_FALSE, OpCode.JUMP_IF_TRUE,
             OpCode.CALL, OpCode.CALL_METHOD, OpCode.NEW,
-            OpCode.BUILD_ARRAY, OpCode.BUILD_OBJECT,
+            OpCode.BUILD_ARRAY, OpCode.BUILD_OBJECT, OpCode.BUILD_REGEX,
             OpCode.TRY_START, OpCode.MAKE_CLOSURE,
         ):
             # Has argument

@@ -98,6 +98,12 @@ class Lexer:
                     result.append('"')
                 elif escape == "0":
                     result.append("\0")
+                elif escape == "b":
+                    result.append("\x08")  # Backspace
+                elif escape == "f":
+                    result.append("\x0c")  # Form feed
+                elif escape == "v":
+                    result.append("\x0b")  # Vertical tab
                 elif escape == "x":
                     # Hex escape \xNN
                     hex_chars = self._advance() + self._advance()

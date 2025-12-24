@@ -202,14 +202,8 @@ class TestRegexCharacterClass:
 class TestRegexUnicode:
     """Tests for regex Unicode handling."""
 
-    @pytest.mark.xfail(reason="lastIndex not reset correctly for surrogate pairs")
     def test_lastindex_surrogate_pair(self):
-        """lastIndex pointing to second surrogate should reset to 0.
-
-        Issue: When lastIndex points to the second element of a surrogate
-        pair in unicode mode, exec should fail and reset lastIndex to 0.
-        Currently lastIndex becomes 2 instead of 0.
-        """
+        """lastIndex pointing to second surrogate should reset to 0."""
         ctx = JSContext(time_limit=5.0)
         ctx.eval('var a = /(?:)/gu;')
         ctx.eval('a.lastIndex = 1;')  # Point to middle of surrogate pair

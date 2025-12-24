@@ -712,6 +712,16 @@ class VM:
                 return obj.get(key_str)
             return UNDEFINED
 
+        if isinstance(obj, JSFunction):
+            # Function methods
+            if key_str in ("bind", "call", "apply", "toString"):
+                return self._make_function_method(obj, key_str)
+            if key_str == "length":
+                return len(obj.params)
+            if key_str == "name":
+                return obj.name
+            return UNDEFINED
+
         if isinstance(obj, JSObject):
             # Built-in Object methods
             if key_str in ("toString", "hasOwnProperty"):
@@ -957,6 +967,86 @@ class VM:
             "hasOwnProperty": hasOwnProperty_fn,
         }
         return methods.get(method, lambda *args: UNDEFINED)
+
+    def _make_function_method(self, func: JSFunction, method: str) -> Any:
+        """Create a bound function method (bind, call, apply)."""
+        vm = self  # Reference for closures
+
+        def bind_fn(*args):
+            """Create a bound function with fixed this and optional partial args."""
+            bound_this = args[0] if args else UNDEFINED
+            bound_args = list(args[1:]) if len(args) > 1 else []
+
+            # Create a new function that wraps the original
+            bound_func = JSFunction(
+                name=func.name,
+                params=func.params[len(bound_args):],  # Remaining params after bound args
+                bytecode=func.bytecode,
+            )
+            # Copy compiled function reference
+            if hasattr(func, '_compiled'):
+                bound_func._compiled = func._compiled
+            # Copy closure cells
+            if hasattr(func, '_closure_cells'):
+                bound_func._closure_cells = func._closure_cells
+            # Store binding info on the function
+            bound_func._bound_this = bound_this
+            bound_func._bound_args = bound_args
+            bound_func._original_func = func
+            return bound_func
+
+        def call_fn(*args):
+            """Call function with explicit this and individual arguments."""
+            this_val = args[0] if args else UNDEFINED
+            call_args = list(args[1:]) if len(args) > 1 else []
+
+            # Call the function with the specified this
+            return vm._call_function_internal(func, this_val, call_args)
+
+        def apply_fn(*args):
+            """Call function with explicit this and array of arguments."""
+            this_val = args[0] if args else UNDEFINED
+            arg_array = args[1] if len(args) > 1 and args[1] is not NULL else None
+
+            # Convert array argument to list
+            if arg_array is None:
+                apply_args = []
+            elif isinstance(arg_array, JSArray):
+                apply_args = arg_array._elements[:]
+            elif isinstance(arg_array, (list, tuple)):
+                apply_args = list(arg_array)
+            else:
+                apply_args = []
+
+            return vm._call_function_internal(func, this_val, apply_args)
+
+        def toString_fn(*args):
+            return f"function {func.name}() {{ [native code] }}"
+
+        methods = {
+            "bind": bind_fn,
+            "call": call_fn,
+            "apply": apply_fn,
+            "toString": toString_fn,
+        }
+        return methods.get(method, lambda *args: UNDEFINED)
+
+    def _call_function_internal(
+        self, func: JSFunction, this_val: JSValue, args: List[JSValue]
+    ) -> JSValue:
+        """Internal method to call a function with explicit this and args."""
+        # Handle bound functions
+        if hasattr(func, '_bound_this'):
+            this_val = func._bound_this
+        if hasattr(func, '_bound_args'):
+            args = list(func._bound_args) + list(args)
+        if hasattr(func, '_original_func'):
+            func = func._original_func
+
+        # Use existing invoke mechanism
+        self._invoke_js_function(func, args, this_val)
+        result = self._execute()
+        return result
 
     def _make_regexp_method(self, re: JSRegExp, method: str) -> Any:
         """Create a bound RegExp method."""
@@ -1374,6 +1464,14 @@ class VM:
         this_val: JSValue,
     ) -> None:
         """Invoke a JavaScript function."""
+        # Handle bound functions
+        if hasattr(func, '_bound_this'):
+            this_val = func._bound_this
+        if hasattr(func, '_bound_args'):
+            args = list(func._bound_args) + list(args)
+        if hasattr(func, '_original_func'):
+            func = func._original_func
+
         compiled = getattr(func, '_compiled', None)
         if compiled is None:
             raise JSTypeError("Function has no bytecode")

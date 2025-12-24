@@ -342,6 +342,32 @@ class RegexCompiler:
             return any(self._needs_advance_check(a) for a in node.alternatives)
         return True  # Unknown - be safe
 
+    def _find_capture_groups(self, node: Node) -> List[int]:
+        """Find all capture group indices in a node."""
+        groups = []
+        if isinstance(node, Group):
+            if node.capturing:
+                groups.append(node.group_index)
+            groups.extend(self._find_capture_groups(node.body))
+        elif isinstance(node, (Lookahead, Lookbehind)):
+            groups.extend(self._find_capture_groups(node.body))
+        elif isinstance(node, Quantifier):
+            groups.extend(self._find_capture_groups(node.body))
+        elif isinstance(node, Alternative):
+            for term in node.terms:
+                groups.extend(self._find_capture_groups(term))
+        elif isinstance(node, Disjunction):
+            for alt in node.alternatives:
+                groups.extend(self._find_capture_groups(alt))
+        return groups
+
+    def _emit_capture_reset(self, groups: List[int]):
+        """Emit SAVE_RESET to reset capture groups at start of loop iteration."""
+        if groups:
+            min_group = min(groups)
+            max_group = max(groups)
+            self._emit(Op.SAVE_RESET, min_group, max_group)
+
     def _compile_optional(self, body: Node, greedy: bool):
         """Compile ? quantifier."""
         if greedy:
@@ -357,6 +383,9 @@ class RegexCompiler:
 
     def _compile_star(self, body: Node, greedy: bool, need_advance_check: bool):
         """Compile * quantifier."""
+        # Find capture groups in body to reset at each iteration
+        capture_groups = self._find_capture_groups(body)
+
         if need_advance_check:
             reg = self._allocate_register()
             loop_start = self._current_offset()
@@ -364,6 +393,7 @@ class RegexCompiler:
             if greedy:
                 self._emit(Op.SET_POS, reg)
                 split_idx = self._emit(Op.SPLIT_FIRST, 0)
+                self._emit_capture_reset(capture_groups)
                 self._compile_node(body)
                 self._emit(Op.CHECK_ADVANCE, reg)
                 self._emit(Op.JUMP, loop_start)
@@ -371,6 +401,7 @@ class RegexCompiler:
             else:
                 self._emit(Op.SET_POS, reg)
                 split_idx = self._emit(Op.SPLIT_NEXT, 0)
+                self._emit_capture_reset(capture_groups)
                 self._compile_node(body)
                 self._emit(Op.CHECK_ADVANCE, reg)
                 self._emit(Op.JUMP, loop_start)
@@ -382,6 +413,7 @@ class RegexCompiler:
             else:
                 split_idx = self._emit(Op.SPLIT_NEXT, 0)
 
+            self._emit_capture_reset(capture_groups)
             self._compile_node(body)
             self._emit(Op.JUMP, loop_start)
 
@@ -392,10 +424,14 @@ class RegexCompiler:
 
     def _compile_plus(self, body: Node, greedy: bool, need_advance_check: bool):
         """Compile + quantifier."""
+        # Find capture groups in body to reset at each iteration
+        capture_groups = self._find_capture_groups(body)
+
         if need_advance_check:
             reg = self._allocate_register()
             loop_start = self._current_offset()
 
+            self._emit_capture_reset(capture_groups)
             self._emit(Op.SET_POS, reg)
             self._compile_node(body)
             # CHECK_ADVANCE before SPLIT so that if body took a non-advancing path
@@ -413,6 +449,7 @@ class RegexCompiler:
                 self._patch(split_idx, Op.SPLIT_NEXT, self._current_offset())
         else:
             loop_start = self._current_offset()
+            self._emit_capture_reset(capture_groups)
             self._compile_node(body)
 
             if greedy:

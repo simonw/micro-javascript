@@ -75,6 +75,24 @@ class Parser:
         """Check if we've reached the end of input."""
         return self.current.type == TokenType.EOF
 
+    def _peek_next(self) -> Token:
+        """Peek at the next token without consuming it."""
+        # Save current state
+        saved_pos = self.lexer.pos
+        saved_line = self.lexer.line
+        saved_column = self.lexer.column
+        saved_current = self.current
+
+        # Get next token
+        next_token = self.lexer.next_token()
+
+        # Restore state
+        self.lexer.pos = saved_pos
+        self.lexer.line = saved_line
+        self.lexer.column = saved_column
+
+        return next_token
+
     def parse(self) -> Program:
         """Parse the entire program."""
         body: List[Node] = []
@@ -130,11 +148,14 @@ class Parser:
         if self._match(TokenType.FUNCTION):
             return self._parse_function_declaration()
 
-        # Check for labeled statement
+        # Check for labeled statement: IDENTIFIER COLON statement
         if self._check(TokenType.IDENTIFIER):
-            # Look ahead for colon
-            # For now, treat as expression statement
-            pass
+            # Look ahead for colon to detect labeled statement
+            if self._peek_next().type == TokenType.COLON:
+                label_token = self._advance()  # consume identifier
+                self._advance()  # consume colon
+                body = self._parse_statement()
+                return LabeledStatement(Identifier(label_token.value), body)
 
         # Expression statement
         return self._parse_expression_statement()
@@ -240,10 +261,11 @@ class Parser:
                 init = VariableDeclaration(declarations)
                 self._expect(TokenType.SEMICOLON, "Expected ';' after for init")
         else:
-            # Expression init (could also be for-in with identifier)
-            expr = self._parse_expression()
+            # Expression init (could also be for-in with identifier or member expression)
+            # Parse with exclude_in=True so 'in' isn't treated as binary operator
+            expr = self._parse_expression(exclude_in=True)
             if self._match(TokenType.IN):
-                # for (x in obj)
+                # for (x in obj) or for (a.x in obj)
                 right = self._parse_expression()
                 self._expect(TokenType.RPAREN, "Expected ')' after for-in")
                 body = self._parse_statement()
@@ -378,21 +400,21 @@ class Parser:
 
     # ---- Expressions ----
 
-    def _parse_expression(self) -> Node:
+    def _parse_expression(self, exclude_in: bool = False) -> Node:
         """Parse an expression (includes comma operator)."""
-        expr = self._parse_assignment_expression()
+        expr = self._parse_assignment_expression(exclude_in)
 
         if self._check(TokenType.COMMA):
             expressions = [expr]
             while self._match(TokenType.COMMA):
-                expressions.append(self._parse_assignment_expression())
+                expressions.append(self._parse_assignment_expression(exclude_in))
             return SequenceExpression(expressions)
 
         return expr
 
-    def _parse_assignment_expression(self) -> Node:
+    def _parse_assignment_expression(self, exclude_in: bool = False) -> Node:
         """Parse assignment expression."""
-        expr = self._parse_conditional_expression()
+        expr = self._parse_conditional_expression(exclude_in)
 
         if self._check(
             TokenType.ASSIGN, TokenType.PLUS_ASSIGN, TokenType.MINUS_ASSIGN,
@@ -401,30 +423,34 @@ class Parser:
             TokenType.LSHIFT_ASSIGN, TokenType.RSHIFT_ASSIGN, TokenType.URSHIFT_ASSIGN,
         ):
             op = self._advance().value
-            right = self._parse_assignment_expression()
+            right = self._parse_assignment_expression(exclude_in)
             return AssignmentExpression(op, expr, right)
 
         return expr
 
-    def _parse_conditional_expression(self) -> Node:
+    def _parse_conditional_expression(self, exclude_in: bool = False) -> Node:
         """Parse conditional (ternary) expression."""
-        expr = self._parse_binary_expression()
+        expr = self._parse_binary_expression(0, exclude_in)
 
         if self._match(TokenType.QUESTION):
-            consequent = self._parse_assignment_expression()
+            consequent = self._parse_assignment_expression(exclude_in)
             self._expect(TokenType.COLON, "Expected ':' in conditional expression")
-            alternate = self._parse_assignment_expression()
+            alternate = self._parse_assignment_expression(exclude_in)
             return ConditionalExpression(expr, consequent, alternate)
 
         return expr
 
-    def _parse_binary_expression(self, min_precedence: int = 0) -> Node:
+    def _parse_binary_expression(self, min_precedence: int = 0, exclude_in: bool = False) -> Node:
         """Parse binary expression with operator precedence."""
         left = self._parse_unary_expression()
 
         while True:
             op = self._get_binary_operator()
             if op is None:
+                break
+
+            # Skip 'in' operator when parsing for-in left-hand side
+            if exclude_in and op == "in":
                 break
 
             precedence = PRECEDENCE.get(op, 0)
@@ -435,9 +461,9 @@ class Parser:
 
             # Handle right-associative operators
             if op == "**":
-                right = self._parse_binary_expression(precedence)
+                right = self._parse_binary_expression(precedence, exclude_in)
             else:
-                right = self._parse_binary_expression(precedence + 1)
+                right = self._parse_binary_expression(precedence + 1, exclude_in)
 
             # Use LogicalExpression for && and ||
             if op in ("&&", "||"):

@@ -19,6 +19,12 @@ from .errors import (
 
 
 @dataclass
+class ClosureCell:
+    """A cell for closure variable - allows sharing between scopes."""
+    value: JSValue
+
+
+@dataclass
 class CallFrame:
     """Call frame on the call stack."""
     func: CompiledFunction
@@ -26,6 +32,8 @@ class CallFrame:
     bp: int  # Base pointer (stack base for this frame)
     locals: List[JSValue]
     this_value: JSValue
+    closure_cells: List[ClosureCell] = None  # Cells for captured variables (from outer function)
+    cell_storage: List[ClosureCell] = None  # Cells for variables captured by inner functions
 
 
 class ForInIterator:
@@ -127,6 +135,8 @@ class VM:
             elif op in (
                 OpCode.LOAD_CONST, OpCode.LOAD_NAME, OpCode.STORE_NAME,
                 OpCode.LOAD_LOCAL, OpCode.STORE_LOCAL,
+                OpCode.LOAD_CLOSURE, OpCode.STORE_CLOSURE,
+                OpCode.LOAD_CELL, OpCode.STORE_CELL,
                 OpCode.CALL, OpCode.CALL_METHOD, OpCode.NEW,
                 OpCode.BUILD_ARRAY, OpCode.BUILD_OBJECT,
                 OpCode.MAKE_CLOSURE,
@@ -199,6 +209,30 @@ class VM:
         elif op == OpCode.STORE_NAME:
             name = frame.func.constants[arg]
             self.globals[name] = self.stack[-1]
+
+        elif op == OpCode.LOAD_CLOSURE:
+            if frame.closure_cells and arg < len(frame.closure_cells):
+                self.stack.append(frame.closure_cells[arg].value)
+            else:
+                raise JSReferenceError("Closure variable not found")
+
+        elif op == OpCode.STORE_CLOSURE:
+            if frame.closure_cells and arg < len(frame.closure_cells):
+                frame.closure_cells[arg].value = self.stack[-1]
+            else:
+                raise JSReferenceError("Closure variable not found")
+
+        elif op == OpCode.LOAD_CELL:
+            if frame.cell_storage and arg < len(frame.cell_storage):
+                self.stack.append(frame.cell_storage[arg].value)
+            else:
+                raise JSReferenceError("Cell variable not found")
+
+        elif op == OpCode.STORE_CELL:
+            if frame.cell_storage and arg < len(frame.cell_storage):
+                frame.cell_storage[arg].value = self.stack[-1]
+            else:
+                raise JSReferenceError("Cell variable not found")
 
         # Properties
         elif op == OpCode.GET_PROP:
@@ -512,6 +546,29 @@ class VM:
                     bytecode=compiled_func.bytecode,
                 )
                 js_func._compiled = compiled_func
+
+                # Capture closure cells for free variables
+                if compiled_func.free_vars:
+                    closure_cells = []
+                    for var_name in compiled_func.free_vars:
+                        # First check if it's in our cell_storage (cell var)
+                        if frame.cell_storage and var_name in getattr(frame.func, 'cell_vars', []):
+                            idx = frame.func.cell_vars.index(var_name)
+                            # Share the same cell!
+                            closure_cells.append(frame.cell_storage[idx])
+                        elif frame.closure_cells and var_name in getattr(frame.func, 'free_vars', []):
+                            # Variable is in our own closure
+                            idx = frame.func.free_vars.index(var_name)
+                            closure_cells.append(frame.closure_cells[idx])
+                        elif var_name in frame.func.locals:
+                            # Regular local - shouldn't happen if cell_vars is working
+                            slot = frame.func.locals.index(var_name)
+                            cell = ClosureCell(frame.locals[slot])
+                            closure_cells.append(cell)
+                        else:
+                            closure_cells.append(ClosureCell(UNDEFINED))
+                    js_func._closure_cells = closure_cells
+
                 self.stack.append(js_func)
             else:
                 self.stack.append(compiled_func)
@@ -772,6 +829,21 @@ class VM:
             arguments_obj._elements = list(args)
             locals_list[arguments_slot] = arguments_obj
 
+        # Get closure cells from the function
+        closure_cells = getattr(func, '_closure_cells', None)
+
+        # Create cell storage for variables that will be captured by inner functions
+        cell_storage = None
+        if compiled.cell_vars:
+            cell_storage = []
+            for var_name in compiled.cell_vars:
+                # Find the initial value from locals
+                if var_name in compiled.locals:
+                    slot = compiled.locals.index(var_name)
+                    cell_storage.append(ClosureCell(locals_list[slot]))
+                else:
+                    cell_storage.append(ClosureCell(UNDEFINED))
+
         # Create new call frame
         frame = CallFrame(
             func=compiled,
@@ -779,6 +851,8 @@ class VM:
             bp=len(self.stack),
             locals=locals_list,
             this_value=this_val,
+            closure_cells=closure_cells,
+            cell_storage=cell_storage,
         )
         self.call_stack.append(frame)
 

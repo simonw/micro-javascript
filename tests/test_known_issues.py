@@ -73,25 +73,8 @@ class TestIndirectEval:
 class TestRegexCaptureGroups:
     """Tests for regex capture group behavior."""
 
-    @pytest.mark.xfail(reason="Capture groups in repetitions not reset to undefined")
     def test_capture_group_reset_in_repetition(self):
-        """Capture groups in repetitions should reset to undefined.
-
-        Issue: When a capture group inside a repetition (* or +) doesn't
-        participate in a particular iteration, it should be reset to undefined.
-        Currently the previous iteration's capture is retained.
-
-        Pattern: /(z)((a+)?(b+)?(c))*/
-        String:  'zaacbbbcac'
-
-        Iterations:
-        1. 'aac' -> group 3='aa', group 4=undefined, group 5='c'
-        2. 'bbbc' -> group 3=undefined, group 4='bbb', group 5='c'
-        3. 'ac' -> group 3='a', group 4=undefined, group 5='c'
-
-        Final result should have group 4=undefined (from iteration 3),
-        not 'bbb' (from iteration 2).
-        """
+        """Capture groups in repetitions should reset to undefined."""
         ctx = JSContext(time_limit=5.0)
         result = ctx.eval('/(z)((a+)?(b+)?(c))*/.exec("zaacbbbcac")')
         expected = ['zaacbbbcac', 'z', 'ac', 'a', None, 'c']

@@ -398,15 +398,17 @@ class RegexCompiler:
 
             self._emit(Op.SET_POS, reg)
             self._compile_node(body)
+            # CHECK_ADVANCE before SPLIT so that if body took a non-advancing path
+            # (like empty alternative), we backtrack to body alternatives first,
+            # not directly to the loop exit
+            self._emit(Op.CHECK_ADVANCE, reg)
 
             if greedy:
                 split_idx = self._emit(Op.SPLIT_FIRST, 0)
-                self._emit(Op.CHECK_ADVANCE, reg)
                 self._emit(Op.JUMP, loop_start)
                 self._patch(split_idx, Op.SPLIT_FIRST, self._current_offset())
             else:
                 split_idx = self._emit(Op.SPLIT_NEXT, 0)
-                self._emit(Op.CHECK_ADVANCE, reg)
                 self._emit(Op.JUMP, loop_start)
                 self._patch(split_idx, Op.SPLIT_NEXT, self._current_offset())
         else:

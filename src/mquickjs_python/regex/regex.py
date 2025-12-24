@@ -208,7 +208,7 @@ class RegExp:
                 return None
             start_pos = cp_start
         else:
-            start_pos = self.lastIndex if self._global else 0
+            start_pos = self.lastIndex if (self._global or self._sticky) else 0
 
         if self._sticky:
             result = vm.match(string, start_pos)

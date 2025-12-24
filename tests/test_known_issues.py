@@ -45,14 +45,8 @@ class TestIndirectEval:
         ctx.eval('var g_eval = (1,eval);')
         assert ctx.eval('g_eval("z")') == 2
 
-    @pytest.mark.xfail(reason="Indirect eval doesn't persist writes to global vars")
     def test_indirect_eval_writes_global(self):
-        """Indirect eval should persist writes to existing global variables.
-
-        Issue: When indirect eval assigns to an existing global variable,
-        the assignment should modify the global scope. Currently the
-        assignment happens in a temporary scope and is lost.
-        """
+        """Indirect eval should persist writes to existing global variables."""
         ctx = JSContext(time_limit=5.0)
         ctx.eval('var z = 2;')
         ctx.eval('var g_eval = (1,eval);')

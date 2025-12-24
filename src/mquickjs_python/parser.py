@@ -16,7 +16,7 @@ from .ast_nodes import (
     ForInStatement, ForOfStatement, BreakStatement, ContinueStatement,
     ReturnStatement, ThrowStatement, TryStatement, CatchClause,
     SwitchStatement, SwitchCase, LabeledStatement,
-    FunctionDeclaration, FunctionExpression,
+    FunctionDeclaration, FunctionExpression, ArrowFunctionExpression,
 )
 
 
@@ -414,6 +414,16 @@ class Parser:
 
     def _parse_assignment_expression(self, exclude_in: bool = False) -> Node:
         """Parse assignment expression."""
+        # Check for arrow function: identifier => expr
+        if self._check(TokenType.IDENTIFIER):
+            if self._is_arrow_function_single_param():
+                return self._parse_arrow_function_single_param()
+
+        # Check for arrow function: () => expr or (params) => expr
+        if self._check(TokenType.LPAREN):
+            if self._is_arrow_function_params():
+                return self._parse_arrow_function_params()
+
         expr = self._parse_conditional_expression(exclude_in)
 
         if self._check(
@@ -427,6 +437,95 @@ class Parser:
             return AssignmentExpression(op, expr, right)
 
         return expr
+
+    def _is_arrow_function_single_param(self) -> bool:
+        """Check if this is a single-param arrow function: x => ..."""
+        # Save state
+        saved_pos = self.lexer.pos
+        saved_line = self.lexer.line
+        saved_column = self.lexer.column
+        saved_current = self.current
+
+        # Try to advance past identifier and check for =>
+        self._advance()  # identifier
+        is_arrow = self._check(TokenType.ARROW)
+
+        # Restore state
+        self.lexer.pos = saved_pos
+        self.lexer.line = saved_line
+        self.lexer.column = saved_column
+        self.current = saved_current
+
+        return is_arrow
+
+    def _is_arrow_function_params(self) -> bool:
+        """Check if this is a parenthesized arrow function: () => or (a, b) => ..."""
+        # Save state
+        saved_pos = self.lexer.pos
+        saved_line = self.lexer.line
+        saved_column = self.lexer.column
+        saved_current = self.current
+
+        is_arrow = False
+        try:
+            self._advance()  # (
+            # Skip to matching )
+            paren_depth = 1
+            while paren_depth > 0 and not self._is_at_end():
+                if self._check(TokenType.LPAREN):
+                    paren_depth += 1
+                elif self._check(TokenType.RPAREN):
+                    paren_depth -= 1
+                self._advance()
+
+            # Check for =>
+            is_arrow = self._check(TokenType.ARROW)
+        except Exception:
+            pass
+
+        # Restore state
+        self.lexer.pos = saved_pos
+        self.lexer.line = saved_line
+        self.lexer.column = saved_column
+        self.current = saved_current
+
+        return is_arrow
+
+    def _parse_arrow_function_single_param(self) -> ArrowFunctionExpression:
+        """Parse arrow function with single unparenthesized param."""
+        param = Identifier(self._advance().value)  # Get the param name
+        self._expect(TokenType.ARROW, "Expected '=>'")
+
+        if self._check(TokenType.LBRACE):
+            # Block body
+            body = self._parse_block_statement()
+            return ArrowFunctionExpression([param], body, expression=False)
+        else:
+            # Expression body
+            body = self._parse_assignment_expression()
+            return ArrowFunctionExpression([param], body, expression=True)
+
+    def _parse_arrow_function_params(self) -> ArrowFunctionExpression:
+        """Parse arrow function with parenthesized params."""
+        self._expect(TokenType.LPAREN, "Expected '('")
+
+        params: List[Identifier] = []
+        if not self._check(TokenType.RPAREN):
+            params.append(Identifier(self._expect(TokenType.IDENTIFIER, "Expected parameter name").value))
+            while self._match(TokenType.COMMA):
+                params.append(Identifier(self._expect(TokenType.IDENTIFIER, "Expected parameter name").value))
+
+        self._expect(TokenType.RPAREN, "Expected ')'")
+        self._expect(TokenType.ARROW, "Expected '=>'")
+
+        if self._check(TokenType.LBRACE):
+            # Block body
+            body = self._parse_block_statement()
+            return ArrowFunctionExpression(params, body, expression=False)
+        else:
+            # Expression body
+            body = self._parse_assignment_expression()
+            return ArrowFunctionExpression(params, body, expression=True)
 
     def _parse_conditional_expression(self, exclude_in: bool = False) -> Node:
         """Parse conditional (ternary) expression."""

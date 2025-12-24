@@ -260,6 +260,10 @@ class Lexer:
                 return Token(TokenType.EQEQ, "===", line, column)
             return Token(TokenType.EQ, "==", line, column)
 
+        if ch == "=" and self._current() == ">":
+            self._advance()
+            return Token(TokenType.ARROW, "=>", line, column)
+
         if ch == "!" and self._current() == "=":
             self._advance()
             if self._current() == "=":

@@ -42,6 +42,12 @@ class LoopContext:
     is_loop: bool = True  # False for switch statements (break only, no continue)
 
 
+@dataclass
+class TryContext:
+    """Context for try-finally blocks (for break/continue/return)."""
+    finalizer: Any = None  # The finally block AST node
+
+
 class Compiler:
     """Compiles AST to bytecode."""
 
@@ -51,6 +57,7 @@ class Compiler:
         self.names: List[str] = []
         self.locals: List[str] = []
         self.loop_stack: List[LoopContext] = []
+        self.try_stack: List[TryContext] = []  # Track try-finally for break/continue/return
         self.functions: List[CompiledFunction] = []
         self._in_function: bool = False  # Track if we're compiling inside a function
         self._outer_locals: List[List[str]] = []  # Stack of outer scope locals
@@ -119,6 +126,13 @@ class Compiler:
             target = len(self.bytecode)
         self.bytecode[pos + 1] = target & 0xFF  # Low byte
         self.bytecode[pos + 2] = (target >> 8) & 0xFF  # High byte
+
+    def _emit_pending_finally_blocks(self) -> None:
+        """Emit all pending finally blocks (for break/continue/return)."""
+        # Emit finally blocks in reverse order (innermost first)
+        for try_ctx in reversed(self.try_stack):
+            if try_ctx.finalizer:
+                self._compile_statement(try_ctx.finalizer)
 
     def _add_constant(self, value: Any) -> int:
         """Add a constant and return its index."""
@@ -559,6 +573,9 @@ class Compiler:
             if ctx is None:
                 raise SyntaxError(f"label '{target_label}' not found")
 
+            # Emit pending finally blocks before the break
+            self._emit_pending_finally_blocks()
+
             pos = self._emit_jump(OpCode.JUMP)
             ctx.break_jumps.append(pos)
 
@@ -580,10 +597,16 @@ class Compiler:
             if ctx is None:
                 raise SyntaxError(f"label '{target_label}' not found")
 
+            # Emit pending finally blocks before the continue
+            self._emit_pending_finally_blocks()
+
             pos = self._emit_jump(OpCode.JUMP)
             ctx.continue_jumps.append(pos)
 
         elif isinstance(node, ReturnStatement):
+            # Emit pending finally blocks before the return
+            self._emit_pending_finally_blocks()
+
             if node.argument:
                 self._compile_expression(node.argument)
                 self._emit(OpCode.RETURN)
@@ -595,18 +618,24 @@ class Compiler:
             self._emit(OpCode.THROW)
 
         elif isinstance(node, TryStatement):
+            # Push TryContext if there's a finally block so break/continue/return
+            # can inline the finally code
+            if node.finalizer:
+                self.try_stack.append(TryContext(finalizer=node.finalizer))
+
             # Try block
             try_start = self._emit_jump(OpCode.TRY_START)
 
             self._compile_statement(node.block)
             self._emit(OpCode.TRY_END)
 
-            # Jump past catch/finally
-            jump_end = self._emit_jump(OpCode.JUMP)
+            # Jump past exception handler to normal finally
+            jump_to_finally = self._emit_jump(OpCode.JUMP)
 
-            # Catch handler
+            # Exception handler
             self._patch_jump(try_start)
             if node.handler:
+                # Has catch block
                 self._emit(OpCode.CATCH)
                 # Store exception in catch variable
                 name = node.handler.param.name
@@ -615,10 +644,19 @@ class Compiler:
                 self._emit(OpCode.STORE_LOCAL, slot)
                 self._emit(OpCode.POP)
                 self._compile_statement(node.handler.body)
+                # Fall through to finally
+            elif node.finalizer:
+                # No catch, only finally - exception is on stack
+                # Run finally then rethrow
+                self._compile_statement(node.finalizer)
+                self._emit(OpCode.THROW)  # Rethrow the exception
 
-            self._patch_jump(jump_end)
+            # Pop TryContext before compiling normal finally
+            if node.finalizer:
+                self.try_stack.pop()
 
-            # Finally block
+            # Normal finally block (after try completes normally or after catch)
+            self._patch_jump(jump_to_finally)
             if node.finalizer:
                 self._compile_statement(node.finalizer)
 

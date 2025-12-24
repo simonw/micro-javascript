@@ -327,3 +327,11 @@ class FunctionExpression(Node):
     id: Optional[Identifier]
     params: List[Identifier]
     body: BlockStatement
+
+
+@dataclass
+class ArrowFunctionExpression(Node):
+    """Arrow function: (params) => body or param => body"""
+    params: List[Identifier]
+    body: Node  # Can be BlockStatement or expression
+    expression: bool  # True if body is an expression, False if block

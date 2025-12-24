@@ -29,6 +29,8 @@ class CompiledFunction:
     constants: List[Any]
     locals: List[str]
     num_locals: int
+    free_vars: List[str] = field(default_factory=list)  # Variables captured from outer scope
+    cell_vars: List[str] = field(default_factory=list)  # Local variables that are captured by inner functions
 
 
 @dataclass
@@ -51,6 +53,9 @@ class Compiler:
         self.loop_stack: List[LoopContext] = []
         self.functions: List[CompiledFunction] = []
         self._in_function: bool = False  # Track if we're compiling inside a function
+        self._outer_locals: List[List[str]] = []  # Stack of outer scope locals
+        self._free_vars: List[str] = []  # Free variables captured from outer scopes
+        self._cell_vars: List[str] = []  # Local variables captured by inner functions
 
     def compile(self, node: Program) -> CompiledFunction:
         """Compile a program to bytecode."""
@@ -148,6 +153,136 @@ class Compiler:
             return self.locals.index(name)
         return None
 
+    def _get_free_var(self, name: str) -> Optional[int]:
+        """Get free variable slot, or None if not in outer scope."""
+        if name in self._free_vars:
+            return self._free_vars.index(name)
+        # Check if it's in any outer scope
+        for outer_locals in reversed(self._outer_locals):
+            if name in outer_locals:
+                # Add to free vars
+                self._free_vars.append(name)
+                return len(self._free_vars) - 1
+        return None
+
+    def _is_in_outer_scope(self, name: str) -> bool:
+        """Check if name exists in any outer scope."""
+        for outer_locals in self._outer_locals:
+            if name in outer_locals:
+                return True
+        return False
+
+    def _get_cell_var(self, name: str) -> Optional[int]:
+        """Get cell variable slot, or None if not a cell var."""
+        if name in self._cell_vars:
+            return self._cell_vars.index(name)
+        return None
+
+    def _find_captured_vars(self, body: BlockStatement, locals_set: set) -> set:
+        """Find all variables captured by inner functions."""
+        captured = set()
+
+        def visit(node):
+            if isinstance(node, (FunctionDeclaration, FunctionExpression)):
+                # Found inner function - check what variables it uses
+                inner_captured = self._find_free_vars_in_function(node, locals_set)
+                captured.update(inner_captured)
+            elif isinstance(node, BlockStatement):
+                for stmt in node.body:
+                    visit(stmt)
+            elif isinstance(node, IfStatement):
+                visit(node.consequent)
+                if node.alternate:
+                    visit(node.alternate)
+            elif isinstance(node, WhileStatement):
+                visit(node.body)
+            elif isinstance(node, DoWhileStatement):
+                visit(node.body)
+            elif isinstance(node, ForStatement):
+                visit(node.body)
+            elif isinstance(node, ForInStatement):
+                visit(node.body)
+            elif isinstance(node, TryStatement):
+                visit(node.block)
+                if node.handler:
+                    visit(node.handler.body)
+                if node.finalizer:
+                    visit(node.finalizer)
+            elif isinstance(node, SwitchStatement):
+                for case in node.cases:
+                    for stmt in case.consequent:
+                        visit(stmt)
+            elif isinstance(node, LabeledStatement):
+                visit(node.body)
+
+        for stmt in body.body:
+            visit(stmt)
+
+        return captured
+
+    def _find_free_vars_in_function(self, func_node, outer_locals: set) -> set:
+        """Find variables used in function that come from outer scope.
+
+        Also recursively checks nested functions - if a nested function needs
+        a variable from outer scope, this function needs to capture it too.
+        """
+        free_vars = set()
+        # Get function's own locals (params and declared vars)
+        if isinstance(func_node, FunctionDeclaration):
+            params = {p.name for p in func_node.params}
+            body = func_node.body
+        else:  # FunctionExpression
+            params = {p.name for p in func_node.params}
+            body = func_node.body
+
+        local_vars = params.copy()
+        # Find var declarations in function
+        self._collect_var_decls(body, local_vars)
+
+        # Now find identifiers used that are not local but are in outer_locals
+        def visit_expr(node):
+            if isinstance(node, Identifier):
+                if node.name in outer_locals and node.name not in local_vars:
+                    free_vars.add(node.name)
+            elif isinstance(node, (FunctionDeclaration, FunctionExpression)):
+                # Recursively check nested functions - any outer variable they need
+                # must also be captured by this function (unless it's our local)
+                nested_free = self._find_free_vars_in_function(node, outer_locals)
+                for var in nested_free:
+                    if var not in local_vars:
+                        free_vars.add(var)
+            elif hasattr(node, '__dict__'):
+                for value in node.__dict__.values():
+                    if isinstance(value, Node):
+                        visit_expr(value)
+                    elif isinstance(value, list):
+                        for item in value:
+                            if isinstance(item, Node):
+                                visit_expr(item)
+
+        visit_expr(body)
+        return free_vars
+
+    def _collect_var_decls(self, node, var_set: set):
+        """Collect all var declarations in a node."""
+        if isinstance(node, VariableDeclaration):
+            for decl in node.declarations:
+                var_set.add(decl.id.name)
+        elif isinstance(node, FunctionDeclaration):
+            var_set.add(node.id.name)
+            # Don't recurse into function body
+        elif isinstance(node, BlockStatement):
+            for stmt in node.body:
+                self._collect_var_decls(stmt, var_set)
+        elif hasattr(node, '__dict__'):
+            for key, value in node.__dict__.items():
+                if isinstance(value, Node) and not isinstance(value, (FunctionDeclaration, FunctionExpression)):
+                    self._collect_var_decls(value, var_set)
+                elif isinstance(value, list):
+                    for item in value:
+                        if isinstance(item, Node) and not isinstance(item, (FunctionDeclaration, FunctionExpression)):
+                            self._collect_var_decls(item, var_set)
+
     # ---- Statements ----
 
     def _compile_statement(self, node: Node) -> None:
@@ -174,8 +309,13 @@ class Compiler:
                 if self._in_function:
                     # Inside function: use local variable
                     self._add_local(name)
-                    slot = self._get_local(name)
-                    self._emit(OpCode.STORE_LOCAL, slot)
+                    # Check if it's a cell var (captured by inner function)
+                    cell_slot = self._get_cell_var(name)
+                    if cell_slot is not None:
+                        self._emit(OpCode.STORE_CELL, cell_slot)
+                    else:
+                        slot = self._get_local(name)
+                        self._emit(OpCode.STORE_LOCAL, slot)
                 else:
                     # At program level: use global variable
                     idx = self._add_name(name)
@@ -512,6 +652,47 @@ class Compiler:
         else:
             raise NotImplementedError(f"Cannot compile statement: {type(node).__name__}")
 
+    def _find_required_free_vars(self, body: BlockStatement, local_vars: set) -> set:
+        """Find all free variables required by this function including pass-through.
+
+        This scans the function body for:
+        1. Direct identifier references to outer scope variables
+        2. Nested functions that need outer scope variables (pass-through)
+        """
+        free_vars = set()
+
+        def visit(node):
+            if isinstance(node, Identifier):
+                if node.name not in local_vars and self._is_in_outer_scope(node.name):
+                    free_vars.add(node.name)
+            elif isinstance(node, (FunctionDeclaration, FunctionExpression)):
+                # Check nested function's free vars - we need to pass through
+                # any outer scope vars that aren't our locals
+                nested_params = {p.name for p in node.params}
+                nested_locals = nested_params.copy()
+                nested_locals.add("arguments")
+                self._collect_var_decls(node.body, nested_locals)
+                nested_free = self._find_required_free_vars(node.body, nested_locals)
+                for var in nested_free:
+                    if var not in local_vars and self._is_in_outer_scope(var):
+                        free_vars.add(var)
+            elif isinstance(node, BlockStatement):
+                for stmt in node.body:
+                    visit(stmt)
+            elif hasattr(node, '__dict__'):
+                for value in node.__dict__.values():
+                    if isinstance(value, Node):
+                        visit(value)
+                    elif isinstance(value, list):
+                        for item in value:
+                            if isinstance(item, Node):
+                                visit(item)
+
+        for stmt in body.body:
+            visit(stmt)
+
+        return free_vars
+
     def _compile_function(
         self, name: str, params: List[Identifier], body: BlockStatement
     ) -> CompiledFunction:
@@ -522,6 +703,12 @@ class Compiler:
         old_locals = self.locals
         old_loop_stack = self.loop_stack
         old_in_function = self._in_function
+        old_free_vars = self._free_vars
+        old_cell_vars = self._cell_vars
+
+        # Push current locals to outer scope stack (for closure resolution)
+        if self._in_function:
+            self._outer_locals.append(old_locals[:])
 
         # New state for function
         # Locals: params first, then 'arguments' reserved slot
@@ -530,6 +717,18 @@ class Compiler:
         self.locals = [p.name for p in params] + ["arguments"]
         self.loop_stack = []
         self._in_function = True
+
+        # Collect all var declarations to know the full locals set
+        local_vars_set = set(self.locals)
+        self._collect_var_decls(body, local_vars_set)
+
+        # Find variables captured by inner functions
+        captured = self._find_captured_vars(body, local_vars_set)
+        self._cell_vars = list(captured)
+
+        # Find all free variables needed (including pass-through for nested functions)
+        required_free = self._find_required_free_vars(body, local_vars_set)
+        self._free_vars = list(required_free)
 
         # Compile function body
         for stmt in body.body:
@@ -545,7 +744,13 @@ class Compiler:
             constants=self.constants,
             locals=self.locals,
             num_locals=len(self.locals),
+            free_vars=self._free_vars[:],
+            cell_vars=self._cell_vars[:],
         )
+
+        # Pop outer scope if we pushed it
+        if old_in_function:
+            self._outer_locals.pop()
 
         # Restore state
         self.bytecode = old_bytecode
@@ -553,6 +758,8 @@ class Compiler:
         self.locals = old_locals
         self.loop_stack = old_loop_stack
         self._in_function = old_in_function
+        self._free_vars = old_free_vars
+        self._cell_vars = old_cell_vars
 
         return func
 
@@ -579,12 +786,22 @@ class Compiler:
 
         elif isinstance(node, Identifier):
             name = node.name
-            slot = self._get_local(name)
-            if slot is not None:
-                self._emit(OpCode.LOAD_LOCAL, slot)
+            # Check if it's a cell var (local that's captured by inner function)
+            cell_slot = self._get_cell_var(name)
+            if cell_slot is not None:
+                self._emit(OpCode.LOAD_CELL, cell_slot)
             else:
-                idx = self._add_name(name)
-                self._emit(OpCode.LOAD_NAME, idx)
+                slot = self._get_local(name)
+                if slot is not None:
+                    self._emit(OpCode.LOAD_LOCAL, slot)
+                else:
+                    # Check if it's a free variable (from outer scope)
+                    closure_slot = self._get_free_var(name)
+                    if closure_slot is not None:
+                        self._emit(OpCode.LOAD_CLOSURE, closure_slot)
+                    else:
+                        idx = self._add_name(name)
+                        self._emit(OpCode.LOAD_NAME, idx)
 
         elif isinstance(node, ThisExpression):
             self._emit(OpCode.THIS)
@@ -730,13 +947,21 @@ class Compiler:
                 if node.operator == "=":
                     self._compile_expression(node.right)
                 else:
-                    # Compound assignment
-                    slot = self._get_local(name)
-                    if slot is not None:
-                        self._emit(OpCode.LOAD_LOCAL, slot)
+                    # Compound assignment - load current value first
+                    cell_slot = self._get_cell_var(name)
+                    if cell_slot is not None:
+                        self._emit(OpCode.LOAD_CELL, cell_slot)
                     else:
-                        idx = self._add_name(name)
-                        self._emit(OpCode.LOAD_NAME, idx)
+                        slot = self._get_local(name)
+                        if slot is not None:
+                            self._emit(OpCode.LOAD_LOCAL, slot)
+                        else:
+                            closure_slot = self._get_free_var(name)
+                            if closure_slot is not None:
+                                self._emit(OpCode.LOAD_CLOSURE, closure_slot)
+                            else:
+                                idx = self._add_name(name)
+                                self._emit(OpCode.LOAD_NAME, idx)
                     self._compile_expression(node.right)
                     op = node.operator[:-1]  # Remove '='
                     op_map = {
@@ -750,12 +975,20 @@ class Compiler:
                     self._emit(op_map[op])
 
                 self._emit(OpCode.DUP)
-                slot = self._get_local(name)
-                if slot is not None:
-                    self._emit(OpCode.STORE_LOCAL, slot)
+                cell_slot = self._get_cell_var(name)
+                if cell_slot is not None:
+                    self._emit(OpCode.STORE_CELL, cell_slot)
                 else:
-                    idx = self._add_name(name)
-                    self._emit(OpCode.STORE_NAME, idx)
+                    slot = self._get_local(name)
+                    if slot is not None:
+                        self._emit(OpCode.STORE_LOCAL, slot)
+                    else:
+                        closure_slot = self._get_free_var(name)
+                        if closure_slot is not None:
+                            self._emit(OpCode.STORE_CLOSURE, closure_slot)
+                        else:
+                            idx = self._add_name(name)
+                            self._emit(OpCode.STORE_NAME, idx)
                 self._emit(OpCode.POP)
 
             elif isinstance(node.left, MemberExpression):

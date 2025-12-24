@@ -426,6 +426,8 @@ class JSContext:
             err.set("message", to_string(message) if message is not UNDEFINED else "")
             err.set("name", error_name)
             err.set("stack", "")  # Stack trace placeholder
+            err.set("lineNumber", None)  # Will be set when error is thrown
+            err.set("columnNumber", None)  # Will be set when error is thrown
             return err
 
         constructor = JSCallableObject(error_constructor)

@@ -275,7 +275,7 @@ class Parser:
                 init = VariableDeclaration(declarations)
                 self._expect(TokenType.SEMICOLON, "Expected ';' after for init")
         else:
-            # Expression init (could also be for-in with identifier or member expression)
+            # Expression init (could also be for-in/for-of with identifier or member expression)
             # Parse with exclude_in=True so 'in' isn't treated as binary operator
             expr = self._parse_expression(exclude_in=True)
             if self._match(TokenType.IN):
@@ -284,6 +284,12 @@ class Parser:
                 self._expect(TokenType.RPAREN, "Expected ')' after for-in")
                 body = self._parse_statement()
                 return ForInStatement(expr, right, body)
+            elif self._match(TokenType.OF):
+                # for (x of iterable) or for (a.x of iterable)
+                right = self._parse_expression()
+                self._expect(TokenType.RPAREN, "Expected ')' after for-of")
+                body = self._parse_statement()
+                return ForOfStatement(expr, right, body)
             init = expr
             self._expect(TokenType.SEMICOLON, "Expected ';' after for init")
 

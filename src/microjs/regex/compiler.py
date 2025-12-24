@@ -370,14 +370,20 @@ class RegexCompiler:
 
     def _compile_optional(self, body: Node, greedy: bool):
         """Compile ? quantifier."""
+        # Find capture groups in body to reset when skipping
+        capture_groups = self._find_capture_groups(body)
+
         if greedy:
-            # Try match first
+            # Try match first, skip as backup
+            # Reset captures first (they should be undefined if we backtrack to skip)
+            self._emit_capture_reset(capture_groups)
             split_idx = self._emit(Op.SPLIT_FIRST, 0)
             self._compile_node(body)
             self._patch(split_idx, Op.SPLIT_FIRST, self._current_offset())
         else:
-            # Try skip first
+            # Try skip first, match as backup
             split_idx = self._emit(Op.SPLIT_NEXT, 0)
+            self._emit_capture_reset(capture_groups)
             self._compile_node(body)
             self._patch(split_idx, Op.SPLIT_NEXT, self._current_offset())
 

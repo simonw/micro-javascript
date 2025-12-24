@@ -143,3 +143,93 @@ class TestStringSplit:
         result = ctx.eval('"a,b,c,d".split(/,/, 2)')
         assert len(result) == 2
         assert result == ["a", "b"]
+
+
+class TestStringTrimStart:
+    """Test String.prototype.trimStart()."""
+
+    def test_trimStart_basic(self):
+        """trimStart removes leading whitespace."""
+        ctx = JSContext()
+        result = ctx.eval('"  hello".trimStart()')
+        assert result == "hello"
+
+    def test_trimStart_preserves_trailing(self):
+        """trimStart preserves trailing whitespace."""
+        ctx = JSContext()
+        result = ctx.eval('"  hello  ".trimStart()')
+        assert result == "hello  "
+
+    def test_trimStart_no_change(self):
+        """trimStart on string without leading whitespace."""
+        ctx = JSContext()
+        result = ctx.eval('"hello".trimStart()')
+        assert result == "hello"
+
+    def test_trimStart_all_whitespace(self):
+        """trimStart on all whitespace string."""
+        ctx = JSContext()
+        result = ctx.eval('"   ".trimStart()')
+        assert result == ""
+
+
+class TestStringTrimEnd:
+    """Test String.prototype.trimEnd()."""
+
+    def test_trimEnd_basic(self):
+        """trimEnd removes trailing whitespace."""
+        ctx = JSContext()
+        result = ctx.eval('"hello  ".trimEnd()')
+        assert result == "hello"
+
+    def test_trimEnd_preserves_leading(self):
+        """trimEnd preserves leading whitespace."""
+        ctx = JSContext()
+        result = ctx.eval('"  hello  ".trimEnd()')
+        assert result == "  hello"
+
+    def test_trimEnd_no_change(self):
+        """trimEnd on string without trailing whitespace."""
+        ctx = JSContext()
+        result = ctx.eval('"hello".trimEnd()')
+        assert result == "hello"
+
+    def test_trimEnd_all_whitespace(self):
+        """trimEnd on all whitespace string."""
+        ctx = JSContext()
+        result = ctx.eval('"   ".trimEnd()')
+        assert result == ""
+
+
+class TestStringReplaceAll:
+    """Test String.prototype.replaceAll()."""
+
+    def test_replaceAll_basic(self):
+        """replaceAll replaces all occurrences."""
+        ctx = JSContext()
+        result = ctx.eval('"abcabc".replaceAll("b", "x")')
+        assert result == "axcaxc"
+
+    def test_replaceAll_no_match(self):
+        """replaceAll with no match returns original."""
+        ctx = JSContext()
+        result = ctx.eval('"hello".replaceAll("x", "y")')
+        assert result == "hello"
+
+    def test_replaceAll_with_dollar_ampersand(self):
+        """replaceAll with $& replacement pattern."""
+        ctx = JSContext()
+        result = ctx.eval('"abcabc".replaceAll("b", "$&$&")')
+        assert result == "abbcabbc"
+
+    def test_replaceAll_with_dollar_dollar(self):
+        """replaceAll with $$ replacement pattern (literal $)."""
+        ctx = JSContext()
+        result = ctx.eval('"abcabc".replaceAll("b", "$$")')
+        assert result == "a$ca$c"
+
+    def test_replaceAll_complex_replacement(self):
+        """replaceAll with combined $$ and $& patterns."""
+        ctx = JSContext()
+        result = ctx.eval('"abcabc".replaceAll("b", "a$$b$&")')
+        assert result == "aa$bbcaa$bbc"

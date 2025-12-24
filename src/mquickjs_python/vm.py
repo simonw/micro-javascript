@@ -808,9 +808,18 @@ class VM:
 
     def _compare(self, a: JSValue, b: JSValue) -> int:
         """Compare two values. Returns -1, 0, or 1."""
-        # Handle NaN
+        # Both strings: compare as strings
+        if isinstance(a, str) and isinstance(b, str):
+            if a < b:
+                return -1
+            if a > b:
+                return 1
+            return 0
+
+        # Convert to numbers for numeric comparison
         a_num = to_number(a)
         b_num = to_number(b)
+        # Handle NaN - any comparison with NaN returns false, we return 1
         if math.isnan(a_num) or math.isnan(b_num):
             return 1  # NaN comparisons are always false
         if a_num < b_num:
@@ -895,9 +904,9 @@ class VM:
             # Built-in array methods
             array_methods = [
                 "push", "pop", "shift", "unshift", "toString", "join",
-                "map", "filter", "reduce", "forEach", "indexOf", "lastIndexOf",
-                "find", "findIndex", "some", "every", "concat", "slice",
-                "reverse", "includes",
+                "map", "filter", "reduce", "reduceRight", "forEach", "indexOf", "lastIndexOf",
+                "find", "findIndex", "some", "every", "concat", "slice", "splice",
+                "reverse", "includes", "sort",
             ]
             if key_str in array_methods:
                 return self._make_array_method(obj, key_str)
@@ -958,8 +967,8 @@ class VM:
             string_methods = [
                 "charAt", "charCodeAt", "indexOf", "lastIndexOf",
                 "substring", "slice", "split", "toLowerCase", "toUpperCase",
-                "trim", "concat", "repeat", "startsWith", "endsWith",
-                "includes", "replace", "match", "search", "toString",
+                "trim", "trimStart", "trimEnd", "concat", "repeat", "startsWith", "endsWith",
+                "includes", "replace", "replaceAll", "match", "search", "toString",
             ]
             if key_str in string_methods:
                 return self._make_string_method(obj, key_str)
@@ -1001,12 +1010,18 @@ class VM:
                 arr._elements.insert(i, arg)
             return arr.length
 
+        def array_elem_to_string(elem):
+            # undefined and null convert to empty string in array join/toString
+            if elem is UNDEFINED or elem is NULL:
+                return ""
+            return to_string(elem)
+
         def toString_fn(*args):
-            return ",".join(to_string(elem) for elem in arr._elements)
+            return ",".join(array_elem_to_string(elem) for elem in arr._elements)
 
         def join_fn(*args):
             sep = "," if not args else to_string(args[0])
-            return sep.join(to_string(elem) for elem in arr._elements)
+            return sep.join(array_elem_to_string(elem) for elem in arr._elements)
 
         def map_fn(*args):
             callback = args[0] if args else None
@@ -1047,6 +1062,46 @@ class VM:
                 elem = arr._elements[i]
                 acc = vm._call_callback(callback, [acc, elem, i, arr])
             return acc
+
+        def reduceRight_fn(*args):
+            callback = args[0] if args else None
+            initial = args[1] if len(args) > 1 else UNDEFINED
+            if not callback:
+                raise JSTypeError("reduceRight callback is not a function")
+            acc = initial
+            length = len(arr._elements)
+            start_idx = length - 1
+            if acc is UNDEFINED:
+                if not arr._elements:
+                    raise JSTypeError("Reduce of empty array with no initial value")
+                acc = arr._elements[length - 1]
+                start_idx = length - 2
+            for i in range(start_idx, -1, -1):
+                elem = arr._elements[i]
+                acc = vm._call_callback(callback, [acc, elem, i, arr])
+            return acc
+
+        def splice_fn(*args):
+            start = int(to_number(args[0])) if args else 0
+            delete_count = int(to_number(args[1])) if len(args) > 1 else len(arr._elements) - start
+            items = list(args[2:]) if len(args) > 2 else []
+
+            length = len(arr._elements)
+            if start < 0:
+                start = max(0, length + start)
+            else:
+                start = min(start, length)
+
+            delete_count = max(0, min(delete_count, length - start))
+
+            # Create result array with deleted elements
+            result = JSArray()
+            result._elements = arr._elements[start:start + delete_count]
+
+            # Modify original array
+            arr._elements = arr._elements[:start] + items + arr._elements[start + delete_count:]
+
+            return result
 
         def forEach_fn(*args):
             callback = args[0] if args else None
@@ -1151,6 +1206,41 @@ class VM:
                     return True
             return False
 
+        def sort_fn(*args):
+            comparator = args[0] if args else None
+
+            # Default string comparison
+            def default_compare(a, b):
+                # Convert to strings and compare
+                str_a = to_string(a)
+                str_b = to_string(b)
+                if str_a < str_b:
+                    return -1
+                if str_a > str_b:
+                    return 1
+                return 0
+
+            def compare_fn(a, b):
+                # undefined values always sort to the end per JS spec
+                if a is UNDEFINED and b is UNDEFINED:
+                    return 0
+                if a is UNDEFINED:
+                    return 1
+                if b is UNDEFINED:
+                    return -1
+                # Use comparator if provided
+                if comparator and (callable(comparator) or isinstance(comparator, JSFunction)):
+                    result = vm._call_callback(comparator, [a, b])
+                    # Convert to integer for cmp_to_key
+                    num = to_number(result) if result is not UNDEFINED else 0
+                    return int(num) if isinstance(num, (int, float)) else 0
+                return default_compare(a, b)
+
+            # Sort using Python's sort with custom key
+            from functools import cmp_to_key
+            arr._elements.sort(key=cmp_to_key(compare_fn))
+            return arr
+
         methods = {
             "push": push_fn,
             "pop": pop_fn,
@@ -1170,8 +1260,11 @@ class VM:
             "every": every_fn,
             "concat": concat_fn,
             "slice": slice_fn,
+            "splice": splice_fn,
             "reverse": reverse_fn,
             "includes": includes_fn,
+            "sort": sort_fn,
+            "reduceRight": reduceRight_fn,
         }
         return methods.get(method, lambda *args: UNDEFINED)
 
@@ -1570,6 +1663,12 @@ class VM:
         def trim(*args):
             return s.strip()
 
+        def trimStart(*args):
+            return s.lstrip()
+
+        def trimEnd(*args):
+            return s.rstrip()
+
         def concat(*args):
             result = s
             for arg in args:
@@ -1633,7 +1732,40 @@ class VM:
             else:
                 # String replace - only replace first occurrence
                 search = to_string(pattern)
-                return s.replace(search, replacement, 1)
+                # Handle special replacement patterns
+                repl = replacement
+                if "$$" in repl:
+                    repl = repl.replace("$$", "\x00DOLLAR\x00")
+                if "$&" in repl:
+                    repl = repl.replace("$&", search)
+                repl = repl.replace("\x00DOLLAR\x00", "$")
+                # Find first occurrence and replace
+                idx = s.find(search)
+                if idx >= 0:
+                    return s[:idx] + repl + s[idx + len(search):]
+                return s
+
+        def replaceAll(*args):
+            pattern = args[0] if args else ""
+            replacement = to_string(args[1]) if len(args) > 1 else "undefined"
+
+            if isinstance(pattern, JSRegExp):
+                # replaceAll with regex requires global flag
+                if "g" not in pattern._flags:
+                    raise JSTypeError("replaceAll called with a non-global RegExp")
+                return replace(pattern, replacement)
+            else:
+                # String replaceAll - replace all occurrences
+                search = to_string(pattern)
+                # Handle special replacement patterns
+                if "$$" in replacement:
+                    # $$ -> $ (must be done before other replacements)
+                    replacement = replacement.replace("$$", "\x00DOLLAR\x00")
+                if "$&" in replacement:
+                    # $& -> the matched substring
+                    replacement = replacement.replace("$&", search)
+                replacement = replacement.replace("\x00DOLLAR\x00", "$")
+                return s.replace(search, replacement)
 
         def match(*args):
             pattern = args[0] if args else None
@@ -1715,12 +1847,15 @@ class VM:
             "toLowerCase": toLowerCase,
             "toUpperCase": toUpperCase,
             "trim": trim,
+            "trimStart": trimStart,
+            "trimEnd": trimEnd,
             "concat": concat,
             "repeat": repeat,
             "startsWith": startsWith,
             "endsWith": endsWith,
             "includes": includes,
             "replace": replace,
+            "replaceAll": replaceAll,
             "match": match,
             "search": search,
             "toString": toString,

@@ -43,6 +43,7 @@ class JSContext:
         # Basic type constructors (minimal implementations)
         self._globals["Object"] = self._object_constructor
         self._globals["Array"] = self._array_constructor
+        self._globals["Error"] = self._error_constructor
 
     def _console_log(self, *args: JSValue) -> None:
         """Console.log implementation."""
@@ -60,6 +61,13 @@ class JSContext:
         for arg in args:
             arr.push(arg)
         return arr
+
+    def _error_constructor(self, message: JSValue = UNDEFINED) -> JSObject:
+        """Error constructor."""
+        err = JSObject()
+        err.set("message", to_string(message) if message is not UNDEFINED else "")
+        err.set("name", "Error")
+        return err
 
     def eval(self, code: str) -> Any:
         """Evaluate JavaScript code and return the result.

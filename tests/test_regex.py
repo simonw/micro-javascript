@@ -435,14 +435,12 @@ class TestLookahead:
 class TestLookbehind:
     """Test lookbehind assertions."""
 
-    @pytest.mark.xfail(reason="Lookbehind not yet implemented")
     def test_positive_lookbehind(self):
         """Positive lookbehind (?<=...)."""
         re = RegExp(r"(?<=foo)bar")
         assert re.test("foobar") is True
         assert re.test("bazbar") is False
 
-    @pytest.mark.xfail(reason="Lookbehind not yet implemented")
     def test_negative_lookbehind(self):
         """Negative lookbehind (?<!...)."""
         re = RegExp(r"(?<!foo)bar")

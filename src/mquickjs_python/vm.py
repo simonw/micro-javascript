@@ -176,8 +176,15 @@ class VM:
                 arg = bytecode[frame.ip]
                 frame.ip += 1
 
-            # Execute opcode
-            self._execute_opcode(op, arg, frame)
+            # Execute opcode - wrap in try/except to catch Python JS exceptions
+            try:
+                self._execute_opcode(op, arg, frame)
+            except JSTypeError as e:
+                # Convert Python JSTypeError to JavaScript TypeError
+                self._handle_python_exception("TypeError", str(e))
+            except JSReferenceError as e:
+                # Convert Python JSReferenceError to JavaScript ReferenceError
+                self._handle_python_exception("ReferenceError", str(e))
 
             # Check if frame was popped (return)
             if not self.call_stack:
@@ -526,12 +533,16 @@ class VM:
                 self.stack.append(False)
             else:
                 # Get constructor's prototype property
-                if isinstance(constructor, JSFunction) and hasattr(constructor, '_prototype'):
+                # For JSFunction, check _prototype attribute (if set and not None)
+                # For JSCallableObject and other constructors, use get("prototype")
+                proto = None
+                if isinstance(constructor, JSFunction) and getattr(constructor, '_prototype', None) is not None:
                     proto = constructor._prototype
-                elif isinstance(constructor, JSObject) and hasattr(constructor, '_prototype'):
-                    proto = constructor._prototype
-                else:
-                    proto = constructor.get("prototype") if isinstance(constructor, JSObject) else None
+                elif isinstance(constructor, JSObject):
+                    # Try get("prototype") first for callable objects, fall back to _prototype
+                    proto = constructor.get("prototype")
+                    if proto is None or proto is UNDEFINED:
+                        proto = getattr(constructor, '_prototype', None)
 
                 # Walk the prototype chain
                 result = False
@@ -1437,7 +1448,14 @@ class VM:
             digits = int(to_number(args[0])) if args else 0
             if digits < 0 or digits > 100:
                 raise JSReferenceError("toFixed() digits out of range")
-            return f"{n:.{digits}f}"
+            # Use JavaScript-style rounding (round half away from zero)
+            rounded = js_round(n, digits)
+            result = f"{rounded:.{digits}f}"
+            # Handle negative zero: if n was negative but rounded to 0, keep the sign
+            if n < 0 or (n == 0 and math.copysign(1, n) == -1):
+                if rounded == 0:
+                    result = "-" + result.lstrip("-")
+            return result
 
         def toString(*args):
             radix = int(to_number(args[0])) if args else 10
@@ -1881,13 +1899,32 @@ class VM:
             return
 
         if isinstance(obj, JSArray):
+            # Special handling for length property
+            if key_str == "length":
+                new_len = int(to_number(value))
+                obj.length = new_len
+                return
+            # Strict array mode: reject non-integer indices
+            # Valid indices are integer strings in range [0, 2^32-2]
             try:
                 idx = int(key_str)
-                if idx >= 0:
+                if idx >= 0 and str(idx) == key_str:
                     obj.set_index(idx, value)
                     return
             except (ValueError, IndexError):
                 pass
+            # If key looks like a number but isn't a valid integer index, throw
+            # This includes NaN, Infinity, -Infinity, floats like "1.2"
+            invalid_keys = ("NaN", "Infinity", "-Infinity")
+            if key_str in invalid_keys:
+                raise JSTypeError(f"Cannot set property '{key_str}' on array")
+            # Check if it looks like a float
+            try:
+                float_val = float(key_str)
+                if not float_val.is_integer() or math.isinf(float_val) or math.isnan(float_val):
+                    raise JSTypeError(f"Cannot set property '{key_str}' on array")
+            except ValueError:
+                pass  # Not a number, allow as string property
             obj.set(key_str, value)
         elif isinstance(obj, JSObject):
             # Check for setter
@@ -2128,3 +2165,21 @@ class VM:
                 raise JSError(to_string(msg) if msg else "Error")
             else:
                 raise JSError(to_string(exc))
+
+    def _handle_python_exception(self, error_type: str, message: str) -> None:
+        """Convert a Python exception to a JavaScript exception and throw it."""
+        # Get the error constructor from globals
+        error_constructor = self.globals.get(error_type)
+        if error_constructor and hasattr(error_constructor, '_call_fn'):
+            # Create the error object using the constructor
+            # Strip the "TypeError: " prefix from the message if present
+            if message.startswith(f"{error_type}: "):
+                message = message[len(error_type) + 2:]
+            error_obj = error_constructor._call_fn(message)
+            self._throw(error_obj)
+        else:
+            # Fall back to a plain object with message property
+            error_obj = JSObject()
+            error_obj.set("name", error_type)
+            error_obj.set("message", message)
+            self._throw(error_obj)

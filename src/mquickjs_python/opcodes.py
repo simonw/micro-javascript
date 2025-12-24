@@ -72,6 +72,7 @@ class OpCode(IntEnum):
 
     # Type operations
     TYPEOF = auto()       # typeof operator
+    TYPEOF_NAME = auto()  # typeof with name lookup (returns "undefined" for undeclared vars)
     INSTANCEOF = auto()   # instanceof operator
     IN = auto()           # in operator
 
@@ -130,7 +131,7 @@ def disassemble(bytecode: bytes, constants: list) -> str:
             OpCode.JUMP, OpCode.JUMP_IF_FALSE, OpCode.JUMP_IF_TRUE,
             OpCode.CALL, OpCode.CALL_METHOD, OpCode.NEW,
             OpCode.BUILD_ARRAY, OpCode.BUILD_OBJECT, OpCode.BUILD_REGEX,
-            OpCode.TRY_START, OpCode.MAKE_CLOSURE,
+            OpCode.TRY_START, OpCode.MAKE_CLOSURE, OpCode.TYPEOF_NAME,
         ):
             # Has argument
             if i + 1 < len(bytecode):

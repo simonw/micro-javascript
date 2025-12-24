@@ -82,12 +82,22 @@ class JSContext:
 
     def _create_object_constructor(self) -> JSCallableObject:
         """Create the Object constructor with static methods."""
+        # Create Object.prototype first
+        object_prototype = JSObject()
+
         # Constructor function - new Object() creates empty object
         def object_constructor(*args):
-            return JSObject()
+            obj = JSObject()
+            obj._prototype = object_prototype
+            return obj
 
         # Create a callable object that acts as constructor
         obj_constructor = JSCallableObject(object_constructor)
+        obj_constructor._prototype = object_prototype
+        object_prototype.set("constructor", obj_constructor)
+
+        # Store for other constructors to use
+        self._object_prototype = object_prototype
 
         def keys_fn(*args):
             obj = args[0] if args else UNDEFINED
@@ -130,24 +140,55 @@ class JSContext:
                         target.set(k, source.get(k))
             return target
 
+        def get_prototype_of(*args):
+            obj = args[0] if args else UNDEFINED
+            if not isinstance(obj, JSObject):
+                return NULL
+            return getattr(obj, '_prototype', NULL) or NULL
+
+        def set_prototype_of(*args):
+            if len(args) < 2:
+                return UNDEFINED
+            obj, proto = args[0], args[1]
+            if not isinstance(obj, JSObject):
+                return obj
+            if proto is NULL or proto is None:
+                obj._prototype = None
+            elif isinstance(proto, JSObject):
+                obj._prototype = proto
+            return obj
+
         obj_constructor.set("keys", keys_fn)
         obj_constructor.set("values", values_fn)
         obj_constructor.set("entries", entries_fn)
         obj_constructor.set("assign", assign_fn)
+        obj_constructor.set("getPrototypeOf", get_prototype_of)
+        obj_constructor.set("setPrototypeOf", set_prototype_of)
 
         return obj_constructor
 
     def _create_array_constructor(self) -> JSCallableObject:
         """Create the Array constructor with static methods."""
+        # Create Array.prototype (inherits from Object.prototype)
+        array_prototype = JSArray()
+        array_prototype._prototype = self._object_prototype
+
         def array_constructor(*args):
             if len(args) == 1 and isinstance(args[0], (int, float)):
-                return JSArray(int(args[0]))
-            arr = JSArray()
-            for arg in args:
-                arr.push(arg)
+                arr = JSArray(int(args[0]))
+            else:
+                arr = JSArray()
+                for arg in args:
+                    arr.push(arg)
+            arr._prototype = array_prototype
             return arr
 
         arr_constructor = JSCallableObject(array_constructor)
+        arr_constructor._prototype = array_prototype
+        array_prototype.set("constructor", arr_constructor)
+
+        # Store for other uses
+        self._array_prototype = array_prototype
 
         # Array.isArray()
         def is_array(*args):

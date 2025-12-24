@@ -487,13 +487,13 @@ class RegexVM:
                 saved_sp = sp
                 saved_captures = [c.copy() for c in captures]
 
-                # Create sub-execution for lookahead
-                la_result = self._execute_lookahead(string, sp, pc + 1, end_offset)
+                # Create sub-execution for lookahead, passing current captures
+                la_captures = self._execute_lookahead(string, sp, pc + 1, end_offset, captures)
 
-                if la_result:
-                    # Lookahead succeeded - restore position and continue after
+                if la_captures is not None:
+                    # Lookahead succeeded - restore position but keep captures from lookahead
                     sp = saved_sp
-                    captures = saved_captures
+                    captures = la_captures  # Use captures from lookahead
                     pc = end_offset
                 else:
                     # Lookahead failed
@@ -506,12 +506,12 @@ class RegexVM:
                 saved_sp = sp
                 saved_captures = [c.copy() for c in captures]
 
-                la_result = self._execute_lookahead(string, sp, pc + 1, end_offset)
+                la_captures = self._execute_lookahead(string, sp, pc + 1, end_offset, captures)
 
-                if not la_result:
+                if la_captures is None:
                     # Negative lookahead succeeded (inner didn't match)
                     sp = saved_sp
-                    captures = saved_captures
+                    captures = saved_captures  # Keep original captures
                     pc = end_offset
                 else:
                     # Negative lookahead failed (inner matched)
@@ -606,12 +606,17 @@ class RegexVM:
         after = pos < len(string) and is_word_char(string[pos])
         return before != after
 
-    def _execute_lookahead(self, string: str, start_pos: int, start_pc: int, end_pc: int) -> bool:
-        """Execute bytecode for lookahead assertion."""
-        # Simple recursive call with limited bytecode range
+    def _execute_lookahead(self, string: str, start_pos: int, start_pc: int, end_pc: int,
+                            input_captures: List[List[int]]) -> Optional[List[List[int]]]:
+        """Execute bytecode for lookahead assertion.
+
+        Returns the captures list if lookahead succeeds, None if it fails.
+        This preserves captures made inside the lookahead.
+        """
+        # Start with a copy of input captures to preserve outer captures
         pc = start_pc
         sp = start_pos
-        captures = [[-1, -1] for _ in range(self.capture_count)]
+        captures = [c.copy() for c in input_captures]
         registers: List[int] = []
         stack: List[Tuple] = []
         step_count = 0
@@ -626,21 +631,32 @@ class RegexVM:
                 raise RegexStackOverflow("Regex stack overflow")
 
             if pc >= end_pc:
-                return False
+                return None
 
             instr = self.bytecode[pc]
             opcode = instr[0]
 
             if opcode == Op.LOOKAHEAD_END:
-                return True  # Lookahead content matched
+                return captures  # Return captures made inside lookahead
 
-            # Reuse main execution logic for other opcodes
-            # This is simplified - in production would share more code
-            if opcode == Op.CHAR:
+            # Handle SAVE_START/SAVE_END to capture groups inside lookahead
+            if opcode == Op.SAVE_START:
+                group_idx = instr[1]
+                if group_idx < len(captures):
+                    captures[group_idx][0] = sp
+                pc += 1
+
+            elif opcode == Op.SAVE_END:
+                group_idx = instr[1]
+                if group_idx < len(captures):
+                    captures[group_idx][1] = sp
+                pc += 1
+
+            elif opcode == Op.CHAR:
                 char_code = instr[1]
                 if sp >= len(string):
                     if not stack:
-                        return False
+                        return None
                     pc, sp, captures, registers = stack.pop()
                     continue
                 ch = string[sp]
@@ -653,13 +669,13 @@ class RegexVM:
                     pc += 1
                 else:
                     if not stack:
-                        return False
+                        return None
                     pc, sp, captures, registers = stack.pop()
 
             elif opcode == Op.DOT:
                 if sp >= len(string) or string[sp] == '\n':
                     if not stack:
-                        return False
+                        return None
                     pc, sp, captures, registers = stack.pop()
                     continue
                 sp += 1
@@ -679,7 +695,7 @@ class RegexVM:
                 pc = instr[1]
 
             elif opcode == Op.MATCH:
-                return True
+                return captures
 
             else:
                 # Handle other opcodes similarly to main loop

@@ -9,7 +9,7 @@ from .opcodes import OpCode
 from .compiler import CompiledFunction
 from .values import (
     UNDEFINED, NULL, JSUndefined, JSNull, JSValue,
-    JSObject, JSArray, JSFunction, JSRegExp,
+    JSObject, JSArray, JSFunction, JSRegExp, JSTypedArray,
     to_boolean, to_number, to_string, js_typeof,
 )
 from .errors import (
@@ -870,6 +870,18 @@ class VM:
 
         key_str = to_string(key) if not isinstance(key, str) else key
 
+        if isinstance(obj, JSTypedArray):
+            # Typed array index access
+            try:
+                idx = int(key_str)
+                if idx >= 0:
+                    return obj.get_index(idx)
+            except ValueError:
+                pass
+            if key_str == "length":
+                return obj.length
+            return obj.get(key_str)
+
         if isinstance(obj, JSArray):
             # Array index access
             try:
@@ -1721,6 +1733,17 @@ class VM:
             raise JSTypeError(f"Cannot set property of {obj}")
 
         key_str = to_string(key) if not isinstance(key, str) else key
+
+        if isinstance(obj, JSTypedArray):
+            try:
+                idx = int(key_str)
+                if idx >= 0:
+                    obj.set_index(idx, value)
+                    return
+            except ValueError:
+                pass
+            obj.set(key_str, value)
+            return
 
         if isinstance(obj, JSArray):
             try:

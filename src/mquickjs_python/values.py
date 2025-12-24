@@ -397,3 +397,137 @@ class JSBoundMethod:
 
     def __call__(self, this_val, *args):
         return self._fn(this_val, *args)
+
+
+class JSTypedArray(JSObject):
+    """Base class for JavaScript typed arrays."""
+
+    # Subclasses override these
+    _element_size = 1  # bytes per element
+    _type_name = "TypedArray"
+
+    def __init__(self, length: int = 0):
+        super().__init__()
+        self._data = [0] * length
+
+    @property
+    def length(self) -> int:
+        return len(self._data)
+
+    def get_index(self, index: int):
+        if 0 <= index < len(self._data):
+            return self._data[index]
+        return UNDEFINED
+
+    def set_index(self, index: int, value) -> None:
+        if 0 <= index < len(self._data):
+            self._data[index] = self._coerce_value(value)
+
+    def _coerce_value(self, value):
+        """Coerce value to the appropriate type. Override in subclasses."""
+        return int(value) if isinstance(value, (int, float)) else 0
+
+    def __repr__(self) -> str:
+        return f"{self._type_name}({self._data})"
+
+
+class JSInt32Array(JSTypedArray):
+    """JavaScript Int32Array."""
+
+    _element_size = 4
+    _type_name = "Int32Array"
+
+    def _coerce_value(self, value):
+        """Coerce to signed 32-bit integer."""
+        if isinstance(value, (int, float)):
+            v = int(value)
+            # Handle overflow to signed 32-bit
+            v = v & 0xFFFFFFFF
+            if v >= 0x80000000:
+                v -= 0x100000000
+            return v
+        return 0
+
+
+class JSUint32Array(JSTypedArray):
+    """JavaScript Uint32Array."""
+
+    _element_size = 4
+    _type_name = "Uint32Array"
+
+    def _coerce_value(self, value):
+        """Coerce to unsigned 32-bit integer."""
+        if isinstance(value, (int, float)):
+            return int(value) & 0xFFFFFFFF
+        return 0
+
+
+class JSFloat64Array(JSTypedArray):
+    """JavaScript Float64Array."""
+
+    _element_size = 8
+    _type_name = "Float64Array"
+
+    def _coerce_value(self, value):
+        """Coerce to float."""
+        if isinstance(value, (int, float)):
+            return float(value)
+        return 0.0
+
+
+class JSUint8Array(JSTypedArray):
+    """JavaScript Uint8Array."""
+
+    _element_size = 1
+    _type_name = "Uint8Array"
+
+    def _coerce_value(self, value):
+        """Coerce to unsigned 8-bit integer."""
+        if isinstance(value, (int, float)):
+            return int(value) & 0xFF
+        return 0
+
+
+class JSInt8Array(JSTypedArray):
+    """JavaScript Int8Array."""
+
+    _element_size = 1
+    _type_name = "Int8Array"
+
+    def _coerce_value(self, value):
+        """Coerce to signed 8-bit integer."""
+        if isinstance(value, (int, float)):
+            v = int(value) & 0xFF
+            if v >= 0x80:
+                v -= 0x100
+            return v
+        return 0
+
+
+class JSInt16Array(JSTypedArray):
+    """JavaScript Int16Array."""
+
+    _element_size = 2
+    _type_name = "Int16Array"
+
+    def _coerce_value(self, value):
+        """Coerce to signed 16-bit integer."""
+        if isinstance(value, (int, float)):
+            v = int(value) & 0xFFFF
+            if v >= 0x8000:
+                v -= 0x10000
+            return v
+        return 0
+
+
+class JSUint16Array(JSTypedArray):
+    """JavaScript Uint16Array."""
+
+    _element_size = 2
+    _type_name = "Uint16Array"
+
+    def _coerce_value(self, value):
+        """Coerce to unsigned 16-bit integer."""
+        if isinstance(value, (int, float)):
+            return int(value) & 0xFFFF
+        return 0

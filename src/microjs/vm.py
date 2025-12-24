@@ -1490,6 +1490,13 @@ class VM:
             arguments_obj._elements = list(args)
             locals_list[arguments_slot] = arguments_obj
 
+        # For named function expressions, bind the function name to itself
+        # This allows recursive calls like: var f = function fact(n) { return fact(n-1); }
+        if compiled.name and compiled.name in compiled.locals:
+            name_slot = compiled.locals.index(compiled.name)
+            if name_slot >= len(compiled.params) + 1:  # After params and arguments
+                locals_list[name_slot] = func
+
         # Get closure cells from the function
         closure_cells = getattr(func, '_closure_cells', None)
 

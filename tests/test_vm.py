@@ -398,3 +398,23 @@ class TestGetterSetter:
             obj.value
         ''')
         assert result == 20  # 10 * 2
+
+class TestTryFinallyBreak:
+    """Test that finally blocks execute before break/continue/return."""
+
+    def test_break_in_try_finally(self):
+        """Break inside try should run finally block first."""
+        ctx = JSContext()
+        result = ctx.eval('''
+            var s = '';
+            for(;;) {
+                try {
+                    s += 't';
+                    break;
+                } finally {
+                    s += 'f';
+                }
+            }
+            s
+        ''')
+        assert result == "tf"

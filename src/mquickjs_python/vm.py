@@ -138,7 +138,7 @@ class VM:
                 OpCode.LOAD_CLOSURE, OpCode.STORE_CLOSURE,
                 OpCode.LOAD_CELL, OpCode.STORE_CELL,
                 OpCode.CALL, OpCode.CALL_METHOD, OpCode.NEW,
-                OpCode.BUILD_ARRAY, OpCode.BUILD_OBJECT,
+                OpCode.BUILD_ARRAY, OpCode.BUILD_OBJECT, OpCode.BUILD_REGEX,
                 OpCode.MAKE_CLOSURE,
             ):
                 arg = bytecode[frame.ip]
@@ -273,6 +273,11 @@ class VM:
                 key_str = to_string(key) if not isinstance(key, str) else key
                 obj.set(key_str, value)
             self.stack.append(obj)
+
+        elif op == OpCode.BUILD_REGEX:
+            pattern, flags = frame.func.constants[arg]
+            regex = JSRegExp(pattern, flags)
+            self.stack.append(regex)
 
         # Arithmetic
         elif op == OpCode.ADD:
@@ -728,7 +733,7 @@ class VM:
                 "charAt", "charCodeAt", "indexOf", "lastIndexOf",
                 "substring", "slice", "split", "toLowerCase", "toUpperCase",
                 "trim", "concat", "repeat", "startsWith", "endsWith",
-                "includes", "replace", "toString",
+                "includes", "replace", "match", "search", "toString",
             ]
             if key_str in string_methods:
                 return self._make_string_method(obj, key_str)
@@ -1061,14 +1066,27 @@ class VM:
             return s[start:end]
 
         def split(*args):
-            sep = to_string(args[0]) if args else UNDEFINED
+            sep = args[0] if args else UNDEFINED
             limit = int(to_number(args[1])) if len(args) > 1 else -1
+
             if sep is UNDEFINED:
                 parts = [s]
-            elif sep == "":
+            elif isinstance(sep, JSRegExp):
+                # Split with regex
+                import re
+                flags = 0
+                if "i" in sep._flags:
+                    flags |= re.IGNORECASE
+                if "m" in sep._flags:
+                    flags |= re.MULTILINE
+                pattern = re.compile(sep._pattern, flags)
+                # Python split includes groups, which matches JS behavior
+                parts = pattern.split(s)
+            elif to_string(sep) == "":
                 parts = list(s)
             else:
-                parts = s.split(sep)
+                parts = s.split(to_string(sep))
+
             if limit >= 0:
                 parts = parts[:limit]
             arr = JSArray()
@@ -1112,10 +1130,108 @@ class VM:
             return search in s[pos:]
 
         def replace(*args):
-            search = to_string(args[0]) if args else ""
+            pattern = args[0] if args else ""
             replacement = to_string(args[1]) if len(args) > 1 else "undefined"
-            # Only replace first occurrence
-            return s.replace(search, replacement, 1)
+
+            if isinstance(pattern, JSRegExp):
+                # Replace with regex
+                import re
+                flags = 0
+                if "i" in pattern._flags:
+                    flags |= re.IGNORECASE
+                if "m" in pattern._flags:
+                    flags |= re.MULTILINE
+                regex = re.compile(pattern._pattern, flags)
+
+                # Handle special replacement patterns
+                def handle_replacement(m):
+                    result = replacement
+                    # $& - the matched substring
+                    result = result.replace("$&", m.group(0))
+                    # $` - portion before match (not commonly used, skip for now)
+                    # $' - portion after match (not commonly used, skip for now)
+                    # $n - nth captured group
+                    for i in range(1, 10):
+                        if m.lastindex and i <= m.lastindex:
+                            result = result.replace(f"${i}", m.group(i) or "")
+                        else:
+                            result = result.replace(f"${i}", "")
+                    return result
+
+                if "g" in pattern._flags:
+                    return regex.sub(handle_replacement, s)
+                else:
+                    return regex.sub(handle_replacement, s, count=1)
+            else:
+                # String replace - only replace first occurrence
+                search = to_string(pattern)
+                return s.replace(search, replacement, 1)
+
+        def match(*args):
+            pattern = args[0] if args else None
+            if pattern is None:
+                # Match empty string
+                arr = JSArray()
+                arr._elements = [""]
+                arr.set("index", 0)
+                arr.set("input", s)
+                return arr
+
+            import re
+            if isinstance(pattern, JSRegExp):
+                flags = 0
+                if "i" in pattern._flags:
+                    flags |= re.IGNORECASE
+                if "m" in pattern._flags:
+                    flags |= re.MULTILINE
+                regex = re.compile(pattern._pattern, flags)
+                is_global = "g" in pattern._flags
+            else:
+                # Convert string to regex
+                regex = re.compile(to_string(pattern))
+                is_global = False
+
+            if is_global:
+                # Global flag: return all matches without groups
+                matches = [m.group(0) for m in regex.finditer(s)]
+                if not matches:
+                    return NULL
+                arr = JSArray()
+                arr._elements = list(matches)
+                return arr
+            else:
+                # Non-global: return first match with groups
+                m = regex.search(s)
+                if m is None:
+                    return NULL
+                arr = JSArray()
+                arr._elements = [m.group(0)]
+                # Add captured groups
+                for i in range(1, len(m.groups()) + 1):
+                    arr._elements.append(m.group(i))
+                arr.set("index", m.start())
+                arr.set("input", s)
+                return arr
+
+        def search(*args):
+            pattern = args[0] if args else None
+            if pattern is None:
+                return 0  # Match empty string at start
+
+            import re
+            if isinstance(pattern, JSRegExp):
+                flags = 0
+                if "i" in pattern._flags:
+                    flags |= re.IGNORECASE
+                if "m" in pattern._flags:
+                    flags |= re.MULTILINE
+                regex = re.compile(pattern._pattern, flags)
+            else:
+                # Convert string to regex
+                regex = re.compile(to_string(pattern))
+
+            m = regex.search(s)
+            return m.start() if m else -1
 
         def toString(*args):
             return s
@@ -1137,6 +1253,8 @@ class VM:
             "endsWith": endsWith,
             "includes": includes,
             "replace": replace,
+            "match": match,
+            "search": search,
             "toString": toString,
         }
         return methods.get(method, lambda *args: UNDEFINED)
@@ -1231,7 +1349,7 @@ class VM:
                     OpCode.LOAD_CLOSURE, OpCode.STORE_CLOSURE,
                     OpCode.LOAD_CELL, OpCode.STORE_CELL,
                     OpCode.CALL, OpCode.CALL_METHOD, OpCode.NEW,
-                    OpCode.BUILD_ARRAY, OpCode.BUILD_OBJECT,
+                    OpCode.BUILD_ARRAY, OpCode.BUILD_OBJECT, OpCode.BUILD_REGEX,
                     OpCode.MAKE_CLOSURE,
                 ):
                     arg = bytecode[frame.ip]

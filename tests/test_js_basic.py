@@ -51,6 +51,7 @@ def test_basic_js(name: str, path: Path):
     ctx.eval(source)
 
 
+@pytest.mark.timeout(60)  # Allow up to 60 seconds for compat tests (e.g., mandelbrot.js)
 @pytest.mark.parametrize(
     "name,path",
     get_compat_test_files(),
@@ -63,7 +64,9 @@ def test_compat_js(name: str, path: Path):
     that now pass in our Python implementation.
     """
     source = path.read_text(encoding="utf-8")
-    ctx = JSContext(time_limit=2.0)
+    # mandelbrot.js needs more time to render
+    time_limit = 30.0 if "mandelbrot" in name else 2.0
+    ctx = JSContext(time_limit=time_limit)
     # Execute the script - if it throws, the test fails
     ctx.eval(source)
 

@@ -97,6 +97,8 @@ class OpCode(IntEnum):
     # Iteration
     FOR_IN_INIT = auto()  # Initialize for-in: obj -> iterator
     FOR_IN_NEXT = auto()  # Get next for-in: iterator -> key, done
+    FOR_OF_INIT = auto()  # Initialize for-of: iterable -> iterator
+    FOR_OF_NEXT = auto()  # Get next for-of: iterator -> value, done
 
     # Increment/Decrement
     INC = auto()          # Increment

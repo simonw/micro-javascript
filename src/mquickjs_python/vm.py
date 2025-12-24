@@ -51,6 +51,21 @@ class ForInIterator:
         return key, False
 
 
+class ForOfIterator:
+    """Iterator for for-of loops."""
+    def __init__(self, values: List):
+        self.values = values
+        self.index = 0
+
+    def next(self) -> Tuple[Any, bool]:
+        """Return (value, done)."""
+        if self.index >= len(self.values):
+            return None, True
+        value = self.values[self.index]
+        self.index += 1
+        return value, False
+
+
 class VM:
     """JavaScript virtual machine."""
 
@@ -528,6 +543,33 @@ class VM:
                     self.stack.append(True)
                 else:
                     self.stack.append(key)
+                    self.stack.append(False)
+            else:
+                self.stack.append(True)
+
+        elif op == OpCode.FOR_OF_INIT:
+            iterable = self.stack.pop()
+            if iterable is UNDEFINED or iterable is NULL:
+                values = []
+            elif isinstance(iterable, JSArray):
+                values = list(iterable._elements)
+            elif isinstance(iterable, str):
+                # Strings iterate over characters
+                values = list(iterable)
+            elif isinstance(iterable, list):
+                values = list(iterable)
+            else:
+                values = []
+            self.stack.append(ForOfIterator(values))
+
+        elif op == OpCode.FOR_OF_NEXT:
+            iterator = self.stack[-1]
+            if isinstance(iterator, ForOfIterator):
+                value, done = iterator.next()
+                if done:
+                    self.stack.append(True)
+                else:
+                    self.stack.append(value)
                     self.stack.append(False)
             else:
                 self.stack.append(True)

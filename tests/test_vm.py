@@ -418,3 +418,20 @@ class TestTryFinallyBreak:
             s
         ''')
         assert result == "tf"
+
+
+class TestLabeledStatements:
+    """Test labeled statements."""
+
+    def test_labeled_break_after_while(self):
+        """Labeled break after while without braces."""
+        ctx = JSContext()
+        # Should not hang - breaks immediately
+        result = ctx.eval("var x = 0; while (1) label: break; x")
+        assert result == 0
+
+    def test_labeled_break_in_block(self):
+        """Labeled break in block."""
+        ctx = JSContext()
+        result = ctx.eval("var x = 0; label: { x = 1; break label; x = 2; } x")
+        assert result == 1

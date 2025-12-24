@@ -102,6 +102,61 @@ class JSContext:
         obj_constructor._prototype = object_prototype
         object_prototype.set("constructor", obj_constructor)
 
+        # Add Object.prototype methods
+        def proto_toString(this_val, *args):
+            # Get the [[Class]] internal property
+            if this_val is UNDEFINED:
+                return "[object Undefined]"
+            if this_val is NULL:
+                return "[object Null]"
+            if isinstance(this_val, bool):
+                return "[object Boolean]"
+            if isinstance(this_val, (int, float)):
+                return "[object Number]"
+            if isinstance(this_val, str):
+                return "[object String]"
+            if isinstance(this_val, JSArray):
+                return "[object Array]"
+            if callable(this_val) or isinstance(this_val, JSCallableObject):
+                return "[object Function]"
+            return "[object Object]"
+
+        def proto_hasOwnProperty(this_val, *args):
+            prop = to_string(args[0]) if args else ""
+            if isinstance(this_val, JSArray):
+                # For arrays, check both properties and array indices
+                try:
+                    idx = int(prop)
+                    if 0 <= idx < len(this_val._elements):
+                        return True
+                except (ValueError, TypeError):
+                    pass
+                return this_val.has(prop) or prop in this_val._getters or prop in this_val._setters
+            if isinstance(this_val, JSObject):
+                return this_val.has(prop) or prop in this_val._getters or prop in this_val._setters
+            return False
+
+        def proto_valueOf(this_val, *args):
+            return this_val
+
+        def proto_isPrototypeOf(this_val, *args):
+            obj = args[0] if args else UNDEFINED
+            if not isinstance(obj, JSObject):
+                return False
+            proto = getattr(obj, '_prototype', None)
+            while proto is not None:
+                if proto is this_val:
+                    return True
+                proto = getattr(proto, '_prototype', None)
+            return False
+
+        # These methods need special handling for 'this'
+        from .values import JSBoundMethod
+        object_prototype.set("toString", JSBoundMethod(proto_toString))
+        object_prototype.set("hasOwnProperty", JSBoundMethod(proto_hasOwnProperty))
+        object_prototype.set("valueOf", JSBoundMethod(proto_valueOf))
+        object_prototype.set("isPrototypeOf", JSBoundMethod(proto_isPrototypeOf))
+
         # Store for other constructors to use
         self._object_prototype = object_prototype
 
@@ -260,6 +315,7 @@ class JSContext:
         obj_constructor.set("defineProperties", define_properties)
         obj_constructor.set("create", create_fn)
         obj_constructor.set("getOwnPropertyDescriptor", get_own_property_descriptor)
+        obj_constructor.set("prototype", object_prototype)
 
         return obj_constructor
 
@@ -417,6 +473,70 @@ class JSContext:
                 return -1
             return 0
 
+        def imul_fn(*args):
+            # 32-bit integer multiplication
+            a = int(to_number(args[0])) if args else 0
+            b = int(to_number(args[1])) if len(args) > 1 else 0
+            # Convert to 32-bit signed integers
+            a = a & 0xFFFFFFFF
+            b = b & 0xFFFFFFFF
+            if a >= 0x80000000:
+                a -= 0x100000000
+            if b >= 0x80000000:
+                b -= 0x100000000
+            result = (a * b) & 0xFFFFFFFF
+            if result >= 0x80000000:
+                result -= 0x100000000
+            return result
+
+        def fround_fn(*args):
+            # Convert to 32-bit float
+            import struct
+            x = to_number(args[0]) if args else float('nan')
+            # Pack as 32-bit float and unpack as 64-bit
+            packed = struct.pack('f', x)
+            return struct.unpack('f', packed)[0]
+
+        def clz32_fn(*args):
+            # Count leading zeros in 32-bit integer
+            x = int(to_number(args[0])) if args else 0
+            x = x & 0xFFFFFFFF
+            if x == 0:
+                return 32
+            count = 0
+            while (x & 0x80000000) == 0:
+                count += 1
+                x <<= 1
+            return count
+
+        def hypot_fn(*args):
+            if not args:
+                return 0
+            nums = [to_number(a) for a in args]
+            return math.hypot(*nums)
+
+        def cbrt_fn(*args):
+            x = to_number(args[0]) if args else float('nan')
+            if x < 0:
+                return -(-x) ** (1/3)
+            return x ** (1/3)
+
+        def log2_fn(*args):
+            x = to_number(args[0]) if args else float('nan')
+            return math.log2(x) if x > 0 else float('nan')
+
+        def log10_fn(*args):
+            x = to_number(args[0]) if args else float('nan')
+            return math.log10(x) if x > 0 else float('nan')
+
+        def expm1_fn(*args):
+            x = to_number(args[0]) if args else float('nan')
+            return math.expm1(x)
+
+        def log1p_fn(*args):
+            x = to_number(args[0]) if args else float('nan')
+            return math.log1p(x) if x > -1 else float('nan')
+
         # Set all methods
         math_obj.set("abs", abs_fn)
         math_obj.set("floor", floor_fn)
@@ -438,6 +558,15 @@ class JSContext:
         math_obj.set("exp", exp_fn)
         math_obj.set("random", random_fn)
         math_obj.set("sign", sign_fn)
+        math_obj.set("imul", imul_fn)
+        math_obj.set("fround", fround_fn)
+        math_obj.set("clz32", clz32_fn)
+        math_obj.set("hypot", hypot_fn)
+        math_obj.set("cbrt", cbrt_fn)
+        math_obj.set("log2", log2_fn)
+        math_obj.set("log10", log10_fn)
+        math_obj.set("expm1", expm1_fn)
+        math_obj.set("log1p", log1p_fn)
 
         return math_obj
 

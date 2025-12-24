@@ -158,12 +158,102 @@ class JSContext:
                 obj._prototype = proto
             return obj
 
+        def define_property(*args):
+            """Object.defineProperty(obj, prop, descriptor)."""
+            if len(args) < 3:
+                return UNDEFINED
+            obj, prop, descriptor = args[0], args[1], args[2]
+            if not isinstance(obj, JSObject):
+                return obj
+            prop_name = to_string(prop)
+
+            if isinstance(descriptor, JSObject):
+                # Check for getter/setter
+                getter = descriptor.get("get")
+                setter = descriptor.get("set")
+
+                if getter is not UNDEFINED and getter is not NULL:
+                    obj.define_getter(prop_name, getter)
+                if setter is not UNDEFINED and setter is not NULL:
+                    obj.define_setter(prop_name, setter)
+
+                # Check for value (only if no getter/setter)
+                if getter is UNDEFINED and setter is UNDEFINED:
+                    value = descriptor.get("value")
+                    if value is not UNDEFINED:
+                        obj.set(prop_name, value)
+
+            return obj
+
+        def define_properties(*args):
+            """Object.defineProperties(obj, props)."""
+            if len(args) < 2:
+                return UNDEFINED
+            obj, props = args[0], args[1]
+            if not isinstance(obj, JSObject) or not isinstance(props, JSObject):
+                return obj
+
+            for key in props.keys():
+                descriptor = props.get(key)
+                define_property(obj, key, descriptor)
+
+            return obj
+
+        def create_fn(*args):
+            """Object.create(proto, properties)."""
+            proto = args[0] if args else NULL
+            properties = args[1] if len(args) > 1 else UNDEFINED
+
+            obj = JSObject()
+            if proto is NULL or proto is None:
+                obj._prototype = None
+            elif isinstance(proto, JSObject):
+                obj._prototype = proto
+
+            if properties is not UNDEFINED and isinstance(properties, JSObject):
+                define_properties(obj, properties)
+
+            return obj
+
+        def get_own_property_descriptor(*args):
+            """Object.getOwnPropertyDescriptor(obj, prop)."""
+            if len(args) < 2:
+                return UNDEFINED
+            obj, prop = args[0], args[1]
+            if not isinstance(obj, JSObject):
+                return UNDEFINED
+            prop_name = to_string(prop)
+
+            if not obj.has(prop_name) and prop_name not in obj._getters and prop_name not in obj._setters:
+                return UNDEFINED
+
+            descriptor = JSObject()
+
+            getter = obj._getters.get(prop_name)
+            setter = obj._setters.get(prop_name)
+
+            if getter or setter:
+                descriptor.set("get", getter if getter else UNDEFINED)
+                descriptor.set("set", setter if setter else UNDEFINED)
+            else:
+                descriptor.set("value", obj.get(prop_name))
+                descriptor.set("writable", True)
+
+            descriptor.set("enumerable", True)
+            descriptor.set("configurable", True)
+
+            return descriptor
+
         obj_constructor.set("keys", keys_fn)
         obj_constructor.set("values", values_fn)
         obj_constructor.set("entries", entries_fn)
         obj_constructor.set("assign", assign_fn)
         obj_constructor.set("getPrototypeOf", get_prototype_of)
         obj_constructor.set("setPrototypeOf", set_prototype_of)
+        obj_constructor.set("defineProperty", define_property)
+        obj_constructor.set("defineProperties", define_properties)
+        obj_constructor.set("create", create_fn)
+        obj_constructor.set("getOwnPropertyDescriptor", get_own_property_descriptor)
 
         return obj_constructor
 

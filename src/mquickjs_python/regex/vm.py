@@ -525,20 +525,43 @@ class RegexVM:
 
             elif opcode == Op.LOOKBEHIND:
                 end_offset = instr[1]
-                # Lookbehind is complex - for now, simplified implementation
-                # Would need to try matching backwards
-                # This is a placeholder that always fails
-                if not stack:
-                    return None
-                pc, sp, captures, registers = self._backtrack(stack)
+                saved_sp = sp
+                saved_captures = [c.copy() for c in captures]
+
+                # Try lookbehind - match pattern ending at current position
+                lb_result = self._execute_lookbehind(string, sp, pc + 1, end_offset)
+
+                if lb_result:
+                    # Lookbehind succeeded - restore position and continue after
+                    sp = saved_sp
+                    captures = saved_captures
+                    pc = end_offset
+                else:
+                    # Lookbehind failed
+                    if not stack:
+                        return None
+                    pc, sp, captures, registers = self._backtrack(stack)
 
             elif opcode == Op.LOOKBEHIND_NEG:
                 end_offset = instr[1]
-                # Placeholder
-                pc = end_offset
+                saved_sp = sp
+                saved_captures = [c.copy() for c in captures]
+
+                lb_result = self._execute_lookbehind(string, sp, pc + 1, end_offset)
+
+                if not lb_result:
+                    # Negative lookbehind succeeded (inner didn't match)
+                    sp = saved_sp
+                    captures = saved_captures
+                    pc = end_offset
+                else:
+                    # Negative lookbehind failed (inner matched)
+                    if not stack:
+                        return None
+                    pc, sp, captures, registers = self._backtrack(stack)
 
             elif opcode == Op.LOOKBEHIND_END:
-                return MatchResult([], 0, "")
+                return MatchResult([], 0, "")  # Special marker
 
             elif opcode == Op.SET_POS:
                 reg_idx = instr[1]
@@ -660,4 +683,121 @@ class RegexVM:
 
             else:
                 # Handle other opcodes similarly to main loop
+                pc += 1
+
+    def _execute_lookbehind(self, string: str, end_pos: int, start_pc: int, end_pc: int) -> bool:
+        """Execute bytecode for lookbehind assertion.
+
+        Lookbehind matches if the pattern matches text ending at end_pos.
+        We try all possible start positions backwards from end_pos.
+        """
+        # Try all possible starting positions from 0 to end_pos
+        # We want the pattern to match and end exactly at end_pos
+        for start_pos in range(end_pos, -1, -1):
+            result = self._try_lookbehind_at(string, start_pos, end_pos, start_pc, end_pc)
+            if result:
+                return True
+        return False
+
+    def _try_lookbehind_at(self, string: str, start_pos: int, end_pos: int,
+                           start_pc: int, end_pc: int) -> bool:
+        """Try to match lookbehind pattern from start_pos, checking it ends at end_pos."""
+        pc = start_pc
+        sp = start_pos
+        captures = [[-1, -1] for _ in range(self.capture_count)]
+        registers: List[int] = []
+        stack: List[Tuple] = []
+        step_count = 0
+
+        while True:
+            step_count += 1
+            if step_count % self.poll_interval == 0:
+                if self.poll_callback and self.poll_callback():
+                    raise RegexTimeoutError("Regex execution timed out")
+
+            if len(stack) > self.stack_limit:
+                raise RegexStackOverflow("Regex stack overflow")
+
+            if pc >= end_pc:
+                return False
+
+            instr = self.bytecode[pc]
+            opcode = instr[0]
+
+            if opcode == Op.LOOKBEHIND_END:
+                # Check if we ended exactly at the target position
+                return sp == end_pos
+
+            if opcode == Op.CHAR:
+                char_code = instr[1]
+                if sp >= len(string):
+                    if not stack:
+                        return False
+                    pc, sp, captures, registers = stack.pop()
+                    continue
+                ch = string[sp]
+                if self.ignorecase:
+                    match = ord(ch.lower()) == char_code or ord(ch.upper()) == char_code
+                else:
+                    match = ord(ch) == char_code
+                if match:
+                    sp += 1
+                    pc += 1
+                else:
+                    if not stack:
+                        return False
+                    pc, sp, captures, registers = stack.pop()
+
+            elif opcode == Op.DOT:
+                if sp >= len(string) or string[sp] == '\n':
+                    if not stack:
+                        return False
+                    pc, sp, captures, registers = stack.pop()
+                    continue
+                sp += 1
+                pc += 1
+
+            elif opcode == Op.DIGIT:
+                if sp >= len(string) or not string[sp].isdigit():
+                    if not stack:
+                        return False
+                    pc, sp, captures, registers = stack.pop()
+                    continue
+                sp += 1
+                pc += 1
+
+            elif opcode == Op.WORD:
+                if sp >= len(string):
+                    if not stack:
+                        return False
+                    pc, sp, captures, registers = stack.pop()
+                    continue
+                ch = string[sp]
+                if ch.isalnum() or ch == '_':
+                    sp += 1
+                    pc += 1
+                else:
+                    if not stack:
+                        return False
+                    pc, sp, captures, registers = stack.pop()
+
+            elif opcode == Op.SPLIT_FIRST:
+                alt_pc = instr[1]
+                stack.append((alt_pc, sp, [c.copy() for c in captures], registers.copy()))
+                pc += 1
+
+            elif opcode == Op.SPLIT_NEXT:
+                alt_pc = instr[1]
+                stack.append((pc + 1, sp, [c.copy() for c in captures], registers.copy()))
+                pc = alt_pc
+
+            elif opcode == Op.JUMP:
+                pc = instr[1]
+
+            elif opcode == Op.MATCH:
+                # Check if we ended exactly at the target position
+                return sp == end_pos
+
+            else:
+                # Handle other opcodes - advance pc
                 pc += 1

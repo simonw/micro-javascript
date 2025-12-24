@@ -14,6 +14,59 @@ __all__ = ['RegExp', 'RegExpError', 'match', 'search', 'test',
            'RegexTimeoutError', 'RegexStackOverflow', 'MatchResult']
 
 
+def _utf16_len(s: str) -> int:
+    """Get UTF-16 length of a string (counting surrogate pairs as 2)."""
+    length = 0
+    for ch in s:
+        cp = ord(ch)
+        if cp > 0xFFFF:
+            length += 2  # Surrogate pair
+        else:
+            length += 1
+    return length
+
+
+def _utf16_to_codepoint_index(s: str, utf16_idx: int) -> Optional[int]:
+    """Convert UTF-16 index to code point index.
+
+    Returns None if utf16_idx points to the middle of a surrogate pair.
+    """
+    if utf16_idx < 0:
+        return None
+
+    utf16_pos = 0
+    for cp_idx, ch in enumerate(s):
+        if utf16_pos == utf16_idx:
+            return cp_idx
+        cp = ord(ch)
+        if cp > 0xFFFF:
+            utf16_pos += 2
+            # Check if pointing to middle of surrogate pair
+            if utf16_pos > utf16_idx:
+                return None  # Invalid - in middle of surrogate pair
+        else:
+            utf16_pos += 1
+
+    # Check if pointing to end of string
+    if utf16_pos == utf16_idx:
+        return len(s)
+    return None
+
+
+def _codepoint_to_utf16_index(s: str, cp_idx: int) -> int:
+    """Convert code point index to UTF-16 index."""
+    utf16_pos = 0
+    for i, ch in enumerate(s):
+        if i == cp_idx:
+            return utf16_pos
+        cp = ord(ch)
+        if cp > 0xFFFF:
+            utf16_pos += 2
+        else:
+            utf16_pos += 1
+    return utf16_pos
+
+
 class RegExp:
     """
     JavaScript-compatible regular expression object.
@@ -145,22 +198,41 @@ class RegExp:
         """
         vm = self._create_vm()
 
+        # In unicode mode, lastIndex is a UTF-16 index
+        # Convert to code point index for internal matching
+        if self._unicode and (self._global or self._sticky):
+            cp_start = _utf16_to_codepoint_index(string, self.lastIndex)
+            if cp_start is None:
+                # Invalid UTF-16 index (e.g., in middle of surrogate pair)
+                self.lastIndex = 0
+                return None
+            start_pos = cp_start
+        else:
+            start_pos = self.lastIndex if self._global else 0
+
         if self._sticky:
-            result = vm.match(string, self.lastIndex)
+            result = vm.match(string, start_pos)
             if result:
                 if self._global or self._sticky:
-                    self.lastIndex = result.index + len(result[0]) if result[0] else result.index
+                    end_cp = result.index + len(result[0]) if result[0] else result.index
+                    if self._unicode:
+                        self.lastIndex = _codepoint_to_utf16_index(string, end_cp)
+                    else:
+                        self.lastIndex = end_cp
                 return result
             if self._global or self._sticky:
                 self.lastIndex = 0
             return None
 
-        start_pos = self.lastIndex if self._global else 0
         result = vm.search(string, start_pos)
 
         if result:
             if self._global:
-                self.lastIndex = result.index + len(result[0]) if result[0] else result.index + 1
+                end_cp = result.index + len(result[0]) if result[0] else result.index + 1
+                if self._unicode:
+                    self.lastIndex = _codepoint_to_utf16_index(string, end_cp)
+                else:
+                    self.lastIndex = end_cp
             return result
 
         if self._global:

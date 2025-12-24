@@ -304,7 +304,8 @@ class Parser:
     def _parse_break_statement(self) -> BreakStatement:
         """Parse break statement."""
         label = None
-        if self._check(TokenType.IDENTIFIER):
+        # Only consume identifier as label if on same line (ASI rule)
+        if self._check(TokenType.IDENTIFIER) and self.current.line == self.previous.line:
             label = Identifier(self._advance().value)
         self._consume_semicolon()
         return BreakStatement(label)
@@ -312,7 +313,8 @@ class Parser:
     def _parse_continue_statement(self) -> ContinueStatement:
         """Parse continue statement."""
         label = None
-        if self._check(TokenType.IDENTIFIER):
+        # Only consume identifier as label if on same line (ASI rule)
+        if self._check(TokenType.IDENTIFIER) and self.current.line == self.previous.line:
             label = Identifier(self._advance().value)
         self._consume_semicolon()
         return ContinueStatement(label)

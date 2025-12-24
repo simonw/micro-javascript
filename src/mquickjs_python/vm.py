@@ -699,8 +699,8 @@ class VM:
 
         if isinstance(obj, JSObject):
             # Built-in Object methods
-            if key_str == "toString":
-                return self._make_object_method(obj, "toString")
+            if key_str in ("toString", "hasOwnProperty"):
+                return self._make_object_method(obj, key_str)
             return obj.get(key_str)
 
         if isinstance(obj, str):
@@ -927,8 +927,13 @@ class VM:
         def toString_fn(*args):
             return "[object Object]"
 
+        def hasOwnProperty_fn(*args):
+            key = to_string(args[0]) if args else ""
+            return obj.has(key)
+
         methods = {
             "toString": toString_fn,
+            "hasOwnProperty": hasOwnProperty_fn,
         }
         return methods.get(method, lambda *args: UNDEFINED)
 

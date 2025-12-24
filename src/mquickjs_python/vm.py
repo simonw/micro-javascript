@@ -34,6 +34,8 @@ class CallFrame:
     this_value: JSValue
     closure_cells: List[ClosureCell] = None  # Cells for captured variables (from outer function)
     cell_storage: List[ClosureCell] = None  # Cells for variables captured by inner functions
+    is_constructor_call: bool = False  # True if this frame is from a "new" call
+    new_target: JSValue = None  # The new object for constructor calls
 
 
 class ForInIterator:
@@ -330,7 +332,9 @@ class VM:
         elif op == OpCode.MUL:
             b = self.stack.pop()
             a = self.stack.pop()
-            self.stack.append(to_number(a) * to_number(b))
+            a_num = float(to_number(a))  # Use float for proper -0 handling
+            b_num = float(to_number(b))
+            self.stack.append(a_num * b_num)
 
         elif op == OpCode.DIV:
             b = self.stack.pop()
@@ -338,11 +342,13 @@ class VM:
             b_num = to_number(b)
             a_num = to_number(a)
             if b_num == 0:
+                # Check sign of zero using copysign
+                b_sign = math.copysign(1, b_num)
                 if a_num == 0:
                     self.stack.append(float('nan'))
-                elif a_num > 0:
+                elif (a_num > 0) == (b_sign > 0):  # Same sign
                     self.stack.append(float('inf'))
-                else:
+                else:  # Different signs
                     self.stack.append(float('-inf'))
             else:
                 self.stack.append(a_num / b_num)
@@ -364,7 +370,12 @@ class VM:
 
         elif op == OpCode.NEG:
             a = self.stack.pop()
-            self.stack.append(-to_number(a))
+            n = to_number(a)
+            # Ensure -0 produces -0.0 (float)
+            if n == 0:
+                self.stack.append(-0.0 if math.copysign(1, n) > 0 else 0.0)
+            else:
+                self.stack.append(-n)
 
         elif op == OpCode.POS:
             a = self.stack.pop()
@@ -394,7 +405,12 @@ class VM:
             b = self.stack.pop()
             a = self.stack.pop()
             shift = self._to_uint32(b) & 0x1F
-            self.stack.append(self._to_int32(a) << shift)
+            result = self._to_int32(a) << shift
+            # Convert result back to signed 32-bit
+            result = result & 0xFFFFFFFF
+            if result >= 0x80000000:
+                result -= 0x100000000
+            self.stack.append(result)
 
         elif op == OpCode.SHR:
             b = self.stack.pop()
@@ -504,16 +520,18 @@ class VM:
 
         elif op == OpCode.RETURN:
             result = self.stack.pop() if self.stack else UNDEFINED
-            self.call_stack.pop()
-            if self.call_stack:
-                self.stack.append(result)
-            else:
-                self.stack.append(result)
+            popped_frame = self.call_stack.pop()
+            # For constructor calls, return the new object unless result is an object
+            if popped_frame.is_constructor_call:
+                if not isinstance(result, JSObject):
+                    result = popped_frame.new_target
+            self.stack.append(result)
 
         elif op == OpCode.RETURN_UNDEFINED:
-            self.call_stack.pop()
-            if self.call_stack:
-                self.stack.append(UNDEFINED)
+            popped_frame = self.call_stack.pop()
+            # For constructor calls, return the new object
+            if popped_frame.is_constructor_call:
+                self.stack.append(popped_frame.new_target)
             else:
                 self.stack.append(UNDEFINED)
 
@@ -1561,6 +1579,8 @@ class VM:
         func: JSFunction,
         args: List[JSValue],
         this_val: JSValue,
+        is_constructor: bool = False,
+        new_target: JSValue = None,
     ) -> None:
         """Invoke a JavaScript function."""
         # Handle bound functions
@@ -1620,6 +1640,8 @@ class VM:
             this_value=this_val,
             closure_cells=closure_cells,
             cell_storage=cell_storage,
+            is_constructor_call=is_constructor,
+            new_target=new_target,
         )
         self.call_stack.append(frame)
 
@@ -1633,10 +1655,13 @@ class VM:
         if isinstance(constructor, JSFunction):
             # Create new object
             obj = JSObject()
+            # Set prototype from constructor's prototype property
+            if hasattr(constructor, '_prototype'):
+                obj._prototype = constructor._prototype
             # Call constructor with new object as 'this'
-            self._invoke_js_function(constructor, args, obj)
-            # Result is the new object (or returned value if object)
-            self.stack.append(obj)
+            # Mark this as a constructor call so RETURN knows to return the object
+            self._invoke_js_function(constructor, args, obj, is_constructor=True, new_target=obj)
+            # Don't push obj here - RETURN/RETURN_UNDEFINED will handle it
         elif isinstance(constructor, JSObject) and hasattr(constructor, '_call_fn'):
             # Built-in constructor (like Object, Array, RegExp)
             result = constructor._call_fn(*args)

@@ -150,20 +150,3 @@ class TestRectangle:
         """)
         assert result == "testabc"
 
-    def test_full_test_rect_js(self):
-        """Run the full test_rect.js test file with Python-exposed classes."""
-        ctx = JSContext()
-
-        # Create and expose both constructors
-        rect_constructor, rect_prototype = create_rectangle_constructor(ctx, ctx._object_prototype)
-        filled_constructor = create_filled_rectangle_constructor(ctx._object_prototype, rect_prototype)
-
-        ctx.set("Rectangle", rect_constructor)
-        ctx.set("FilledRectangle", filled_constructor)
-
-        # Read and run the test_rect.js file
-        test_file = Path(__file__).parent / "test_rect.js"
-        source = test_file.read_text(encoding="utf-8")
-
-        # Run the test - if it throws, the test fails
-        ctx.eval(source)

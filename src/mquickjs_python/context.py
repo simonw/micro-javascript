@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 from .parser import Parser
 from .compiler import Compiler
 from .vm import VM
-from .values import UNDEFINED, NULL, JSValue, JSObject, JSArray, JSRegExp, to_string, to_number
+from .values import UNDEFINED, NULL, JSValue, JSObject, JSCallableObject, JSArray, JSRegExp, to_string, to_number
 from .errors import JSError, MemoryLimitError, TimeLimitError
 
 
@@ -57,6 +57,12 @@ class JSContext:
 
         # Number constructor and methods
         self._globals["Number"] = self._create_number_constructor()
+
+        # String constructor and methods
+        self._globals["String"] = self._create_string_constructor()
+
+        # Boolean constructor
+        self._globals["Boolean"] = self._create_boolean_constructor()
 
         # Date constructor
         self._globals["Date"] = self._create_date_constructor()
@@ -311,9 +317,16 @@ class JSContext:
 
         return json_obj
 
-    def _create_number_constructor(self) -> JSObject:
+    def _create_number_constructor(self) -> JSCallableObject:
         """Create the Number constructor with static methods."""
-        num_constructor = JSObject()
+
+        def number_call(*args):
+            """Convert argument to a number."""
+            if not args:
+                return 0
+            return to_number(args[0])
+
+        num_constructor = JSCallableObject(number_call)
 
         def isNaN_fn(*args):
             x = args[0] if args else UNDEFINED
@@ -411,6 +424,50 @@ class JSContext:
         num_constructor.set("parseFloat", parseFloat_fn)
 
         return num_constructor
+
+    def _create_string_constructor(self) -> JSCallableObject:
+        """Create the String constructor with static methods."""
+
+        def string_call(*args):
+            """Convert argument to a string."""
+            if not args:
+                return ""
+            return to_string(args[0])
+
+        string_constructor = JSCallableObject(string_call)
+
+        def fromCharCode_fn(*args):
+            """String.fromCharCode - create string from char codes."""
+            return "".join(chr(int(to_number(arg))) for arg in args)
+
+        string_constructor.set("fromCharCode", fromCharCode_fn)
+
+        return string_constructor
+
+    def _create_boolean_constructor(self) -> JSCallableObject:
+        """Create the Boolean constructor."""
+
+        def boolean_call(*args):
+            """Convert argument to a boolean."""
+            if not args:
+                return False
+            val = args[0]
+            # JavaScript truthiness rules
+            if val is UNDEFINED or val is NULL:
+                return False
+            if isinstance(val, bool):
+                return val
+            if isinstance(val, (int, float)):
+                if math.isnan(val):
+                    return False
+                return val != 0
+            if isinstance(val, str):
+                return len(val) > 0
+            # Objects are always truthy
+            return True
+
+        boolean_constructor = JSCallableObject(boolean_call)
+        return boolean_constructor
 
     def _create_date_constructor(self) -> JSObject:
         """Create the Date constructor with static methods."""

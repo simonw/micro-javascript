@@ -687,14 +687,14 @@ class VM:
             if key_str == "length":
                 return obj.length
             # Built-in array methods
-            if key_str == "push":
-                return self._make_array_method(obj, "push")
-            if key_str == "pop":
-                return self._make_array_method(obj, "pop")
-            if key_str == "toString":
-                return self._make_array_method(obj, "toString")
-            if key_str == "join":
-                return self._make_array_method(obj, "join")
+            array_methods = [
+                "push", "pop", "shift", "unshift", "toString", "join",
+                "map", "filter", "reduce", "forEach", "indexOf", "lastIndexOf",
+                "find", "findIndex", "some", "every", "concat", "slice",
+                "reverse", "includes",
+            ]
+            if key_str in array_methods:
+                return self._make_array_method(obj, key_str)
             return obj.get(key_str)
 
         if isinstance(obj, JSObject):
@@ -728,6 +728,8 @@ class VM:
 
     def _make_array_method(self, arr: JSArray, method: str) -> Any:
         """Create a bound array method."""
+        vm = self  # Reference for closures
+
         def push_fn(*args):
             for arg in args:
                 arr.push(arg)
@@ -736,6 +738,16 @@ class VM:
         def pop_fn(*args):
             return arr.pop()
 
+        def shift_fn(*args):
+            if not arr._elements:
+                return UNDEFINED
+            return arr._elements.pop(0)
+
+        def unshift_fn(*args):
+            for i, arg in enumerate(args):
+                arr._elements.insert(i, arg)
+            return arr.length
+
         def toString_fn(*args):
             return ",".join(to_string(elem) for elem in arr._elements)
 
@@ -743,11 +755,170 @@ class VM:
             sep = "," if not args else to_string(args[0])
             return sep.join(to_string(elem) for elem in arr._elements)
 
+        def map_fn(*args):
+            callback = args[0] if args else None
+            if not callback:
+                return JSArray()
+            result = JSArray()
+            result._elements = []
+            for i, elem in enumerate(arr._elements):
+                val = vm._call_callback(callback, [elem, i, arr])
+                result._elements.append(val)
+            return result
+
+        def filter_fn(*args):
+            callback = args[0] if args else None
+            if not callback:
+                return JSArray()
+            result = JSArray()
+            result._elements = []
+            for i, elem in enumerate(arr._elements):
+                val = vm._call_callback(callback, [elem, i, arr])
+                if to_boolean(val):
+                    result._elements.append(elem)
+            return result
+
+        def reduce_fn(*args):
+            callback = args[0] if args else None
+            initial = args[1] if len(args) > 1 else UNDEFINED
+            if not callback:
+                raise JSTypeError("reduce callback is not a function")
+            acc = initial
+            start_idx = 0
+            if acc is UNDEFINED:
+                if not arr._elements:
+                    raise JSTypeError("Reduce of empty array with no initial value")
+                acc = arr._elements[0]
+                start_idx = 1
+            for i in range(start_idx, len(arr._elements)):
+                elem = arr._elements[i]
+                acc = vm._call_callback(callback, [acc, elem, i, arr])
+            return acc
+
+        def forEach_fn(*args):
+            callback = args[0] if args else None
+            if not callback:
+                return UNDEFINED
+            for i, elem in enumerate(arr._elements):
+                vm._call_callback(callback, [elem, i, arr])
+            return UNDEFINED
+
+        def indexOf_fn(*args):
+            search = args[0] if args else UNDEFINED
+            start = int(to_number(args[1])) if len(args) > 1 else 0
+            if start < 0:
+                start = max(0, len(arr._elements) + start)
+            for i in range(start, len(arr._elements)):
+                if vm._strict_equals(arr._elements[i], search):
+                    return i
+            return -1
+
+        def lastIndexOf_fn(*args):
+            search = args[0] if args else UNDEFINED
+            start = int(to_number(args[1])) if len(args) > 1 else len(arr._elements) - 1
+            if start < 0:
+                start = len(arr._elements) + start
+            for i in range(min(start, len(arr._elements) - 1), -1, -1):
+                if vm._strict_equals(arr._elements[i], search):
+                    return i
+            return -1
+
+        def find_fn(*args):
+            callback = args[0] if args else None
+            if not callback:
+                return UNDEFINED
+            for i, elem in enumerate(arr._elements):
+                val = vm._call_callback(callback, [elem, i, arr])
+                if to_boolean(val):
+                    return elem
+            return UNDEFINED
+
+        def findIndex_fn(*args):
+            callback = args[0] if args else None
+            if not callback:
+                return -1
+            for i, elem in enumerate(arr._elements):
+                val = vm._call_callback(callback, [elem, i, arr])
+                if to_boolean(val):
+                    return i
+            return -1
+
+        def some_fn(*args):
+            callback = args[0] if args else None
+            if not callback:
+                return False
+            for i, elem in enumerate(arr._elements):
+                val = vm._call_callback(callback, [elem, i, arr])
+                if to_boolean(val):
+                    return True
+            return False
+
+        def every_fn(*args):
+            callback = args[0] if args else None
+            if not callback:
+                return True
+            for i, elem in enumerate(arr._elements):
+                val = vm._call_callback(callback, [elem, i, arr])
+                if not to_boolean(val):
+                    return False
+            return True
+
+        def concat_fn(*args):
+            result = JSArray()
+            result._elements = arr._elements[:]
+            for arg in args:
+                if isinstance(arg, JSArray):
+                    result._elements.extend(arg._elements)
+                else:
+                    result._elements.append(arg)
+            return result
+
+        def slice_fn(*args):
+            start = int(to_number(args[0])) if args else 0
+            end = int(to_number(args[1])) if len(args) > 1 else len(arr._elements)
+            if start < 0:
+                start = max(0, len(arr._elements) + start)
+            if end < 0:
+                end = max(0, len(arr._elements) + end)
+            result = JSArray()
+            result._elements = arr._elements[start:end]
+            return result
+
+        def reverse_fn(*args):
+            arr._elements.reverse()
+            return arr
+
+        def includes_fn(*args):
+            search = args[0] if args else UNDEFINED
+            start = int(to_number(args[1])) if len(args) > 1 else 0
+            if start < 0:
+                start = max(0, len(arr._elements) + start)
+            for i in range(start, len(arr._elements)):
+                if vm._strict_equals(arr._elements[i], search):
+                    return True
+            return False
+
         methods = {
             "push": push_fn,
             "pop": pop_fn,
+            "shift": shift_fn,
+            "unshift": unshift_fn,
             "toString": toString_fn,
             "join": join_fn,
+            "map": map_fn,
+            "filter": filter_fn,
+            "reduce": reduce_fn,
+            "forEach": forEach_fn,
+            "indexOf": indexOf_fn,
+            "lastIndexOf": lastIndexOf_fn,
+            "find": find_fn,
+            "findIndex": findIndex_fn,
+            "some": some_fn,
+            "every": every_fn,
+            "concat": concat_fn,
+            "slice": slice_fn,
+            "reverse": reverse_fn,
+            "includes": includes_fn,
         }
         return methods.get(method, lambda *args: UNDEFINED)
 
@@ -942,6 +1113,62 @@ class VM:
             self.stack.append(result if result is not None else UNDEFINED)
         else:
             raise JSTypeError(f"{method} is not a function")
+
+    def _call_callback(self, callback: JSValue, args: List[JSValue]) -> JSValue:
+        """Call a callback function synchronously and return the result."""
+        if isinstance(callback, JSFunction):
+            # Save current stack position
+            stack_len = len(self.stack)
+
+            # Invoke the function
+            self._invoke_js_function(callback, args, UNDEFINED)
+
+            # Execute until the call returns
+            while len(self.call_stack) > 1:
+                self._check_limits()
+                frame = self.call_stack[-1]
+                func = frame.func
+                bytecode = func.bytecode
+
+                if frame.ip >= len(bytecode):
+                    self.call_stack.pop()
+                    if len(self.stack) > stack_len:
+                        return self.stack.pop()
+                    return UNDEFINED
+
+                op = OpCode(bytecode[frame.ip])
+                frame.ip += 1
+
+                # Get argument if needed
+                arg = None
+                if op in (OpCode.JUMP, OpCode.JUMP_IF_FALSE, OpCode.JUMP_IF_TRUE, OpCode.TRY_START):
+                    low = bytecode[frame.ip]
+                    high = bytecode[frame.ip + 1]
+                    arg = low | (high << 8)
+                    frame.ip += 2
+                elif op in (
+                    OpCode.LOAD_CONST, OpCode.LOAD_NAME, OpCode.STORE_NAME,
+                    OpCode.LOAD_LOCAL, OpCode.STORE_LOCAL,
+                    OpCode.LOAD_CLOSURE, OpCode.STORE_CLOSURE,
+                    OpCode.LOAD_CELL, OpCode.STORE_CELL,
+                    OpCode.CALL, OpCode.CALL_METHOD, OpCode.NEW,
+                    OpCode.BUILD_ARRAY, OpCode.BUILD_OBJECT,
+                    OpCode.MAKE_CLOSURE,
+                ):
+                    arg = bytecode[frame.ip]
+                    frame.ip += 1
+
+                self._execute_opcode(op, arg, frame)
+
+            # Get result from stack
+            if len(self.stack) > stack_len:
+                return self.stack.pop()
+            return UNDEFINED
+        elif callable(callback):
+            result = callback(*args)
+            return result if result is not None else UNDEFINED
+        else:
+            raise JSTypeError(f"{callback} is not a function")
 
     def _invoke_js_function(
         self,

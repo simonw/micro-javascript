@@ -899,14 +899,23 @@ class VM:
             return UNDEFINED
 
         if isinstance(obj, JSObject):
-            # Built-in Object methods
-            if key_str in ("toString", "hasOwnProperty"):
-                return self._make_object_method(obj, key_str)
-            # Check for getter
+            # Check for getter first
             getter = obj.get_getter(key_str)
             if getter is not None:
                 return self._invoke_getter(getter, obj)
-            return obj.get(key_str)
+            # Check own property
+            if obj.has(key_str):
+                return obj.get(key_str)
+            # Check prototype chain
+            proto = getattr(obj, '_prototype', None)
+            while proto is not None:
+                if isinstance(proto, JSObject) and proto.has(key_str):
+                    return proto.get(key_str)
+                proto = getattr(proto, '_prototype', None)
+            # Built-in Object methods as fallback
+            if key_str in ("toString", "hasOwnProperty"):
+                return self._make_object_method(obj, key_str)
+            return UNDEFINED
 
         if isinstance(obj, str):
             # String character access
@@ -933,6 +942,12 @@ class VM:
             # Number methods
             if key_str in ("toFixed", "toString"):
                 return self._make_number_method(obj, key_str)
+            return UNDEFINED
+
+        # Python callable (including JSBoundMethod)
+        if callable(obj):
+            if key_str in ("call", "apply", "bind"):
+                return self._make_callable_method(obj, key_str)
             return UNDEFINED
 
         return UNDEFINED
@@ -1208,6 +1223,58 @@ class VM:
             "call": call_fn,
             "apply": apply_fn,
             "toString": toString_fn,
+        }
+        return methods.get(method, lambda *args: UNDEFINED)
+
+    def _make_callable_method(self, fn: Any, method: str) -> Any:
+        """Create a method for Python callables (including JSBoundMethod)."""
+        from .values import JSBoundMethod
+
+        def call_fn(*args):
+            """Call with explicit this and individual arguments."""
+            this_val = args[0] if args else UNDEFINED
+            call_args = list(args[1:]) if len(args) > 1 else []
+            # JSBoundMethod expects this as first arg
+            if isinstance(fn, JSBoundMethod):
+                return fn(this_val, *call_args)
+            # Regular Python callable doesn't use this
+            return fn(*call_args)
+
+        def apply_fn(*args):
+            """Call with explicit this and array of arguments."""
+            this_val = args[0] if args else UNDEFINED
+            arg_array = args[1] if len(args) > 1 and args[1] is not NULL else None
+
+            if arg_array is None:
+                apply_args = []
+            elif isinstance(arg_array, JSArray):
+                apply_args = arg_array._elements[:]
+            elif isinstance(arg_array, (list, tuple)):
+                apply_args = list(arg_array)
+            else:
+                apply_args = []
+
+            if isinstance(fn, JSBoundMethod):
+                return fn(this_val, *apply_args)
+            return fn(*apply_args)
+
+        def bind_fn(*args):
+            """Create a bound function with fixed this."""
+            bound_this = args[0] if args else UNDEFINED
+            bound_args = list(args[1:]) if len(args) > 1 else []
+
+            if isinstance(fn, JSBoundMethod):
+                def bound(*call_args):
+                    return fn(bound_this, *bound_args, *call_args)
+            else:
+                def bound(*call_args):
+                    return fn(*bound_args, *call_args)
+            return bound
+
+        methods = {
+            "call": call_fn,
+            "apply": apply_fn,
+            "bind": bind_fn,
         }
         return methods.get(method, lambda *args: UNDEFINED)
 
@@ -1595,8 +1662,13 @@ class VM:
 
     def _call_method(self, method: JSValue, this_val: JSValue, args: List[JSValue]) -> None:
         """Call a method."""
+        from .values import JSBoundMethod
         if isinstance(method, JSFunction):
             self._invoke_js_function(method, args, this_val)
+        elif isinstance(method, JSBoundMethod):
+            # JSBoundMethod expects this_val as first argument
+            result = method(this_val, *args)
+            self.stack.append(result if result is not None else UNDEFINED)
         elif callable(method):
             result = method(*args)
             self.stack.append(result if result is not None else UNDEFINED)

@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 from .parser import Parser
 from .compiler import Compiler
 from .vm import VM
-from .values import UNDEFINED, NULL, JSValue, JSObject, JSArray, to_string, to_number
+from .values import UNDEFINED, NULL, JSValue, JSObject, JSArray, JSRegExp, to_string, to_number
 from .errors import JSError, MemoryLimitError, TimeLimitError
 
 
@@ -60,6 +60,9 @@ class JSContext:
 
         # Date constructor
         self._globals["Date"] = self._create_date_constructor()
+
+        # RegExp constructor
+        self._globals["RegExp"] = self._create_regexp_constructor()
 
         # Global number functions
         self._globals["isNaN"] = self._global_isnan
@@ -419,6 +422,21 @@ class JSContext:
         date_constructor.set("now", now_fn)
 
         return date_constructor
+
+    def _create_regexp_constructor(self) -> JSObject:
+        """Create the RegExp constructor."""
+        # The constructor is a callable that creates JSRegExp objects
+        # This is wrapped in JSObject but the VM will call it specially
+
+        def regexp_constructor_fn(*args):
+            pattern = to_string(args[0]) if args else ""
+            flags = to_string(args[1]) if len(args) > 1 else ""
+            return JSRegExp(pattern, flags)
+
+        # Return a callable marker
+        regexp_constructor = JSObject()
+        regexp_constructor._callable = regexp_constructor_fn
+        return regexp_constructor
 
     def _global_isnan(self, *args) -> bool:
         """Global isNaN - converts argument to number first."""

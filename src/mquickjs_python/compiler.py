@@ -562,16 +562,28 @@ class Compiler:
             if not self.loop_stack:
                 raise SyntaxError("'break' outside of loop")
 
-            # Find the right loop context (labeled or innermost)
+            # Find the right loop context (labeled or innermost loop/switch)
             target_label = node.label.name if node.label else None
             ctx = None
             for loop_ctx in reversed(self.loop_stack):
-                if target_label is None or loop_ctx.label == target_label:
-                    ctx = loop_ctx
-                    break
+                if target_label is not None:
+                    # Labeled break - find the matching label
+                    if loop_ctx.label == target_label:
+                        ctx = loop_ctx
+                        break
+                else:
+                    # Unlabeled break - find innermost loop or switch
+                    # is_loop=True means it's a loop, is_loop=False with no label means switch
+                    # Skip labeled statements (is_loop=False with label) for unlabeled break
+                    if loop_ctx.is_loop or loop_ctx.label is None:
+                        ctx = loop_ctx
+                        break
 
             if ctx is None:
-                raise SyntaxError(f"label '{target_label}' not found")
+                if target_label:
+                    raise SyntaxError(f"label '{target_label}' not found")
+                else:
+                    raise SyntaxError("'break' outside of loop")
 
             # Emit pending finally blocks before the break
             self._emit_pending_finally_blocks()
@@ -736,7 +748,8 @@ class Compiler:
 
         elif isinstance(node, LabeledStatement):
             # Create a loop context for the label
-            loop_ctx = LoopContext(label=node.label.name)
+            # is_loop=False so unlabeled break/continue skip this context
+            loop_ctx = LoopContext(label=node.label.name, is_loop=False)
             self.loop_stack.append(loop_ctx)
 
             # Compile the labeled body

@@ -95,6 +95,9 @@ def js_typeof(value: JSValue) -> str:
         return "function"
     if isinstance(value, JSObject):
         return "object"
+    # Python callable (including JSBoundMethod)
+    if callable(value):
+        return "function"
     return "undefined"
 
 
@@ -384,3 +387,13 @@ class JSRegExp(JSObject):
 
     def __repr__(self) -> str:
         return f"/{self._pattern}/{self._flags}"
+
+
+class JSBoundMethod:
+    """A method that expects 'this' as the first argument when called."""
+
+    def __init__(self, fn):
+        self._fn = fn
+
+    def __call__(self, this_val, *args):
+        return self._fn(this_val, *args)

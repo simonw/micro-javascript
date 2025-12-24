@@ -724,6 +724,12 @@ class VM:
                 return self._make_string_method(obj, key_str)
             return UNDEFINED
 
+        if isinstance(obj, (int, float)):
+            # Number methods
+            if key_str in ("toFixed", "toString"):
+                return self._make_number_method(obj, key_str)
+            return UNDEFINED
+
         return UNDEFINED
 
     def _make_array_method(self, arr: JSArray, method: str) -> Any:
@@ -936,6 +942,48 @@ class VM:
             "hasOwnProperty": hasOwnProperty_fn,
         }
         return methods.get(method, lambda *args: UNDEFINED)
+
+    def _make_number_method(self, n: float, method: str) -> Any:
+        """Create a bound number method."""
+        def toFixed(*args):
+            digits = int(to_number(args[0])) if args else 0
+            if digits < 0 or digits > 100:
+                raise JSReferenceError("toFixed() digits out of range")
+            return f"{n:.{digits}f}"
+
+        def toString(*args):
+            radix = int(to_number(args[0])) if args else 10
+            if radix < 2 or radix > 36:
+                raise JSReferenceError("toString() radix must be between 2 and 36")
+            if radix == 10:
+                if isinstance(n, float) and n.is_integer():
+                    return str(int(n))
+                return str(n)
+            # Convert to different base
+            if n < 0:
+                return "-" + self._number_to_base(-n, radix)
+            return self._number_to_base(n, radix)
+
+        methods = {
+            "toFixed": toFixed,
+            "toString": toString,
+        }
+        return methods.get(method, lambda *args: UNDEFINED)
+
+    def _number_to_base(self, n: float, radix: int) -> str:
+        """Convert number to string in given base."""
+        if n != int(n):
+            # For non-integers, just use base 10
+            return str(n)
+        n = int(n)
+        if n == 0:
+            return "0"
+        digits = "0123456789abcdefghijklmnopqrstuvwxyz"
+        result = []
+        while n:
+            result.append(digits[n % radix])
+            n //= radix
+        return "".join(reversed(result))
 
     def _make_string_method(self, s: str, method: str) -> Any:
         """Create a bound string method."""

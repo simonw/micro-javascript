@@ -3,6 +3,7 @@
 import json
 import math
 import random
+import time
 from typing import Any, Dict, Optional
 
 from .parser import Parser
@@ -53,6 +54,18 @@ class JSContext:
 
         # JSON object
         self._globals["JSON"] = self._create_json_object()
+
+        # Number constructor and methods
+        self._globals["Number"] = self._create_number_constructor()
+
+        # Date constructor
+        self._globals["Date"] = self._create_date_constructor()
+
+        # Global number functions
+        self._globals["isNaN"] = self._global_isnan
+        self._globals["isFinite"] = self._global_isfinite
+        self._globals["parseInt"] = self._global_parseint
+        self._globals["parseFloat"] = self._global_parsefloat
 
     def _console_log(self, *args: JSValue) -> None:
         """Console.log implementation."""
@@ -294,6 +307,194 @@ class JSContext:
         json_obj.set("stringify", stringify_fn)
 
         return json_obj
+
+    def _create_number_constructor(self) -> JSObject:
+        """Create the Number constructor with static methods."""
+        num_constructor = JSObject()
+
+        def isNaN_fn(*args):
+            x = args[0] if args else UNDEFINED
+            # Number.isNaN only returns true for actual NaN
+            if not isinstance(x, (int, float)):
+                return False
+            return math.isnan(x)
+
+        def isFinite_fn(*args):
+            x = args[0] if args else UNDEFINED
+            if not isinstance(x, (int, float)):
+                return False
+            return not (math.isnan(x) or math.isinf(x))
+
+        def isInteger_fn(*args):
+            x = args[0] if args else UNDEFINED
+            if not isinstance(x, (int, float)):
+                return False
+            if math.isnan(x) or math.isinf(x):
+                return False
+            return x == int(x)
+
+        def parseInt_fn(*args):
+            s = to_string(args[0]) if args else ""
+            radix = int(to_number(args[1])) if len(args) > 1 else 10
+            if radix == 0:
+                radix = 10
+            s = s.strip()
+            if not s:
+                return float('nan')
+            # Handle leading sign
+            sign = 1
+            if s.startswith('-'):
+                sign = -1
+                s = s[1:]
+            elif s.startswith('+'):
+                s = s[1:]
+            # Handle 0x prefix for hex
+            if s.startswith('0x') or s.startswith('0X'):
+                radix = 16
+                s = s[2:]
+            # Parse digits
+            result = 0
+            found = False
+            for ch in s:
+                if ch.isdigit():
+                    digit = ord(ch) - ord('0')
+                elif ch.isalpha():
+                    digit = ord(ch.lower()) - ord('a') + 10
+                else:
+                    break
+                if digit >= radix:
+                    break
+                result = result * radix + digit
+                found = True
+            if not found:
+                return float('nan')
+            return sign * result
+
+        def parseFloat_fn(*args):
+            s = to_string(args[0]) if args else ""
+            s = s.strip()
+            if not s:
+                return float('nan')
+            # Find the longest valid float prefix
+            i = 0
+            has_dot = False
+            has_exp = False
+            if s[i] in '+-':
+                i += 1
+            while i < len(s):
+                if s[i].isdigit():
+                    i += 1
+                elif s[i] == '.' and not has_dot:
+                    has_dot = True
+                    i += 1
+                elif s[i] in 'eE' and not has_exp:
+                    has_exp = True
+                    i += 1
+                    if i < len(s) and s[i] in '+-':
+                        i += 1
+                else:
+                    break
+            if i == 0:
+                return float('nan')
+            try:
+                return float(s[:i])
+            except ValueError:
+                return float('nan')
+
+        num_constructor.set("isNaN", isNaN_fn)
+        num_constructor.set("isFinite", isFinite_fn)
+        num_constructor.set("isInteger", isInteger_fn)
+        num_constructor.set("parseInt", parseInt_fn)
+        num_constructor.set("parseFloat", parseFloat_fn)
+
+        return num_constructor
+
+    def _create_date_constructor(self) -> JSObject:
+        """Create the Date constructor with static methods."""
+        date_constructor = JSObject()
+
+        def now_fn(*args):
+            return int(time.time() * 1000)
+
+        date_constructor.set("now", now_fn)
+
+        return date_constructor
+
+    def _global_isnan(self, *args) -> bool:
+        """Global isNaN - converts argument to number first."""
+        x = to_number(args[0]) if args else float('nan')
+        return math.isnan(x)
+
+    def _global_isfinite(self, *args) -> bool:
+        """Global isFinite - converts argument to number first."""
+        x = to_number(args[0]) if args else float('nan')
+        return not (math.isnan(x) or math.isinf(x))
+
+    def _global_parseint(self, *args):
+        """Global parseInt."""
+        s = to_string(args[0]) if args else ""
+        radix = int(to_number(args[1])) if len(args) > 1 else 10
+        if radix == 0:
+            radix = 10
+        s = s.strip()
+        if not s:
+            return float('nan')
+        sign = 1
+        if s.startswith('-'):
+            sign = -1
+            s = s[1:]
+        elif s.startswith('+'):
+            s = s[1:]
+        if s.startswith('0x') or s.startswith('0X'):
+            radix = 16
+            s = s[2:]
+        result = 0
+        found = False
+        for ch in s:
+            if ch.isdigit():
+                digit = ord(ch) - ord('0')
+            elif ch.isalpha():
+                digit = ord(ch.lower()) - ord('a') + 10
+            else:
+                break
+            if digit >= radix:
+                break
+            result = result * radix + digit
+            found = True
+        if not found:
+            return float('nan')
+        return sign * result
+
+    def _global_parsefloat(self, *args):
+        """Global parseFloat."""
+        s = to_string(args[0]) if args else ""
+        s = s.strip()
+        if not s:
+            return float('nan')
+        i = 0
+        has_dot = False
+        has_exp = False
+        if s[i] in '+-':
+            i += 1
+        while i < len(s):
+            if s[i].isdigit():
+                i += 1
+            elif s[i] == '.' and not has_dot:
+                has_dot = True
+                i += 1
+            elif s[i] in 'eE' and not has_exp:
+                has_exp = True
+                i += 1
+                if i < len(s) and s[i] in '+-':
+                    i += 1
+            else:
+                break
+        if i == 0:
+            return float('nan')
+        try:
+            return float(s[:i])
+        except ValueError:
+            return float('nan')
 
     def eval(self, code: str) -> Any:
         """Evaluate JavaScript code and return the result.

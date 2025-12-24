@@ -1,11 +1,13 @@
 """JavaScript execution context."""
 
+import math
+import random
 from typing import Any, Dict, Optional
 
 from .parser import Parser
 from .compiler import Compiler
 from .vm import VM
-from .values import UNDEFINED, NULL, JSValue, JSObject, JSArray, to_string
+from .values import UNDEFINED, NULL, JSValue, JSObject, JSArray, to_string, to_number
 from .errors import JSError, MemoryLimitError, TimeLimitError
 
 
@@ -45,6 +47,9 @@ class JSContext:
         self._globals["Array"] = self._array_constructor
         self._globals["Error"] = self._error_constructor
 
+        # Math object
+        self._globals["Math"] = self._create_math_object()
+
     def _console_log(self, *args: JSValue) -> None:
         """Console.log implementation."""
         print(" ".join(to_string(arg) for arg in args))
@@ -68,6 +73,145 @@ class JSContext:
         err.set("message", to_string(message) if message is not UNDEFINED else "")
         err.set("name", "Error")
         return err
+
+    def _create_math_object(self) -> JSObject:
+        """Create the Math global object."""
+        math_obj = JSObject()
+
+        # Constants
+        math_obj.set("PI", math.pi)
+        math_obj.set("E", math.e)
+        math_obj.set("LN2", math.log(2))
+        math_obj.set("LN10", math.log(10))
+        math_obj.set("LOG2E", 1 / math.log(2))
+        math_obj.set("LOG10E", 1 / math.log(10))
+        math_obj.set("SQRT2", math.sqrt(2))
+        math_obj.set("SQRT1_2", math.sqrt(0.5))
+
+        # Basic functions
+        def abs_fn(*args):
+            x = to_number(args[0]) if args else float('nan')
+            return abs(x)
+
+        def floor_fn(*args):
+            x = to_number(args[0]) if args else float('nan')
+            return math.floor(x)
+
+        def ceil_fn(*args):
+            x = to_number(args[0]) if args else float('nan')
+            return math.ceil(x)
+
+        def round_fn(*args):
+            x = to_number(args[0]) if args else float('nan')
+            # JavaScript-style round (round half towards positive infinity)
+            return math.floor(x + 0.5)
+
+        def trunc_fn(*args):
+            x = to_number(args[0]) if args else float('nan')
+            return math.trunc(x)
+
+        def min_fn(*args):
+            if not args:
+                return float('inf')
+            nums = [to_number(a) for a in args]
+            return min(nums)
+
+        def max_fn(*args):
+            if not args:
+                return float('-inf')
+            nums = [to_number(a) for a in args]
+            return max(nums)
+
+        def pow_fn(*args):
+            x = to_number(args[0]) if args else float('nan')
+            y = to_number(args[1]) if len(args) > 1 else float('nan')
+            return math.pow(x, y)
+
+        def sqrt_fn(*args):
+            x = to_number(args[0]) if args else float('nan')
+            if x < 0:
+                return float('nan')
+            return math.sqrt(x)
+
+        def sin_fn(*args):
+            x = to_number(args[0]) if args else float('nan')
+            return math.sin(x)
+
+        def cos_fn(*args):
+            x = to_number(args[0]) if args else float('nan')
+            return math.cos(x)
+
+        def tan_fn(*args):
+            x = to_number(args[0]) if args else float('nan')
+            return math.tan(x)
+
+        def asin_fn(*args):
+            x = to_number(args[0]) if args else float('nan')
+            if x < -1 or x > 1:
+                return float('nan')
+            return math.asin(x)
+
+        def acos_fn(*args):
+            x = to_number(args[0]) if args else float('nan')
+            if x < -1 or x > 1:
+                return float('nan')
+            return math.acos(x)
+
+        def atan_fn(*args):
+            x = to_number(args[0]) if args else float('nan')
+            return math.atan(x)
+
+        def atan2_fn(*args):
+            y = to_number(args[0]) if args else float('nan')
+            x = to_number(args[1]) if len(args) > 1 else float('nan')
+            return math.atan2(y, x)
+
+        def log_fn(*args):
+            x = to_number(args[0]) if args else float('nan')
+            if x <= 0:
+                return float('-inf') if x == 0 else float('nan')
+            return math.log(x)
+
+        def exp_fn(*args):
+            x = to_number(args[0]) if args else float('nan')
+            return math.exp(x)
+
+        def random_fn(*args):
+            return random.random()
+
+        def sign_fn(*args):
+            x = to_number(args[0]) if args else float('nan')
+            if math.isnan(x):
+                return float('nan')
+            if x > 0:
+                return 1
+            if x < 0:
+                return -1
+            return 0
+
+        # Set all methods
+        math_obj.set("abs", abs_fn)
+        math_obj.set("floor", floor_fn)
+        math_obj.set("ceil", ceil_fn)
+        math_obj.set("round", round_fn)
+        math_obj.set("trunc", trunc_fn)
+        math_obj.set("min", min_fn)
+        math_obj.set("max", max_fn)
+        math_obj.set("pow", pow_fn)
+        math_obj.set("sqrt", sqrt_fn)
+        math_obj.set("sin", sin_fn)
+        math_obj.set("cos", cos_fn)
+        math_obj.set("tan", tan_fn)
+        math_obj.set("asin", asin_fn)
+        math_obj.set("acos", acos_fn)
+        math_obj.set("atan", atan_fn)
+        math_obj.set("atan2", atan2_fn)
+        math_obj.set("log", log_fn)
+        math_obj.set("exp", exp_fn)
+        math_obj.set("random", random_fn)
+        math_obj.set("sign", sign_fn)
+
+        return math_obj
 
     def eval(self, code: str) -> Any:
         """Evaluate JavaScript code and return the result.

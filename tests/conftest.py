@@ -1,4 +1,4 @@
-"""Pytest configuration for mquickjs-python tests."""
+"""Pytest configuration for microjs tests."""
 
 import pytest
 import signal

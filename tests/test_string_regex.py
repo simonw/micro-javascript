@@ -1,7 +1,7 @@
 """Test String methods that use RegExp."""
 
 import pytest
-from mquickjs_python import JSContext
+from microjs import JSContext
 
 
 class TestStringMatch:

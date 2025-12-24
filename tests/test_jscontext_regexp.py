@@ -1,7 +1,7 @@
 """Test RegExp integration with JSContext."""
 
 import pytest
-from mquickjs_python import JSContext
+from microjs import JSContext
 
 
 class TestRegExpConstructor:

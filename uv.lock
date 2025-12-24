@@ -21,7 +21,7 @@ wheels = [
 ]
 
 [[package]]
-name = "mquickjs-python"
+name = "microjs"
 version = "0.1.0"
 source = { editable = "." }
 

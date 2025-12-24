@@ -1,4 +1,4 @@
-# mquickjs-python
+# microjs
 
 A pure Python JavaScript engine, inspired by [MicroQuickJS](https://github.com/bellard/mquickjs).
 
@@ -14,7 +14,7 @@ This project provides a JavaScript execution environment with:
 ## Usage
 
 ```python
-from mquickjs_python import JSContext
+from microjs import JSContext
 
 # Create a context with optional limits
 ctx = JSContext(memory_limit=1024*1024, time_limit=5.0)

@@ -1,12 +1,12 @@
 """
-Comprehensive test suite for MQuickJS Regex Engine.
+Comprehensive test suite for microjs Regex Engine.
 
 Tests are organized by feature category, following TDD approach.
 Each section starts with simple cases and builds to complex ones.
 """
 
 import pytest
-from mquickjs_python.regex import RegExp, RegExpError
+from microjs.regex import RegExp, RegExpError
 
 
 class TestRegExpConstruction:

@@ -1,7 +1,7 @@
 """Test arrow function syntax."""
 
 import pytest
-from mquickjs_python import JSContext
+from microjs import JSContext
 
 
 class TestArrowFunctionBasics:

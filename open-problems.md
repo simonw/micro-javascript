@@ -1,6 +1,6 @@
-# Open Problems in mquickjs-python
+# Open Problems in microjs
 
-This document describes the known issues and limitations that remain as xfail tests in the mquickjs-python implementation.
+This document describes the known issues and limitations that remain as xfail tests in the microjs implementation.
 
 ## Deep Nesting / Recursion Limits
 

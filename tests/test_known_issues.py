@@ -1,5 +1,5 @@
 """
-Fine-grained tests for known issues in mquickjs-python.
+Fine-grained tests for known issues in microjs.
 
 Each test is marked with pytest.mark.xfail and documents a specific issue
 that needs to be fixed. When fixing an issue, the corresponding test should
@@ -15,7 +15,7 @@ Issues are organized by category:
 - Deep nesting (recursion limits)
 """
 import pytest
-from mquickjs_python import JSContext
+from microjs import JSContext
 
 
 # =============================================================================

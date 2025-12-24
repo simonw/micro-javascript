@@ -1,7 +1,7 @@
 [project]
-name = "mquickjs-python"
+name = "microjs"
 version = "0.1.0"
-description = "A pure Python JavaScript sandbox engine based on MQuickJS"
+description = "A pure Python JavaScript sandbox engine inspired by MicroQuickJS"
 readme = "README.md"
 authors = [
     { name = "Claude", email = "noreply@anthropic.com" }

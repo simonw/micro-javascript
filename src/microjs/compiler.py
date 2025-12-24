@@ -1093,20 +1093,30 @@ class Compiler:
             self._emit(OpCode.BUILD_OBJECT, len(node.properties))
 
         elif isinstance(node, UnaryExpression):
-            self._compile_expression(node.argument)
-            op_map = {
-                "-": OpCode.NEG,
-                "+": OpCode.POS,
-                "!": OpCode.NOT,
-                "~": OpCode.BNOT,
-                "typeof": OpCode.TYPEOF,
-            }
-            if node.operator in op_map:
-                self._emit(op_map[node.operator])
+            # Special case for typeof with identifier - must not throw for undeclared vars
+            if node.operator == "typeof" and isinstance(node.argument, Identifier):
+                name = node.argument.name
+                # Check for local, cell, or closure vars first
+                local_slot = self._get_local(name)
+                cell_slot = self._get_cell_var(name)
+                closure_slot = self._get_free_var(name)
+                if local_slot is not None:
+                    self._emit(OpCode.LOAD_LOCAL, local_slot)
+                    self._emit(OpCode.TYPEOF)
+                elif cell_slot is not None:
+                    self._emit(OpCode.LOAD_CELL, cell_slot)
+                    self._emit(OpCode.TYPEOF)
+                elif closure_slot is not None:
+                    self._emit(OpCode.LOAD_CLOSURE, closure_slot)
+                    self._emit(OpCode.TYPEOF)
+                else:
+                    # Use TYPEOF_NAME for global lookup - won't throw if undefined
+                    idx = self._add_constant(name)
+                    self._emit(OpCode.TYPEOF_NAME, idx)
             elif node.operator == "delete":
-                # Handle delete specially
+                # Handle delete specially - don't compile argument normally
                 if isinstance(node.argument, MemberExpression):
-                    # Recompile as delete operation
+                    # Compile as delete operation
                     self._compile_expression(node.argument.object)
                     if node.argument.computed:
                         self._compile_expression(node.argument.property)
@@ -1118,10 +1128,22 @@ class Compiler:
                     self._emit(OpCode.LOAD_TRUE)  # delete on non-property returns true
             elif node.operator == "void":
                 # void evaluates argument for side effects, returns undefined
+                self._compile_expression(node.argument)
                 self._emit(OpCode.POP)  # Discard the argument value
                 self._emit(OpCode.LOAD_UNDEFINED)
             else:
-                raise NotImplementedError(f"Unary operator: {node.operator}")
+                self._compile_expression(node.argument)
+                op_map = {
+                    "-": OpCode.NEG,
+                    "+": OpCode.POS,
+                    "!": OpCode.NOT,
+                    "~": OpCode.BNOT,
+                    "typeof": OpCode.TYPEOF,
+                }
+                if node.operator in op_map:
+                    self._emit(op_map[node.operator])
+                else:
+                    raise NotImplementedError(f"Unary operator: {node.operator}")
 
         elif isinstance(node, UpdateExpression):
             # ++x or x++

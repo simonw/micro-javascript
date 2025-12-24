@@ -44,7 +44,7 @@ class JSContext:
         self._globals["undefined"] = UNDEFINED
 
         # Basic type constructors (minimal implementations)
-        self._globals["Object"] = self._object_constructor
+        self._globals["Object"] = self._create_object_constructor()
         self._globals["Array"] = self._array_constructor
         self._globals["Error"] = self._error_constructor
 
@@ -58,9 +58,58 @@ class JSContext:
         """Console.log implementation."""
         print(" ".join(to_string(arg) for arg in args))
 
-    def _object_constructor(self) -> JSObject:
-        """Object constructor."""
-        return JSObject()
+    def _create_object_constructor(self) -> JSObject:
+        """Create the Object constructor with static methods."""
+        # Create a callable object that acts as constructor
+        obj_constructor = JSObject()
+
+        def keys_fn(*args):
+            obj = args[0] if args else UNDEFINED
+            if not isinstance(obj, JSObject):
+                return JSArray()
+            arr = JSArray()
+            arr._elements = list(obj.keys())
+            return arr
+
+        def values_fn(*args):
+            obj = args[0] if args else UNDEFINED
+            if not isinstance(obj, JSObject):
+                return JSArray()
+            arr = JSArray()
+            arr._elements = [obj.get(k) for k in obj.keys()]
+            return arr
+
+        def entries_fn(*args):
+            obj = args[0] if args else UNDEFINED
+            if not isinstance(obj, JSObject):
+                return JSArray()
+            arr = JSArray()
+            arr._elements = []
+            for k in obj.keys():
+                entry = JSArray()
+                entry._elements = [k, obj.get(k)]
+                arr._elements.append(entry)
+            return arr
+
+        def assign_fn(*args):
+            if not args:
+                return JSObject()
+            target = args[0]
+            if not isinstance(target, JSObject):
+                return target
+            for i in range(1, len(args)):
+                source = args[i]
+                if isinstance(source, JSObject):
+                    for k in source.keys():
+                        target.set(k, source.get(k))
+            return target
+
+        obj_constructor.set("keys", keys_fn)
+        obj_constructor.set("values", values_fn)
+        obj_constructor.set("entries", entries_fn)
+        obj_constructor.set("assign", assign_fn)
+
+        return obj_constructor
 
     def _array_constructor(self, *args: JSValue) -> JSArray:
         """Array constructor."""

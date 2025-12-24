@@ -1185,6 +1185,44 @@ class Compiler:
                                 self._emit(inc_op)
                                 self._emit(OpCode.STORE_NAME, idx)
                                 self._emit(OpCode.POP)
+            elif isinstance(node.argument, MemberExpression):
+                # a.x++ or arr[i]++
+                inc_op = OpCode.INC if node.operator == "++" else OpCode.DEC
+
+                # Compile object
+                self._compile_expression(node.argument.object)
+                # Compile property (or load constant)
+                if node.argument.computed:
+                    self._compile_expression(node.argument.property)
+                else:
+                    idx = self._add_constant(node.argument.property.name)
+                    self._emit(OpCode.LOAD_CONST, idx)
+
+                # Stack: [obj, prop]
+                self._emit(OpCode.DUP2)  # [obj, prop, obj, prop]
+                self._emit(OpCode.GET_PROP)  # [obj, prop, old_value]
+
+                if node.prefix:
+                    # ++a.x: return new value
+                    self._emit(inc_op)  # [obj, prop, new_value]
+                    self._emit(OpCode.DUP)  # [obj, prop, new_value, new_value]
+                    # Rearrange: [obj, prop, nv, nv] -> [nv, obj, prop, nv]
+                    self._emit(OpCode.ROT4)  # [prop, nv, nv, obj]
+                    self._emit(OpCode.ROT4)  # [nv, nv, obj, prop]
+                    self._emit(OpCode.ROT4)  # [nv, obj, prop, nv]
+                    self._emit(OpCode.SET_PROP)  # [nv, nv]
+                    self._emit(OpCode.POP)  # [nv]
+                else:
+                    # a.x++: return old value
+                    self._emit(OpCode.DUP)  # [obj, prop, old_value, old_value]
+                    self._emit(inc_op)  # [obj, prop, old_value, new_value]
+                    # Rearrange: [obj, prop, old_value, new_value] -> [old_value, obj, prop, new_value]
+                    self._emit(OpCode.SWAP)  # [obj, prop, new_value, old_value]
+                    self._emit(OpCode.ROT4)  # [prop, new_value, old_value, obj]
+                    self._emit(OpCode.ROT4)  # [new_value, old_value, obj, prop]
+                    self._emit(OpCode.ROT4)  # [old_value, obj, prop, new_value]
+                    self._emit(OpCode.SET_PROP)  # [old_value, new_value]
+                    self._emit(OpCode.POP)  # [old_value]
             else:
                 raise NotImplementedError("Update expression on non-identifier")
 

@@ -405,10 +405,13 @@ class JSTypedArray(JSObject):
     # Subclasses override these
     _element_size = 1  # bytes per element
     _type_name = "TypedArray"
+    _signed = False
 
     def __init__(self, length: int = 0):
         super().__init__()
         self._data = [0] * length
+        self._buffer = None
+        self._byte_offset = 0
 
     @property
     def length(self) -> int:
@@ -416,12 +419,44 @@ class JSTypedArray(JSObject):
 
     def get_index(self, index: int):
         if 0 <= index < len(self._data):
+            if self._buffer is not None:
+                # Read from buffer
+                return self._read_from_buffer(index)
             return self._data[index]
         return UNDEFINED
 
     def set_index(self, index: int, value) -> None:
         if 0 <= index < len(self._data):
-            self._data[index] = self._coerce_value(value)
+            coerced = self._coerce_value(value)
+            self._data[index] = coerced
+            if self._buffer is not None:
+                # Write to buffer
+                self._write_to_buffer(index, coerced)
+
+    def _read_from_buffer(self, index: int):
+        """Read a value from the underlying buffer."""
+        import struct
+        offset = self._byte_offset + index * self._element_size
+        data = bytes(self._buffer._data[offset:offset + self._element_size])
+        if len(data) < self._element_size:
+            return 0
+        return self._unpack_value(data)
+
+    def _write_to_buffer(self, index: int, value) -> None:
+        """Write a value to the underlying buffer."""
+        import struct
+        offset = self._byte_offset + index * self._element_size
+        packed = self._pack_value(value)
+        for i, b in enumerate(packed):
+            self._buffer._data[offset + i] = b
+
+    def _unpack_value(self, data: bytes):
+        """Unpack bytes to a value. Override in subclasses for float types."""
+        return int.from_bytes(data, 'little', signed=self._signed)
+
+    def _pack_value(self, value) -> bytes:
+        """Pack a value to bytes. Override in subclasses for float types."""
+        return int(value).to_bytes(self._element_size, 'little', signed=self._signed)
 
     def _coerce_value(self, value):
         """Coerce value to the appropriate type. Override in subclasses."""
@@ -436,6 +471,7 @@ class JSInt32Array(JSTypedArray):
 
     _element_size = 4
     _type_name = "Int32Array"
+    _signed = True
 
     def _coerce_value(self, value):
         """Coerce to signed 32-bit integer."""
@@ -454,6 +490,7 @@ class JSUint32Array(JSTypedArray):
 
     _element_size = 4
     _type_name = "Uint32Array"
+    _signed = False
 
     def _coerce_value(self, value):
         """Coerce to unsigned 32-bit integer."""
@@ -467,6 +504,7 @@ class JSFloat64Array(JSTypedArray):
 
     _element_size = 8
     _type_name = "Float64Array"
+    _signed = False
 
     def _coerce_value(self, value):
         """Coerce to float."""
@@ -474,12 +512,23 @@ class JSFloat64Array(JSTypedArray):
             return float(value)
         return 0.0
 
+    def _unpack_value(self, data: bytes):
+        """Unpack bytes to float64."""
+        import struct
+        return struct.unpack('<d', data)[0]
+
+    def _pack_value(self, value) -> bytes:
+        """Pack float64 to bytes."""
+        import struct
+        return struct.pack('<d', float(value))
+
 
 class JSUint8Array(JSTypedArray):
     """JavaScript Uint8Array."""
 
     _element_size = 1
     _type_name = "Uint8Array"
+    _signed = False
 
     def _coerce_value(self, value):
         """Coerce to unsigned 8-bit integer."""
@@ -493,6 +542,7 @@ class JSInt8Array(JSTypedArray):
 
     _element_size = 1
     _type_name = "Int8Array"
+    _signed = True
 
     def _coerce_value(self, value):
         """Coerce to signed 8-bit integer."""
@@ -509,6 +559,7 @@ class JSInt16Array(JSTypedArray):
 
     _element_size = 2
     _type_name = "Int16Array"
+    _signed = True
 
     def _coerce_value(self, value):
         """Coerce to signed 16-bit integer."""
@@ -525,9 +576,72 @@ class JSUint16Array(JSTypedArray):
 
     _element_size = 2
     _type_name = "Uint16Array"
+    _signed = False
 
     def _coerce_value(self, value):
         """Coerce to unsigned 16-bit integer."""
         if isinstance(value, (int, float)):
             return int(value) & 0xFFFF
         return 0
+
+
+class JSUint8ClampedArray(JSTypedArray):
+    """JavaScript Uint8ClampedArray."""
+
+    _element_size = 1
+    _type_name = "Uint8ClampedArray"
+
+    def _coerce_value(self, value):
+        """Coerce to clamped unsigned 8-bit integer (0-255)."""
+        if isinstance(value, (int, float)):
+            # Round half to even for 0.5 values
+            v = round(value)
+            # Clamp to 0-255
+            if v < 0:
+                return 0
+            if v > 255:
+                return 255
+            return v
+        return 0
+
+
+class JSFloat32Array(JSTypedArray):
+    """JavaScript Float32Array."""
+
+    _element_size = 4
+    _type_name = "Float32Array"
+    _signed = False
+
+    def _coerce_value(self, value):
+        """Coerce to 32-bit float."""
+        import struct
+        if isinstance(value, (int, float)):
+            # Convert to float32 and back to simulate precision loss
+            packed = struct.pack('<f', float(value))
+            return struct.unpack('<f', packed)[0]
+        return 0.0
+
+    def _unpack_value(self, data: bytes):
+        """Unpack bytes to float32."""
+        import struct
+        return struct.unpack('<f', data)[0]
+
+    def _pack_value(self, value) -> bytes:
+        """Pack float32 to bytes."""
+        import struct
+        return struct.pack('<f', float(value))
+
+
+class JSArrayBuffer(JSObject):
+    """JavaScript ArrayBuffer - raw binary data buffer."""
+
+    def __init__(self, byte_length: int = 0):
+        super().__init__()
+        self._data = bytearray(byte_length)
+
+    @property
+    def byteLength(self) -> int:
+        return len(self._data)
+
+    def __repr__(self) -> str:
+        return f"ArrayBuffer({self.byteLength})"

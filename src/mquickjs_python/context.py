@@ -83,10 +83,15 @@ class JSContext:
         self._globals["Int32Array"] = self._create_typed_array_constructor("Int32Array")
         self._globals["Uint32Array"] = self._create_typed_array_constructor("Uint32Array")
         self._globals["Float64Array"] = self._create_typed_array_constructor("Float64Array")
+        self._globals["Float32Array"] = self._create_typed_array_constructor("Float32Array")
         self._globals["Uint8Array"] = self._create_typed_array_constructor("Uint8Array")
         self._globals["Int8Array"] = self._create_typed_array_constructor("Int8Array")
         self._globals["Int16Array"] = self._create_typed_array_constructor("Int16Array")
         self._globals["Uint16Array"] = self._create_typed_array_constructor("Uint16Array")
+        self._globals["Uint8ClampedArray"] = self._create_typed_array_constructor("Uint8ClampedArray")
+
+        # ArrayBuffer constructor
+        self._globals["ArrayBuffer"] = self._create_arraybuffer_constructor()
 
         # Global number functions
         self._globals["isNaN"] = self._global_isnan
@@ -924,18 +929,21 @@ class JSContext:
     def _create_typed_array_constructor(self, name: str) -> JSCallableObject:
         """Create a typed array constructor (Int32Array, Uint8Array, etc.)."""
         from .values import (
-            JSInt32Array, JSUint32Array, JSFloat64Array,
-            JSUint8Array, JSInt8Array, JSInt16Array, JSUint16Array
+            JSInt32Array, JSUint32Array, JSFloat64Array, JSFloat32Array,
+            JSUint8Array, JSInt8Array, JSInt16Array, JSUint16Array,
+            JSUint8ClampedArray, JSArrayBuffer, JSArray
         )
 
         type_classes = {
             "Int32Array": JSInt32Array,
             "Uint32Array": JSUint32Array,
             "Float64Array": JSFloat64Array,
+            "Float32Array": JSFloat32Array,
             "Uint8Array": JSUint8Array,
             "Int8Array": JSInt8Array,
             "Int16Array": JSInt16Array,
             "Uint16Array": JSUint16Array,
+            "Uint8ClampedArray": JSUint8ClampedArray,
         }
 
         array_class = type_classes[name]
@@ -947,11 +955,56 @@ class JSContext:
             if isinstance(arg, (int, float)):
                 # new Int32Array(length)
                 return array_class(int(arg))
-            # Could also support creating from array, but for now just length
+            elif isinstance(arg, JSArrayBuffer):
+                # new Int32Array(buffer, byteOffset?, length?)
+                buffer = arg
+                byte_offset = int(args[1]) if len(args) > 1 else 0
+                element_size = array_class._element_size
+
+                if len(args) > 2:
+                    length = int(args[2])
+                else:
+                    length = (buffer.byteLength - byte_offset) // element_size
+
+                result = array_class(length)
+                result._buffer = buffer
+                result._byte_offset = byte_offset
+
+                # Read values from buffer
+                import struct
+                for i in range(length):
+                    offset = byte_offset + i * element_size
+                    if name in ("Float32Array", "Float64Array"):
+                        fmt = 'f' if element_size == 4 else 'd'
+                        val = struct.unpack(fmt, bytes(buffer._data[offset:offset+element_size]))[0]
+                    else:
+                        val = int.from_bytes(buffer._data[offset:offset+element_size], 'little', signed='Int' in name)
+                    result._data[i] = result._coerce_value(val)
+
+                return result
+            elif isinstance(arg, JSArray):
+                # new Int32Array([1, 2, 3])
+                length = arg.length
+                result = array_class(length)
+                for i in range(length):
+                    result.set_index(i, arg.get_index(i))
+                return result
             return array_class(0)
 
         constructor = JSCallableObject(constructor_fn)
         constructor._name = name
+        return constructor
+
+    def _create_arraybuffer_constructor(self) -> JSCallableObject:
+        """Create the ArrayBuffer constructor."""
+        from .values import JSArrayBuffer
+
+        def constructor_fn(*args):
+            length = int(args[0]) if args else 0
+            return JSArrayBuffer(length)
+
+        constructor = JSCallableObject(constructor_fn)
+        constructor._name = "ArrayBuffer"
         return constructor
 
     def _create_eval_function(self):

@@ -713,6 +713,15 @@ class VM:
                 pass
             if key_str == "length":
                 return len(obj)
+            # String methods
+            string_methods = [
+                "charAt", "charCodeAt", "indexOf", "lastIndexOf",
+                "substring", "slice", "split", "toLowerCase", "toUpperCase",
+                "trim", "concat", "repeat", "startsWith", "endsWith",
+                "includes", "replace", "toString",
+            ]
+            if key_str in string_methods:
+                return self._make_string_method(obj, key_str)
             return UNDEFINED
 
         return UNDEFINED
@@ -749,6 +758,136 @@ class VM:
 
         methods = {
             "toString": toString_fn,
+        }
+        return methods.get(method, lambda *args: UNDEFINED)
+
+    def _make_string_method(self, s: str, method: str) -> Any:
+        """Create a bound string method."""
+        def charAt(*args):
+            idx = int(to_number(args[0])) if args else 0
+            if 0 <= idx < len(s):
+                return s[idx]
+            return ""
+
+        def charCodeAt(*args):
+            idx = int(to_number(args[0])) if args else 0
+            if 0 <= idx < len(s):
+                return ord(s[idx])
+            return float('nan')
+
+        def indexOf(*args):
+            search = to_string(args[0]) if args else ""
+            start = int(to_number(args[1])) if len(args) > 1 else 0
+            if start < 0:
+                start = 0
+            return s.find(search, start)
+
+        def lastIndexOf(*args):
+            search = to_string(args[0]) if args else ""
+            end = int(to_number(args[1])) if len(args) > 1 else len(s)
+            # Python's rfind with end position
+            return s.rfind(search, 0, end + len(search))
+
+        def substring(*args):
+            start = int(to_number(args[0])) if args else 0
+            end = int(to_number(args[1])) if len(args) > 1 else len(s)
+            # Clamp and swap if needed
+            if start < 0:
+                start = 0
+            if end < 0:
+                end = 0
+            if start > end:
+                start, end = end, start
+            return s[start:end]
+
+        def slice_fn(*args):
+            start = int(to_number(args[0])) if args else 0
+            end = int(to_number(args[1])) if len(args) > 1 else len(s)
+            # Handle negative indices
+            if start < 0:
+                start = max(0, len(s) + start)
+            if end < 0:
+                end = max(0, len(s) + end)
+            return s[start:end]
+
+        def split(*args):
+            sep = to_string(args[0]) if args else UNDEFINED
+            limit = int(to_number(args[1])) if len(args) > 1 else -1
+            if sep is UNDEFINED:
+                parts = [s]
+            elif sep == "":
+                parts = list(s)
+            else:
+                parts = s.split(sep)
+            if limit >= 0:
+                parts = parts[:limit]
+            arr = JSArray()
+            arr._elements = parts
+            return arr
+
+        def toLowerCase(*args):
+            return s.lower()
+
+        def toUpperCase(*args):
+            return s.upper()
+
+        def trim(*args):
+            return s.strip()
+
+        def concat(*args):
+            result = s
+            for arg in args:
+                result += to_string(arg)
+            return result
+
+        def repeat(*args):
+            count = int(to_number(args[0])) if args else 0
+            if count < 0:
+                raise JSReferenceError("Invalid count value")
+            return s * count
+
+        def startsWith(*args):
+            search = to_string(args[0]) if args else ""
+            pos = int(to_number(args[1])) if len(args) > 1 else 0
+            return s[pos:].startswith(search)
+
+        def endsWith(*args):
+            search = to_string(args[0]) if args else ""
+            length = int(to_number(args[1])) if len(args) > 1 else len(s)
+            return s[:length].endswith(search)
+
+        def includes(*args):
+            search = to_string(args[0]) if args else ""
+            pos = int(to_number(args[1])) if len(args) > 1 else 0
+            return search in s[pos:]
+
+        def replace(*args):
+            search = to_string(args[0]) if args else ""
+            replacement = to_string(args[1]) if len(args) > 1 else "undefined"
+            # Only replace first occurrence
+            return s.replace(search, replacement, 1)
+
+        def toString(*args):
+            return s
+
+        methods = {
+            "charAt": charAt,
+            "charCodeAt": charCodeAt,
+            "indexOf": indexOf,
+            "lastIndexOf": lastIndexOf,
+            "substring": substring,
+            "slice": slice_fn,
+            "split": split,
+            "toLowerCase": toLowerCase,
+            "toUpperCase": toUpperCase,
+            "trim": trim,
+            "concat": concat,
+            "repeat": repeat,
+            "startsWith": startsWith,
+            "endsWith": endsWith,
+            "includes": includes,
+            "replace": replace,
+            "toString": toString,
         }
         return methods.get(method, lambda *args: UNDEFINED)
 

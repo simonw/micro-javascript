@@ -68,6 +68,7 @@ PASSING_TESTS = {
     "test_array_ext",
     "test_enum",
     "test_function",
+    "test_global_eval",
     "test_number",
     "test_math",
     "test_json",
@@ -76,7 +77,6 @@ PASSING_TESTS = {
 
 # Tests that are known to fail (with reasons)
 FAILING_TESTS = {
-    "test_global_eval": "Indirect eval doesn't run in global scope",
     "test_regexp": "Capture groups inside repetitions not reset correctly",
     "test_line_column_numbers": "Line/column tracking not implemented",
     "test_large_eval_parse_stack": "Deeply nested parsing not implemented",

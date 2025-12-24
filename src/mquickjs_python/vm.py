@@ -2,7 +2,7 @@
 
 import math
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 from dataclasses import dataclass
 
 from .opcodes import OpCode
@@ -156,7 +156,7 @@ class VM:
                 OpCode.LOAD_CELL, OpCode.STORE_CELL,
                 OpCode.CALL, OpCode.CALL_METHOD, OpCode.NEW,
                 OpCode.BUILD_ARRAY, OpCode.BUILD_OBJECT, OpCode.BUILD_REGEX,
-                OpCode.MAKE_CLOSURE,
+                OpCode.MAKE_CLOSURE, OpCode.TYPEOF_NAME,
             ):
                 arg = bytecode[frame.ip]
                 frame.ip += 1
@@ -293,10 +293,18 @@ class VM:
                 elements.insert(0, self.stack.pop())
             arr = JSArray()
             arr._elements = elements
+            # Set prototype from Array constructor
+            array_constructor = self.globals.get("Array")
+            if array_constructor and hasattr(array_constructor, '_prototype'):
+                arr._prototype = array_constructor._prototype
             self.stack.append(arr)
 
         elif op == OpCode.BUILD_OBJECT:
             obj = JSObject()
+            # Set prototype from Object constructor
+            object_constructor = self.globals.get("Object")
+            if object_constructor and hasattr(object_constructor, '_prototype'):
+                obj._prototype = object_constructor._prototype
             props = []
             for _ in range(arg):
                 value = self.stack.pop()
@@ -309,6 +317,12 @@ class VM:
                     obj.define_getter(key_str, value)
                 elif kind == "set":
                     obj.define_setter(key_str, value)
+                elif key_str == "__proto__" and kind == "init":
+                    # __proto__ in object literal sets the prototype
+                    if value is NULL or value is None:
+                        obj._prototype = None
+                    elif isinstance(value, JSObject):
+                        obj._prototype = value
                 else:
                     obj.set(key_str, value)
             self.stack.append(obj)
@@ -332,8 +346,8 @@ class VM:
         elif op == OpCode.MUL:
             b = self.stack.pop()
             a = self.stack.pop()
-            a_num = float(to_number(a))  # Use float for proper -0 handling
-            b_num = float(to_number(b))
+            a_num = float(self._to_number(a))  # Use float for proper -0 handling
+            b_num = float(self._to_number(b))
             self.stack.append(a_num * b_num)
 
         elif op == OpCode.DIV:
@@ -476,13 +490,43 @@ class VM:
             a = self.stack.pop()
             self.stack.append(js_typeof(a))
 
+        elif op == OpCode.TYPEOF_NAME:
+            # Special typeof that returns "undefined" for undeclared variables
+            name = frame.func.constants[arg]
+            if name in self.globals:
+                self.stack.append(js_typeof(self.globals[name]))
+            else:
+                self.stack.append("undefined")
+
         elif op == OpCode.INSTANCEOF:
             constructor = self.stack.pop()
             obj = self.stack.pop()
-            # Simplified instanceof
-            if not isinstance(constructor, JSFunction):
+            # Check if constructor is callable
+            if not (isinstance(constructor, JSFunction) or
+                    (isinstance(constructor, JSObject) and hasattr(constructor, '_call_fn'))):
                 raise JSTypeError("Right-hand side of instanceof is not callable")
-            self.stack.append(isinstance(obj, JSObject))
+
+            # Check prototype chain
+            if not isinstance(obj, JSObject):
+                self.stack.append(False)
+            else:
+                # Get constructor's prototype property
+                if isinstance(constructor, JSFunction) and hasattr(constructor, '_prototype'):
+                    proto = constructor._prototype
+                elif isinstance(constructor, JSObject) and hasattr(constructor, '_prototype'):
+                    proto = constructor._prototype
+                else:
+                    proto = constructor.get("prototype") if isinstance(constructor, JSObject) else None
+
+                # Walk the prototype chain
+                result = False
+                current = getattr(obj, '_prototype', None)
+                while current is not None:
+                    if current is proto:
+                        result = True
+                        break
+                    current = getattr(current, '_prototype', None)
+                self.stack.append(result)
 
         elif op == OpCode.IN:
             obj = self.stack.pop()
@@ -634,6 +678,12 @@ class VM:
                 )
                 js_func._compiled = compiled_func
 
+                # Create prototype object for the function
+                # In JavaScript, every function has a prototype property
+                prototype = JSObject()
+                prototype.set("constructor", js_func)
+                js_func._prototype = prototype
+
                 # Capture closure cells for free variables
                 if compiled_func.free_vars:
                     closure_cells = []
@@ -672,8 +722,50 @@ class VM:
                 return name
         return f"<name_{index}>"
 
+    def _to_primitive(self, value: JSValue, hint: str = "default") -> JSValue:
+        """Convert an object to a primitive value (ToPrimitive).
+
+        hint can be "default", "number", or "string"
+        """
+        if not isinstance(value, JSObject):
+            return value
+
+        # For default hint, try valueOf first (like number), then toString
+        if hint == "string":
+            method_order = ["toString", "valueOf"]
+        else:  # default or number
+            method_order = ["valueOf", "toString"]
+
+        for method_name in method_order:
+            method = value.get(method_name)
+            if method is UNDEFINED or method is NULL:
+                continue
+            if isinstance(method, JSFunction):
+                result = self._call_callback(method, [], value)
+                if not isinstance(result, JSObject):
+                    return result
+            elif callable(method):
+                result = method()
+                if not isinstance(result, JSObject):
+                    return result
+
+        # If we get here, conversion failed
+        raise JSTypeError("Cannot convert object to primitive value")
+
+    def _to_number(self, value: JSValue) -> Union[int, float]:
+        """Convert to number, with ToPrimitive for objects."""
+        if isinstance(value, JSObject):
+            value = self._to_primitive(value, "number")
+        return to_number(value)
+
     def _add(self, a: JSValue, b: JSValue) -> JSValue:
         """JavaScript + operator."""
+        # First convert objects to primitives
+        if isinstance(a, JSObject):
+            a = self._to_primitive(a, "default")
+        if isinstance(b, JSObject):
+            b = self._to_primitive(b, "default")
+
         # String concatenation if either is string
         if isinstance(a, str) or isinstance(b, str):
             return to_string(a) + to_string(b)
@@ -802,6 +894,8 @@ class VM:
                 return len(obj.params)
             if key_str == "name":
                 return obj.name
+            if key_str == "prototype":
+                return getattr(obj, '_prototype', UNDEFINED) or UNDEFINED
             return UNDEFINED
 
         if isinstance(obj, JSObject):
@@ -1469,14 +1563,8 @@ class VM:
     def _invoke_getter(self, getter: Any, this_val: JSValue) -> JSValue:
         """Invoke a getter function and return its result."""
         if isinstance(getter, JSFunction):
-            # Save current state
-            old_stack_len = len(self.stack)
-            # Invoke the getter with no arguments
-            self._invoke_js_function(getter, [], this_val)
-            # The result is on the stack
-            if len(self.stack) > old_stack_len:
-                return self.stack.pop()
-            return UNDEFINED
+            # Use synchronous execution (like _call_callback)
+            return self._call_callback(getter, [], this_val)
         elif callable(getter):
             return getter()
         return UNDEFINED
@@ -1484,11 +1572,8 @@ class VM:
     def _invoke_setter(self, setter: Any, this_val: JSValue, value: JSValue) -> None:
         """Invoke a setter function."""
         if isinstance(setter, JSFunction):
-            # Invoke the setter with the value as argument
-            self._invoke_js_function(setter, [value], this_val)
-            # Setter returns nothing, discard any result
-            if self.stack:
-                self.stack.pop()
+            # Use synchronous execution (like _call_callback)
+            self._call_callback(setter, [value], this_val)
         elif callable(setter):
             setter(value)
 
@@ -1518,17 +1603,18 @@ class VM:
         else:
             raise JSTypeError(f"{method} is not a function")
 
-    def _call_callback(self, callback: JSValue, args: List[JSValue]) -> JSValue:
+    def _call_callback(self, callback: JSValue, args: List[JSValue], this_val: JSValue = None) -> JSValue:
         """Call a callback function synchronously and return the result."""
         if isinstance(callback, JSFunction):
-            # Save current stack position
+            # Save current stack position AND call stack depth
             stack_len = len(self.stack)
+            call_stack_len = len(self.call_stack)
 
             # Invoke the function
-            self._invoke_js_function(callback, args, UNDEFINED)
+            self._invoke_js_function(callback, args, this_val if this_val is not None else UNDEFINED)
 
-            # Execute until the call returns
-            while len(self.call_stack) > 1:
+            # Execute until the call returns (back to original call stack depth)
+            while len(self.call_stack) > call_stack_len:
                 self._check_limits()
                 frame = self.call_stack[-1]
                 func = frame.func

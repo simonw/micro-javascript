@@ -1012,6 +1012,10 @@ class Compiler:
                     self._emit(OpCode.DELETE_PROP)
                 else:
                     self._emit(OpCode.LOAD_TRUE)  # delete on non-property returns true
+            elif node.operator == "void":
+                # void evaluates argument for side effects, returns undefined
+                self._emit(OpCode.POP)  # Discard the argument value
+                self._emit(OpCode.LOAD_UNDEFINED)
             else:
                 raise NotImplementedError(f"Unary operator: {node.operator}")
 

@@ -279,14 +279,20 @@ class VM:
 
         elif op == OpCode.BUILD_OBJECT:
             obj = JSObject()
-            pairs = []
+            props = []
             for _ in range(arg):
                 value = self.stack.pop()
+                kind = self.stack.pop()
                 key = self.stack.pop()
-                pairs.insert(0, (key, value))
-            for key, value in pairs:
+                props.insert(0, (key, kind, value))
+            for key, kind, value in props:
                 key_str = to_string(key) if not isinstance(key, str) else key
-                obj.set(key_str, value)
+                if kind == "get":
+                    obj.define_getter(key_str, value)
+                elif kind == "set":
+                    obj.define_setter(key_str, value)
+                else:
+                    obj.set(key_str, value)
             self.stack.append(obj)
 
         elif op == OpCode.BUILD_REGEX:
@@ -768,6 +774,10 @@ class VM:
             # Built-in Object methods
             if key_str in ("toString", "hasOwnProperty"):
                 return self._make_object_method(obj, key_str)
+            # Check for getter
+            getter = obj.get_getter(key_str)
+            if getter is not None:
+                return self._invoke_getter(getter, obj)
             return obj.get(key_str)
 
         if isinstance(obj, str):
@@ -1408,7 +1418,12 @@ class VM:
                 pass
             obj.set(key_str, value)
         elif isinstance(obj, JSObject):
-            obj.set(key_str, value)
+            # Check for setter
+            setter = obj.get_setter(key_str)
+            if setter is not None:
+                self._invoke_setter(setter, obj, value)
+            else:
+                obj.set(key_str, value)
 
     def _delete_property(self, obj: JSValue, key: JSValue) -> bool:
         """Delete property from object."""
@@ -1416,6 +1431,32 @@ class VM:
             key_str = to_string(key) if not isinstance(key, str) else key
             return obj.delete(key_str)
         return False
+
+    def _invoke_getter(self, getter: Any, this_val: JSValue) -> JSValue:
+        """Invoke a getter function and return its result."""
+        if isinstance(getter, JSFunction):
+            # Save current state
+            old_stack_len = len(self.stack)
+            # Invoke the getter with no arguments
+            self._invoke_js_function(getter, [], this_val)
+            # The result is on the stack
+            if len(self.stack) > old_stack_len:
+                return self.stack.pop()
+            return UNDEFINED
+        elif callable(getter):
+            return getter()
+        return UNDEFINED
+
+    def _invoke_setter(self, setter: Any, this_val: JSValue, value: JSValue) -> None:
+        """Invoke a setter function."""
+        if isinstance(setter, JSFunction):
+            # Invoke the setter with the value as argument
+            self._invoke_js_function(setter, [value], this_val)
+            # Setter returns nothing, discard any result
+            if self.stack:
+                self.stack.pop()
+        elif callable(setter):
+            setter(value)
 
     def _call_function(self, arg_count: int, this_val: Optional[JSValue]) -> None:
         """Call a function."""

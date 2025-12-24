@@ -79,6 +79,15 @@ class JSContext:
         # Function constructor
         self._globals["Function"] = self._create_function_constructor()
 
+        # Typed array constructors
+        self._globals["Int32Array"] = self._create_typed_array_constructor("Int32Array")
+        self._globals["Uint32Array"] = self._create_typed_array_constructor("Uint32Array")
+        self._globals["Float64Array"] = self._create_typed_array_constructor("Float64Array")
+        self._globals["Uint8Array"] = self._create_typed_array_constructor("Uint8Array")
+        self._globals["Int8Array"] = self._create_typed_array_constructor("Int8Array")
+        self._globals["Int16Array"] = self._create_typed_array_constructor("Int16Array")
+        self._globals["Uint16Array"] = self._create_typed_array_constructor("Uint16Array")
+
         # Global number functions
         self._globals["isNaN"] = self._global_isnan
         self._globals["isFinite"] = self._global_isfinite
@@ -868,6 +877,39 @@ class JSContext:
         fn_constructor.set("prototype", fn_prototype)
 
         return fn_constructor
+
+    def _create_typed_array_constructor(self, name: str) -> JSCallableObject:
+        """Create a typed array constructor (Int32Array, Uint8Array, etc.)."""
+        from .values import (
+            JSInt32Array, JSUint32Array, JSFloat64Array,
+            JSUint8Array, JSInt8Array, JSInt16Array, JSUint16Array
+        )
+
+        type_classes = {
+            "Int32Array": JSInt32Array,
+            "Uint32Array": JSUint32Array,
+            "Float64Array": JSFloat64Array,
+            "Uint8Array": JSUint8Array,
+            "Int8Array": JSInt8Array,
+            "Int16Array": JSInt16Array,
+            "Uint16Array": JSUint16Array,
+        }
+
+        array_class = type_classes[name]
+
+        def constructor_fn(*args):
+            if not args:
+                return array_class(0)
+            arg = args[0]
+            if isinstance(arg, (int, float)):
+                # new Int32Array(length)
+                return array_class(int(arg))
+            # Could also support creating from array, but for now just length
+            return array_class(0)
+
+        constructor = JSCallableObject(constructor_fn)
+        constructor._name = name
+        return constructor
 
     def _create_eval_function(self):
         """Create the global eval function."""

@@ -177,15 +177,41 @@ class JSObject:
 
     def __init__(self, prototype: Optional["JSObject"] = None):
         self._properties: Dict[str, JSValue] = {}
+        self._getters: Dict[str, Any] = {}  # property name -> getter function
+        self._setters: Dict[str, Any] = {}  # property name -> setter function
         self._prototype = prototype
 
     def get(self, key: str) -> JSValue:
-        """Get a property value."""
+        """Get a property value (does not invoke getters - use get_property for that)."""
         if key in self._properties:
             return self._properties[key]
         if self._prototype is not None:
             return self._prototype.get(key)
         return UNDEFINED
+
+    def get_getter(self, key: str) -> Optional[Any]:
+        """Get the getter function for a property, if any."""
+        if key in self._getters:
+            return self._getters[key]
+        if self._prototype is not None:
+            return self._prototype.get_getter(key)
+        return None
+
+    def get_setter(self, key: str) -> Optional[Any]:
+        """Get the setter function for a property, if any."""
+        if key in self._setters:
+            return self._setters[key]
+        if self._prototype is not None:
+            return self._prototype.get_setter(key)
+        return None
+
+    def define_getter(self, key: str, getter: Any) -> None:
+        """Define a getter for a property."""
+        self._getters[key] = getter
+
+    def define_setter(self, key: str, setter: Any) -> None:
+        """Define a setter for a property."""
+        self._setters[key] = setter
 
     def set(self, key: str, value: JSValue) -> None:
         """Set a property value."""

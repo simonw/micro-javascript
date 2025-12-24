@@ -1034,6 +1034,9 @@ class Compiler:
                     self._emit(OpCode.LOAD_CONST, idx)
                 else:
                     self._compile_expression(prop.key)
+                # Kind (for getters/setters)
+                kind_idx = self._add_constant(prop.kind)
+                self._emit(OpCode.LOAD_CONST, kind_idx)
                 # Value
                 self._compile_expression(prop.value)
             self._emit(OpCode.BUILD_OBJECT, len(node.properties))

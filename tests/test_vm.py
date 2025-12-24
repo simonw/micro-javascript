@@ -355,3 +355,46 @@ class TestForOf:
             chars.join(",")
         ''')
         assert result == "a,b,c"
+"""Test getter/setter property syntax."""
+import pytest
+from mquickjs_python import JSContext
+
+class TestGetterSetter:
+    def test_getter(self):
+        """Basic getter."""
+        ctx = JSContext()
+        result = ctx.eval('''
+            var obj = {
+                _x: 10,
+                get x() { return this._x; }
+            };
+            obj.x
+        ''')
+        assert result == 10
+
+    def test_setter(self):
+        """Basic setter."""
+        ctx = JSContext()
+        result = ctx.eval('''
+            var obj = {
+                _x: 0,
+                set x(v) { this._x = v; }
+            };
+            obj.x = 42;
+            obj._x
+        ''')
+        assert result == 42
+
+    def test_getter_setter_combined(self):
+        """Getter and setter together."""
+        ctx = JSContext()
+        result = ctx.eval('''
+            var obj = {
+                _value: 5,
+                get value() { return this._value * 2; },
+                set value(v) { this._value = v; }
+            };
+            obj.value = 10;
+            obj.value
+        ''')
+        assert result == 20  # 10 * 2

@@ -118,13 +118,18 @@ class VM:
 
             # Get argument if needed
             arg = None
-            if op in (
+            if op in (OpCode.JUMP, OpCode.JUMP_IF_FALSE, OpCode.JUMP_IF_TRUE, OpCode.TRY_START):
+                # 16-bit little-endian argument for jumps
+                low = bytecode[frame.ip]
+                high = bytecode[frame.ip + 1]
+                arg = low | (high << 8)
+                frame.ip += 2
+            elif op in (
                 OpCode.LOAD_CONST, OpCode.LOAD_NAME, OpCode.STORE_NAME,
                 OpCode.LOAD_LOCAL, OpCode.STORE_LOCAL,
-                OpCode.JUMP, OpCode.JUMP_IF_FALSE, OpCode.JUMP_IF_TRUE,
                 OpCode.CALL, OpCode.CALL_METHOD, OpCode.NEW,
                 OpCode.BUILD_ARRAY, OpCode.BUILD_OBJECT,
-                OpCode.TRY_START, OpCode.MAKE_CLOSURE,
+                OpCode.MAKE_CLOSURE,
             ):
                 arg = bytecode[frame.ip]
                 frame.ip += 1
@@ -151,6 +156,15 @@ class VM:
 
         elif op == OpCode.SWAP:
             self.stack[-1], self.stack[-2] = self.stack[-2], self.stack[-1]
+
+        elif op == OpCode.ROT3:
+            # Rotate 3 items: a, b, c -> b, c, a
+            a = self.stack[-3]
+            b = self.stack[-2]
+            c = self.stack[-1]
+            self.stack[-3] = b
+            self.stack[-2] = c
+            self.stack[-1] = a
 
         # Constants
         elif op == OpCode.LOAD_CONST:
@@ -456,6 +470,11 @@ class VM:
             obj = self.stack.pop()
             if obj is UNDEFINED or obj is NULL:
                 keys = []
+            elif isinstance(obj, JSArray):
+                # For arrays, iterate over numeric indices as strings
+                keys = [str(i) for i in range(len(obj._elements))]
+                # Also include any non-numeric properties
+                keys.extend(obj.keys())
             elif isinstance(obj, JSObject):
                 keys = obj.keys()
             else:
@@ -610,9 +629,21 @@ class VM:
                 pass
             if key_str == "length":
                 return obj.length
+            # Built-in array methods
+            if key_str == "push":
+                return self._make_array_method(obj, "push")
+            if key_str == "pop":
+                return self._make_array_method(obj, "pop")
+            if key_str == "toString":
+                return self._make_array_method(obj, "toString")
+            if key_str == "join":
+                return self._make_array_method(obj, "join")
             return obj.get(key_str)
 
         if isinstance(obj, JSObject):
+            # Built-in Object methods
+            if key_str == "toString":
+                return self._make_object_method(obj, "toString")
             return obj.get(key_str)
 
         if isinstance(obj, str):
@@ -628,6 +659,41 @@ class VM:
             return UNDEFINED
 
         return UNDEFINED
+
+    def _make_array_method(self, arr: JSArray, method: str) -> Any:
+        """Create a bound array method."""
+        def push_fn(*args):
+            for arg in args:
+                arr.push(arg)
+            return arr.length
+
+        def pop_fn(*args):
+            return arr.pop()
+
+        def toString_fn(*args):
+            return ",".join(to_string(elem) for elem in arr._elements)
+
+        def join_fn(*args):
+            sep = "," if not args else to_string(args[0])
+            return sep.join(to_string(elem) for elem in arr._elements)
+
+        methods = {
+            "push": push_fn,
+            "pop": pop_fn,
+            "toString": toString_fn,
+            "join": join_fn,
+        }
+        return methods.get(method, lambda *args: UNDEFINED)
+
+    def _make_object_method(self, obj: JSObject, method: str) -> Any:
+        """Create a bound object method."""
+        def toString_fn(*args):
+            return "[object Object]"
+
+        methods = {
+            "toString": toString_fn,
+        }
+        return methods.get(method, lambda *args: UNDEFINED)
 
     def _set_property(self, obj: JSValue, key: JSValue, value: JSValue) -> None:
         """Set property on object."""
@@ -692,11 +758,19 @@ class VM:
         if compiled is None:
             raise JSTypeError("Function has no bytecode")
 
-        # Prepare locals (parameters + local variables)
+        # Prepare locals (parameters + arguments + local variables)
         locals_list = [UNDEFINED] * compiled.num_locals
         for i, arg in enumerate(args):
             if i < len(compiled.params):
                 locals_list[i] = arg
+
+        # Create 'arguments' object (stored after params in locals)
+        # The 'arguments' slot is at index len(compiled.params)
+        arguments_slot = len(compiled.params)
+        if arguments_slot < compiled.num_locals:
+            arguments_obj = JSArray()
+            arguments_obj._elements = list(args)
+            locals_list[arguments_slot] = arguments_obj
 
         # Create new call frame
         frame = CallFrame(

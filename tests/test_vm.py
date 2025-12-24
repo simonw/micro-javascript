@@ -435,3 +435,25 @@ class TestLabeledStatements:
         ctx = JSContext()
         result = ctx.eval("var x = 0; label: { x = 1; break label; x = 2; } x")
         assert result == 1
+
+
+class TestBuiltinConstructors:
+    """Test built-in constructors like new Object(), new Array()."""
+
+    def test_new_object(self):
+        """new Object() creates empty object."""
+        ctx = JSContext()
+        result = ctx.eval("var o = new Object(); o.x = 1; o.x")
+        assert result == 1
+
+    def test_new_array(self):
+        """new Array() creates array."""
+        ctx = JSContext()
+        result = ctx.eval("new Array(3).length")
+        assert result == 3
+
+    def test_new_array_with_elements(self):
+        """new Array(1, 2, 3) creates array with elements."""
+        ctx = JSContext()
+        result = ctx.eval("var a = new Array(1, 2, 3); a[1]")
+        assert result == 2

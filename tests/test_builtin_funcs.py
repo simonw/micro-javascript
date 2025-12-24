@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from mquickjs_python import JSContext
+from microjs import JSContext
 
 
 def get_test_functions_from_js(js_file_path: Path) -> list[tuple[str, str]]:

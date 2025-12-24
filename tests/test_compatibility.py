@@ -1,12 +1,12 @@
 """
-JavaScript feature tests for mquickjs_python.
+JavaScript feature tests for microjs.
 
-These tests verify that mquickjs_python correctly implements JavaScript behavior.
+These tests verify that microjs correctly implements JavaScript behavior.
 """
 
 import pytest
 
-from mquickjs_python import JSContext
+from microjs import JSContext
 
 
 def run_js(js_code):

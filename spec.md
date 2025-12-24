@@ -1,4 +1,4 @@
-# MQuickJS Python - Specification
+# microjs - Specification
 
 A Pure Python JavaScript Sandbox Engine
 
@@ -7,7 +7,7 @@ of the MQuickJS JavaScript engine. The goal is to create a sandboxed JavaScript
 execution environment with memory and time limits, implemented entirely in Python
 with no external dependencies.
 
-Based on: https://github.com/bellard/mquickjs
+Inspired by: https://github.com/bellard/mquickjs
 License: MIT (see LICENSE file)
 
 ## Overview
@@ -216,7 +216,7 @@ Based on mquickjs_opcode.h, the VM uses these opcodes:
 The main public API should be simple and Pythonic:
 
 ```python
-from mquickjs_python import JSContext
+from microjs import JSContext
 
 # Create a context with optional limits
 ctx = JSContext(memory_limit=1024*1024, time_limit=5.0)
@@ -259,7 +259,7 @@ except TimeLimitError:
 ```
 mquickjs-python/
   src/
-    mquickjs_python/
+    microjs/
       __init__.py       # Public API exports
       context.py        # JSContext main class
       values.py         # JavaScript value types

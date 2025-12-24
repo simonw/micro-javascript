@@ -1,8 +1,8 @@
 """Tests for the JavaScript parser."""
 
 import pytest
-from mquickjs_python.parser import Parser
-from mquickjs_python.ast_nodes import (
+from microjs.parser import Parser
+from microjs.ast_nodes import (
     Program, NumericLiteral, StringLiteral, BooleanLiteral, NullLiteral,
     Identifier, ThisExpression, ArrayExpression, ObjectExpression, Property,
     UnaryExpression, UpdateExpression, BinaryExpression, LogicalExpression,
@@ -15,7 +15,7 @@ from mquickjs_python.ast_nodes import (
     ThrowStatement, TryStatement, CatchClause, SwitchStatement, SwitchCase,
     LabeledStatement, FunctionDeclaration, FunctionExpression,
 )
-from mquickjs_python.errors import JSSyntaxError
+from microjs.errors import JSSyntaxError
 
 
 class TestParserLiterals:

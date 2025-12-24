@@ -1,9 +1,9 @@
 """Tests for the JavaScript lexer."""
 
 import pytest
-from mquickjs_python.lexer import Lexer
-from mquickjs_python.tokens import Token, TokenType
-from mquickjs_python.errors import JSSyntaxError
+from microjs.lexer import Lexer
+from microjs.tokens import Token, TokenType
+from microjs.errors import JSSyntaxError
 
 
 class TestLexerBasics:

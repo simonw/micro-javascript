@@ -7,8 +7,8 @@ classes to the JavaScript context, demonstrating Python/JS interop.
 import pytest
 from pathlib import Path
 
-from mquickjs_python import JSContext
-from mquickjs_python.values import JSObject, JSCallableObject, JSFunction, UNDEFINED
+from microjs import JSContext
+from microjs.values import JSObject, JSCallableObject, JSFunction, UNDEFINED
 
 
 def create_rectangle_constructor(ctx, object_prototype):

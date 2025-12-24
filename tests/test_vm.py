@@ -1,7 +1,7 @@
 """Tests for the JavaScript VM and context."""
 
 import pytest
-from mquickjs_python import JSContext, JSError, JSSyntaxError
+from microjs import JSContext, JSError, JSSyntaxError
 
 
 class TestJSContextBasics:
@@ -309,7 +309,7 @@ class TestGlobalAccess:
         assert result == 100
 """Test void operator."""
 import pytest
-from mquickjs_python import JSContext
+from microjs import JSContext
 
 class TestVoidOperator:
     def test_void_returns_undefined(self):
@@ -328,7 +328,7 @@ class TestVoidOperator:
         assert result == 5  # Side effect happens, but void returns undefined
 """Test for...of loops."""
 import pytest
-from mquickjs_python import JSContext
+from microjs import JSContext
 
 class TestForOf:
     def test_for_of_array(self):
@@ -357,7 +357,7 @@ class TestForOf:
         assert result == "a,b,c"
 """Test getter/setter property syntax."""
 import pytest
-from mquickjs_python import JSContext
+from microjs import JSContext
 
 class TestGetterSetter:
     def test_getter(self):

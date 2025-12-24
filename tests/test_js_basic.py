@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from mquickjs_python import JSContext
+from microjs import JSContext
 
 
 def get_basic_test_files():

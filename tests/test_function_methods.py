@@ -1,7 +1,7 @@
 """Test Function.prototype methods: bind, call, apply."""
 
 import pytest
-from mquickjs_python import JSContext
+from microjs import JSContext
 
 
 class TestFunctionBind:

@@ -383,6 +383,62 @@ class Lexer:
 
         raise JSSyntaxError(f"Unexpected character: {ch!r}", line, column)
 
+    def read_regex_literal(self) -> Token:
+        """Read a regex literal after the opening slash has been consumed.
+
+        This is called by the parser when it knows a regex is expected.
+        The opening / has already been consumed.
+        """
+        line = self.line
+        column = self.column - 1  # Account for the / we already consumed
+
+        # Go back one position to re-read from /
+        self.pos -= 1
+        self.column -= 1
+
+        if self._current() != "/":
+            raise JSSyntaxError("Expected regex literal", line, column)
+
+        self._advance()  # Skip opening /
+
+        # Read pattern
+        pattern = []
+        in_char_class = False
+
+        while self.pos < self.length:
+            ch = self._current()
+
+            if ch == "\\" and self.pos + 1 < self.length:
+                # Escape sequence - include both characters
+                pattern.append(self._advance())
+                pattern.append(self._advance())
+            elif ch == "[":
+                in_char_class = True
+                pattern.append(self._advance())
+            elif ch == "]":
+                in_char_class = False
+                pattern.append(self._advance())
+            elif ch == "/" and not in_char_class:
+                # End of pattern
+                self._advance()
+                break
+            elif ch == "\n":
+                raise JSSyntaxError("Unterminated regex literal", line, column)
+            else:
+                pattern.append(self._advance())
+
+        # Read flags
+        flags = []
+        while self._current() and self._current() in "gimsuy":
+            flags.append(self._advance())
+
+        return Token(
+            TokenType.REGEX,
+            ("".join(pattern), "".join(flags)),
+            line,
+            column
+        )
+
     def tokenize(self) -> Iterator[Token]:
         """Tokenize the entire source."""
         while True:

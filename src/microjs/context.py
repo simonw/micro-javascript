@@ -46,7 +46,7 @@ class JSContext:
 
         # Basic type constructors (minimal implementations)
         self._globals["Object"] = self._create_object_constructor()
-        self._globals["Array"] = self._array_constructor
+        self._globals["Array"] = self._create_array_constructor()
         self._globals["Error"] = self._error_constructor
 
         # Math object
@@ -80,10 +80,14 @@ class JSContext:
         """Console.log implementation."""
         print(" ".join(to_string(arg) for arg in args))
 
-    def _create_object_constructor(self) -> JSObject:
+    def _create_object_constructor(self) -> JSCallableObject:
         """Create the Object constructor with static methods."""
+        # Constructor function - new Object() creates empty object
+        def object_constructor(*args):
+            return JSObject()
+
         # Create a callable object that acts as constructor
-        obj_constructor = JSObject()
+        obj_constructor = JSCallableObject(object_constructor)
 
         def keys_fn(*args):
             obj = args[0] if args else UNDEFINED
@@ -133,14 +137,26 @@ class JSContext:
 
         return obj_constructor
 
-    def _array_constructor(self, *args: JSValue) -> JSArray:
-        """Array constructor."""
-        if len(args) == 1 and isinstance(args[0], (int, float)):
-            return JSArray(int(args[0]))
-        arr = JSArray()
-        for arg in args:
-            arr.push(arg)
-        return arr
+    def _create_array_constructor(self) -> JSCallableObject:
+        """Create the Array constructor with static methods."""
+        def array_constructor(*args):
+            if len(args) == 1 and isinstance(args[0], (int, float)):
+                return JSArray(int(args[0]))
+            arr = JSArray()
+            for arg in args:
+                arr.push(arg)
+            return arr
+
+        arr_constructor = JSCallableObject(array_constructor)
+
+        # Array.isArray()
+        def is_array(*args):
+            obj = args[0] if args else UNDEFINED
+            return isinstance(obj, JSArray)
+
+        arr_constructor.set("isArray", is_array)
+
+        return arr_constructor
 
     def _error_constructor(self, message: JSValue = UNDEFINED) -> JSObject:
         """Error constructor."""
@@ -480,20 +496,14 @@ class JSContext:
 
         return date_constructor
 
-    def _create_regexp_constructor(self) -> JSObject:
+    def _create_regexp_constructor(self) -> JSCallableObject:
         """Create the RegExp constructor."""
-        # The constructor is a callable that creates JSRegExp objects
-        # This is wrapped in JSObject but the VM will call it specially
-
         def regexp_constructor_fn(*args):
             pattern = to_string(args[0]) if args else ""
             flags = to_string(args[1]) if len(args) > 1 else ""
             return JSRegExp(pattern, flags)
 
-        # Return a callable marker
-        regexp_constructor = JSObject()
-        regexp_constructor._callable = regexp_constructor_fn
-        return regexp_constructor
+        return JSCallableObject(regexp_constructor_fn)
 
     def _global_isnan(self, *args) -> bool:
         """Global isNaN - converts argument to number first."""

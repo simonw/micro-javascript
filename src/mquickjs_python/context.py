@@ -607,8 +607,31 @@ class JSContext:
 
         def stringify_fn(*args):
             value = args[0] if args else UNDEFINED
-            # Convert JS value to Python for json.dumps
-            py_value = ctx._to_python(value)
+            # Convert JS value to Python for json.dumps, handling undefined specially
+            def to_json_value(v):
+                if v is UNDEFINED:
+                    return None  # Will be filtered out for object properties
+                if v is NULL:
+                    return None
+                if isinstance(v, bool):
+                    return v
+                if isinstance(v, (int, float)):
+                    return v
+                if isinstance(v, str):
+                    return v
+                if isinstance(v, JSArray):
+                    # For arrays, undefined becomes null
+                    return [None if elem is UNDEFINED else to_json_value(elem) for elem in v._elements]
+                if isinstance(v, JSObject):
+                    # For objects, skip undefined values
+                    result = {}
+                    for k, val in v._properties.items():
+                        if val is not UNDEFINED:
+                            result[k] = to_json_value(val)
+                    return result
+                return None
+
+            py_value = to_json_value(value)
             try:
                 return json.dumps(py_value, separators=(',', ':'))
             except (TypeError, ValueError) as e:
@@ -924,6 +947,15 @@ class JSContext:
         s = s.strip()
         if not s:
             return float('nan')
+
+        # Handle Infinity
+        if s.startswith("Infinity"):
+            return float('inf')
+        if s.startswith("-Infinity"):
+            return float('-inf')
+        if s.startswith("+Infinity"):
+            return float('inf')
+
         i = 0
         has_dot = False
         has_exp = False

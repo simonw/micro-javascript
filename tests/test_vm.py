@@ -491,3 +491,51 @@ class TestASI:
         """)
         # 0 + 1 + 3 + 4 = 8 (skipping 2)
         assert result == 8
+
+
+class TestMemberUpdate:
+    """Test update expressions on member expressions."""
+
+    def test_object_property_postfix_increment(self):
+        """a.x++ returns old value and increments."""
+        ctx = JSContext()
+        result = ctx.eval("""
+            var a = {x: 5};
+            var r = a.x++;
+            [r, a.x]
+        """)
+        assert result[0] == 5
+        assert result[1] == 6
+
+    def test_object_property_prefix_increment(self):
+        """++a.x returns new value."""
+        ctx = JSContext()
+        result = ctx.eval("""
+            var a = {x: 5};
+            var r = ++a.x;
+            [r, a.x]
+        """)
+        assert result[0] == 6
+        assert result[1] == 6
+
+    def test_array_element_postfix_increment(self):
+        """arr[0]++ works."""
+        ctx = JSContext()
+        result = ctx.eval("""
+            var arr = [10];
+            var r = arr[0]++;
+            [r, arr[0]]
+        """)
+        assert result[0] == 10
+        assert result[1] == 11
+
+    def test_object_property_decrement(self):
+        """a.x-- works."""
+        ctx = JSContext()
+        result = ctx.eval("""
+            var a = {x: 5};
+            var r = a.x--;
+            [r, a.x]
+        """)
+        assert result[0] == 5
+        assert result[1] == 4

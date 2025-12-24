@@ -179,6 +179,11 @@ class VM:
         elif op == OpCode.DUP:
             self.stack.append(self.stack[-1])
 
+        elif op == OpCode.DUP2:
+            # Duplicate top two items: a, b -> a, b, a, b
+            self.stack.append(self.stack[-2])
+            self.stack.append(self.stack[-2])
+
         elif op == OpCode.SWAP:
             self.stack[-1], self.stack[-2] = self.stack[-2], self.stack[-1]
 
@@ -189,6 +194,17 @@ class VM:
             c = self.stack[-1]
             self.stack[-3] = b
             self.stack[-2] = c
+            self.stack[-1] = a
+
+        elif op == OpCode.ROT4:
+            # Rotate 4 items: a, b, c, d -> b, c, d, a
+            a = self.stack[-4]
+            b = self.stack[-3]
+            c = self.stack[-2]
+            d = self.stack[-1]
+            self.stack[-4] = b
+            self.stack[-3] = c
+            self.stack[-2] = d
             self.stack[-1] = a
 
         # Constants

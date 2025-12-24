@@ -1147,13 +1147,10 @@ class JSContext:
         # Execute
         vm = VM(memory_limit=self.memory_limit, time_limit=self.time_limit)
 
-        # Set up globals
-        vm.globals.update(self._globals)
+        # Share globals with VM (don't copy - allows nested eval to modify globals)
+        vm.globals = self._globals
 
         result = vm.run(compiled)
-
-        # Update globals from VM
-        self._globals.update(vm.globals)
 
         return self._to_python(result)
 

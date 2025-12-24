@@ -2,6 +2,7 @@
 Parameterized pytest tests for JavaScript files.
 
 - Each .js file in tests/basic/ is run as a test case (should pass)
+- Each .js file in tests/compat/ are passing original mquickjs tests
 - Each .js file in tests/ (original mquickjs tests) is run with xfail (expected to fail)
 """
 from pathlib import Path
@@ -17,6 +18,15 @@ def get_basic_test_files():
     if not basic_dir.exists():
         return []
     js_files = sorted(basic_dir.glob("*.js"))
+    return [(f.name, f) for f in js_files]
+
+
+def get_compat_test_files():
+    """Discover passing original mquickjs .js test files in tests/compat/ directory."""
+    compat_dir = Path(__file__).parent / "compat"
+    if not compat_dir.exists():
+        return []
+    js_files = sorted(compat_dir.glob("*.js"))
     return [(f.name, f) for f in js_files]
 
 
@@ -37,6 +47,23 @@ def test_basic_js(name: str, path: Path):
     """Run a basic JavaScript test file."""
     source = path.read_text(encoding="utf-8")
     ctx = JSContext()
+    # Execute the script - if it throws, the test fails
+    ctx.eval(source)
+
+
+@pytest.mark.parametrize(
+    "name,path",
+    get_compat_test_files(),
+    ids=lambda x: x if isinstance(x, str) else None,
+)
+def test_compat_js(name: str, path: Path):
+    """Run a passing original mquickjs JavaScript test file.
+
+    These are tests from the original C mquickjs implementation
+    that now pass in our Python implementation.
+    """
+    source = path.read_text(encoding="utf-8")
+    ctx = JSContext(time_limit=2.0)
     # Execute the script - if it throws, the test fails
     ctx.eval(source)
 

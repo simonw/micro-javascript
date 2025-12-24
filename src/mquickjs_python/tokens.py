@@ -110,6 +110,9 @@ class TokenType(Enum):
     RSHIFT_ASSIGN = auto()  # >>=
     URSHIFT_ASSIGN = auto()  # >>>=
 
+    # Arrow function
+    ARROW = auto()  # =>
+
 
 # Map keywords to token types
 KEYWORDS = {

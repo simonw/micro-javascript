@@ -14,7 +14,7 @@ from .ast_nodes import (
     ForInStatement, ForOfStatement, BreakStatement, ContinueStatement,
     ReturnStatement, ThrowStatement, TryStatement, CatchClause,
     SwitchStatement, SwitchCase, LabeledStatement,
-    FunctionDeclaration, FunctionExpression,
+    FunctionDeclaration, FunctionExpression, ArrowFunctionExpression,
 )
 from .opcodes import OpCode
 from .values import UNDEFINED
@@ -178,12 +178,12 @@ class Compiler:
             return self._cell_vars.index(name)
         return None
 
-    def _find_captured_vars(self, body: BlockStatement, locals_set: set) -> set:
+    def _find_captured_vars(self, body: Node, locals_set: set) -> set:
         """Find all variables captured by inner functions."""
         captured = set()
 
         def visit(node):
-            if isinstance(node, (FunctionDeclaration, FunctionExpression)):
+            if isinstance(node, (FunctionDeclaration, FunctionExpression, ArrowFunctionExpression)):
                 # Found inner function - check what variables it uses
                 inner_captured = self._find_free_vars_in_function(node, locals_set)
                 captured.update(inner_captured)
@@ -214,9 +214,22 @@ class Compiler:
                         visit(stmt)
             elif isinstance(node, LabeledStatement):
                 visit(node.body)
+            elif hasattr(node, '__dict__'):
+                # For expression nodes (e.g., arrow function expression body)
+                for value in node.__dict__.values():
+                    if isinstance(value, Node):
+                        visit(value)
+                    elif isinstance(value, list):
+                        for item in value:
+                            if isinstance(item, Node):
+                                visit(item)
 
-        for stmt in body.body:
-            visit(stmt)
+        if isinstance(body, BlockStatement):
+            for stmt in body.body:
+                visit(stmt)
+        else:
+            # Expression body (e.g., arrow function with expression)
+            visit(body)
 
         return captured
 
@@ -244,7 +257,7 @@ class Compiler:
             if isinstance(node, Identifier):
                 if node.name in outer_locals and node.name not in local_vars:
                     free_vars.add(node.name)
-            elif isinstance(node, (FunctionDeclaration, FunctionExpression)):
+            elif isinstance(node, (FunctionDeclaration, FunctionExpression, ArrowFunctionExpression)):
                 # Recursively check nested functions - any outer variable they need
                 # must also be captured by this function (unless it's our local)
                 nested_free = self._find_free_vars_in_function(node, outer_locals)
@@ -276,11 +289,11 @@ class Compiler:
                 self._collect_var_decls(stmt, var_set)
         elif hasattr(node, '__dict__'):
             for key, value in node.__dict__.items():
-                if isinstance(value, Node) and not isinstance(value, (FunctionDeclaration, FunctionExpression)):
+                if isinstance(value, Node) and not isinstance(value, (FunctionDeclaration, FunctionExpression, ArrowFunctionExpression)):
                     self._collect_var_decls(value, var_set)
                 elif isinstance(value, list):
                     for item in value:
-                        if isinstance(item, Node) and not isinstance(item, (FunctionDeclaration, FunctionExpression)):
+                        if isinstance(item, Node) and not isinstance(item, (FunctionDeclaration, FunctionExpression, ArrowFunctionExpression)):
                             self._collect_var_decls(item, var_set)
 
     # ---- Statements ----
@@ -652,7 +665,7 @@ class Compiler:
         else:
             raise NotImplementedError(f"Cannot compile statement: {type(node).__name__}")
 
-    def _find_required_free_vars(self, body: BlockStatement, local_vars: set) -> set:
+    def _find_required_free_vars(self, body: Node, local_vars: set) -> set:
         """Find all free variables required by this function including pass-through.
 
         This scans the function body for:
@@ -665,13 +678,14 @@ class Compiler:
             if isinstance(node, Identifier):
                 if node.name not in local_vars and self._is_in_outer_scope(node.name):
                     free_vars.add(node.name)
-            elif isinstance(node, (FunctionDeclaration, FunctionExpression)):
+            elif isinstance(node, (FunctionDeclaration, FunctionExpression, ArrowFunctionExpression)):
                 # Check nested function's free vars - we need to pass through
                 # any outer scope vars that aren't our locals
                 nested_params = {p.name for p in node.params}
                 nested_locals = nested_params.copy()
                 nested_locals.add("arguments")
-                self._collect_var_decls(node.body, nested_locals)
+                if isinstance(node.body, BlockStatement):
+                    self._collect_var_decls(node.body, nested_locals)
                 nested_free = self._find_required_free_vars(node.body, nested_locals)
                 for var in nested_free:
                     if var not in local_vars and self._is_in_outer_scope(var):
@@ -688,10 +702,86 @@ class Compiler:
                             if isinstance(item, Node):
                                 visit(item)
 
-        for stmt in body.body:
-            visit(stmt)
+        if isinstance(body, BlockStatement):
+            for stmt in body.body:
+                visit(stmt)
+        else:
+            # Expression body
+            visit(body)
 
         return free_vars
+
+    def _compile_arrow_function(self, node: ArrowFunctionExpression) -> CompiledFunction:
+        """Compile an arrow function."""
+        # Save current state
+        old_bytecode = self.bytecode
+        old_constants = self.constants
+        old_locals = self.locals
+        old_loop_stack = self.loop_stack
+        old_in_function = self._in_function
+        old_free_vars = self._free_vars
+        old_cell_vars = self._cell_vars
+
+        # Push current locals to outer scope stack (for closure resolution)
+        if self._in_function:
+            self._outer_locals.append(old_locals[:])
+
+        # New state for function
+        self.bytecode = []
+        self.constants = []
+        self.locals = [p.name for p in node.params] + ["arguments"]
+        self.loop_stack = []
+        self._in_function = True
+
+        # Collect all var declarations to know the full locals set
+        local_vars_set = set(self.locals)
+        if isinstance(node.body, BlockStatement):
+            self._collect_var_decls(node.body, local_vars_set)
+
+        # Find variables captured by inner functions
+        captured = self._find_captured_vars(node.body, local_vars_set)
+        self._cell_vars = list(captured)
+
+        # Find all free variables needed
+        required_free = self._find_required_free_vars(node.body, local_vars_set)
+        self._free_vars = list(required_free)
+
+        if node.expression:
+            # Expression body: compile expression and return it
+            self._compile_expression(node.body)
+            self._emit(OpCode.RETURN)
+        else:
+            # Block body: compile statements
+            for stmt in node.body.body:
+                self._compile_statement(stmt)
+            # Implicit return undefined
+            self._emit(OpCode.RETURN_UNDEFINED)
+
+        func = CompiledFunction(
+            name="",  # Arrow functions are anonymous
+            params=[p.name for p in node.params],
+            bytecode=bytes(self.bytecode),
+            constants=self.constants,
+            locals=self.locals,
+            num_locals=len(self.locals),
+            free_vars=self._free_vars[:],
+            cell_vars=self._cell_vars[:],
+        )
+
+        # Pop outer scope if we pushed it
+        if old_in_function:
+            self._outer_locals.pop()
+
+        # Restore state
+        self.bytecode = old_bytecode
+        self.constants = old_constants
+        self.locals = old_locals
+        self.loop_stack = old_loop_stack
+        self._in_function = old_in_function
+        self._free_vars = old_free_vars
+        self._cell_vars = old_cell_vars
+
+        return func
 
     def _compile_function(
         self, name: str, params: List[Identifier], body: BlockStatement
@@ -1052,6 +1142,15 @@ class Compiler:
         elif isinstance(node, FunctionExpression):
             name = node.id.name if node.id else ""
             func = self._compile_function(name, node.params, node.body)
+            func_idx = len(self.functions)
+            self.functions.append(func)
+
+            const_idx = self._add_constant(func)
+            self._emit(OpCode.LOAD_CONST, const_idx)
+            self._emit(OpCode.MAKE_CLOSURE, func_idx)
+
+        elif isinstance(node, ArrowFunctionExpression):
+            func = self._compile_arrow_function(node)
             func_idx = len(self.functions)
             self.functions.append(func)
 

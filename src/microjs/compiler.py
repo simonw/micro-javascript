@@ -494,6 +494,56 @@ class Compiler:
 
             self.loop_stack.pop()
 
+        elif isinstance(node, ForOfStatement):
+            loop_ctx = LoopContext()
+            self.loop_stack.append(loop_ctx)
+
+            # Compile iterable expression
+            self._compile_expression(node.right)
+            self._emit(OpCode.FOR_OF_INIT)
+
+            loop_start = len(self.bytecode)
+            self._emit(OpCode.FOR_OF_NEXT)
+            jump_done = self._emit_jump(OpCode.JUMP_IF_TRUE)
+
+            # Store value in variable
+            if isinstance(node.left, VariableDeclaration):
+                decl = node.left.declarations[0]
+                name = decl.id.name
+                if self._in_function:
+                    self._add_local(name)
+                    slot = self._get_local(name)
+                    self._emit(OpCode.STORE_LOCAL, slot)
+                else:
+                    idx = self._add_name(name)
+                    self._emit(OpCode.STORE_NAME, idx)
+                self._emit(OpCode.POP)
+            elif isinstance(node.left, Identifier):
+                name = node.left.name
+                slot = self._get_local(name)
+                if slot is not None:
+                    self._emit(OpCode.STORE_LOCAL, slot)
+                else:
+                    idx = self._add_name(name)
+                    self._emit(OpCode.STORE_NAME, idx)
+                self._emit(OpCode.POP)
+            else:
+                raise NotImplementedError(f"Unsupported for-of left: {type(node.left).__name__}")
+
+            self._compile_statement(node.body)
+
+            self._emit(OpCode.JUMP, loop_start)
+            self._patch_jump(jump_done)
+            self._emit(OpCode.POP)  # Pop iterator
+
+            # Patch break and continue jumps
+            for pos in loop_ctx.break_jumps:
+                self._patch_jump(pos)
+            for pos in loop_ctx.continue_jumps:
+                self._patch_jump(pos, loop_start)
+
+            self.loop_stack.pop()
+
         elif isinstance(node, BreakStatement):
             if not self.loop_stack:
                 raise SyntaxError("'break' outside of loop")

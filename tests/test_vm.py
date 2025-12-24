@@ -326,3 +326,32 @@ class TestVoidOperator:
         ctx = JSContext()
         result = ctx.eval("var x = 0; void (x = 5); x")
         assert result == 5  # Side effect happens, but void returns undefined
+"""Test for...of loops."""
+import pytest
+from microjs import JSContext
+
+class TestForOf:
+    def test_for_of_array(self):
+        """Basic for...of with array."""
+        ctx = JSContext()
+        result = ctx.eval('''
+            var sum = 0;
+            var arr = [1, 2, 3, 4, 5];
+            for (var x of arr) {
+                sum += x;
+            }
+            sum
+        ''')
+        assert result == 15
+
+    def test_for_of_string(self):
+        """for...of with string iterates characters."""
+        ctx = JSContext()
+        result = ctx.eval('''
+            var chars = [];
+            for (var c of "abc") {
+                chars.push(c);
+            }
+            chars.join(",")
+        ''')
+        assert result == "a,b,c"

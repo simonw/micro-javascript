@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 from .parser import Parser
 from .compiler import Compiler
 from .vm import VM
-from .values import UNDEFINED, NULL, JSValue, JSObject, JSCallableObject, JSArray, JSRegExp, to_string, to_number
+from .values import UNDEFINED, NULL, JSValue, JSObject, JSCallableObject, JSArray, JSFunction, JSRegExp, to_string, to_number
 from .errors import JSError, MemoryLimitError, TimeLimitError
 
 
@@ -1017,6 +1017,17 @@ class JSContext:
 
         return self._to_python(result)
 
+    def _call_function(self, func: JSFunction, args: list) -> Any:
+        """Call a JavaScript function with the given arguments.
+
+        This is used internally to invoke JSFunction objects from Python code.
+        """
+        vm = VM(memory_limit=self.memory_limit, time_limit=self.time_limit)
+        vm.globals.update(self._globals)
+        result = vm._call_callback(func, args, UNDEFINED)
+        self._globals.update(vm.globals)
+        return result
+
     def get(self, name: str) -> Any:
         """Get a global variable.
 
@@ -1066,6 +1077,11 @@ class JSContext:
             return value
         if isinstance(value, str):
             return value
+        # Already JS values - pass through
+        if isinstance(value, (JSObject, JSFunction, JSCallableObject)):
+            return value
+        if value is UNDEFINED:
+            return value
         if isinstance(value, list):
             arr = JSArray()
             for elem in value:
@@ -1076,4 +1092,7 @@ class JSContext:
             for k, v in value.items():
                 obj.set(str(k), self._to_js(v))
             return obj
+        # Python callables become JS functions
+        if callable(value):
+            return value
         return UNDEFINED

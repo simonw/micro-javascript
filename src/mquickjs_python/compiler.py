@@ -31,6 +31,7 @@ class CompiledFunction:
     num_locals: int
     free_vars: List[str] = field(default_factory=list)  # Variables captured from outer scope
     cell_vars: List[str] = field(default_factory=list)  # Local variables that are captured by inner functions
+    source_map: Dict[int, Tuple[int, int]] = field(default_factory=dict)  # bytecode_pos -> (line, column)
 
 
 @dataclass
@@ -63,6 +64,8 @@ class Compiler:
         self._outer_locals: List[List[str]] = []  # Stack of outer scope locals
         self._free_vars: List[str] = []  # Free variables captured from outer scopes
         self._cell_vars: List[str] = []  # Local variables captured by inner functions
+        self.source_map: Dict[int, Tuple[int, int]] = {}  # bytecode_pos -> (line, column)
+        self._current_loc: Optional[Tuple[int, int]] = None  # Current source location
 
     def compile(self, node: Program) -> CompiledFunction:
         """Compile a program to bytecode."""
@@ -88,6 +91,7 @@ class Compiler:
             constants=self.constants,
             locals=self.locals,
             num_locals=len(self.locals),
+            source_map=self.source_map,
         )
 
     # Opcodes that use 16-bit arguments (jumps and jump-like)
@@ -96,6 +100,9 @@ class Compiler:
     def _emit(self, opcode: OpCode, arg: Optional[int] = None) -> int:
         """Emit an opcode, return its position."""
         pos = len(self.bytecode)
+        # Record source location for this bytecode position
+        if self._current_loc is not None:
+            self.source_map[pos] = self._current_loc
         self.bytecode.append(opcode)
         if arg is not None:
             if opcode in self._JUMP_OPCODES:
@@ -105,6 +112,11 @@ class Compiler:
             else:
                 self.bytecode.append(arg)
         return pos
+
+    def _set_loc(self, node: Node) -> None:
+        """Set current source location from an AST node."""
+        if node.loc is not None:
+            self._current_loc = (node.loc.line, node.loc.column)
 
     def _emit_jump(self, opcode: OpCode) -> int:
         """Emit a jump instruction, return position for patching.
@@ -626,6 +638,7 @@ class Compiler:
                 self._emit(OpCode.RETURN_UNDEFINED)
 
         elif isinstance(node, ThrowStatement):
+            self._set_loc(node)  # Record location of throw statement
             self._compile_expression(node.argument)
             self._emit(OpCode.THROW)
 

@@ -17,6 +17,7 @@ from .ast_nodes import (
     ReturnStatement, ThrowStatement, TryStatement, CatchClause,
     SwitchStatement, SwitchCase, LabeledStatement,
     FunctionDeclaration, FunctionExpression, ArrowFunctionExpression,
+    SourceLocation,
 )
 
 
@@ -47,6 +48,12 @@ class Parser:
     def _error(self, message: str) -> JSSyntaxError:
         """Create a syntax error at current position."""
         return JSSyntaxError(message, self.current.line, self.current.column)
+
+    def _loc(self, node: Node, token: Optional[Token] = None) -> Node:
+        """Set source location on a node and return it."""
+        t = token or self.previous or self.current
+        node.loc = SourceLocation(t.line, t.column)
+        return node
 
     def _advance(self) -> Token:
         """Advance to next token and return previous."""
@@ -335,9 +342,10 @@ class Parser:
 
     def _parse_throw_statement(self) -> ThrowStatement:
         """Parse throw statement."""
+        throw_token = self.previous  # The 'throw' keyword
         argument = self._parse_expression()
         self._consume_semicolon()
-        return ThrowStatement(argument)
+        return self._loc(ThrowStatement(argument), throw_token)
 
     def _parse_try_statement(self) -> TryStatement:
         """Parse try statement."""
@@ -729,25 +737,25 @@ class Parser:
         """Parse primary expression (literals, identifiers, grouped)."""
         # Literals
         if self._match(TokenType.NUMBER):
-            return NumericLiteral(self.previous.value)
+            return self._loc(NumericLiteral(self.previous.value))
 
         if self._match(TokenType.STRING):
-            return StringLiteral(self.previous.value)
+            return self._loc(StringLiteral(self.previous.value))
 
         if self._match(TokenType.TRUE):
-            return BooleanLiteral(True)
+            return self._loc(BooleanLiteral(True))
 
         if self._match(TokenType.FALSE):
-            return BooleanLiteral(False)
+            return self._loc(BooleanLiteral(False))
 
         if self._match(TokenType.NULL):
-            return NullLiteral()
+            return self._loc(NullLiteral())
 
         if self._match(TokenType.THIS):
-            return ThisExpression()
+            return self._loc(ThisExpression())
 
         if self._match(TokenType.IDENTIFIER):
-            return Identifier(self.previous.value)
+            return self._loc(Identifier(self.previous.value))
 
         # Parenthesized expression
         if self._match(TokenType.LPAREN):

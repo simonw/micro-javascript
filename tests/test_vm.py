@@ -457,3 +457,37 @@ class TestBuiltinConstructors:
         ctx = JSContext()
         result = ctx.eval("var a = new Array(1, 2, 3); a[1]")
         assert result == 2
+
+
+class TestASI:
+    """Test automatic semicolon insertion."""
+
+    def test_break_asi_newline(self):
+        """break followed by identifier on new line should not consume identifier as label."""
+        ctx = JSContext()
+        # break should get ASI, i++ should be a separate statement
+        result = ctx.eval("""
+            var i = 0;
+            while (i < 3) {
+                if (i > 0)
+                    break
+                i++
+            }
+            i
+        """)
+        assert result == 1
+
+    def test_continue_asi_newline(self):
+        """continue followed by identifier on new line should not consume identifier as label."""
+        ctx = JSContext()
+        result = ctx.eval("""
+            var sum = 0;
+            for (var i = 0; i < 5; i++) {
+                if (i == 2)
+                    continue
+                sum += i
+            }
+            sum
+        """)
+        # 0 + 1 + 3 + 4 = 8 (skipping 2)
+        assert result == 8

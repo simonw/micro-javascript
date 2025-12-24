@@ -16,9 +16,14 @@ class JSSyntaxError(JSError):
     """JavaScript syntax error during parsing."""
 
     def __init__(self, message: str = "", line: int = 0, column: int = 0):
-        super().__init__(message, "SyntaxError")
         self.line = line
         self.column = column
+        # Include line/column in the message if provided
+        if line > 0:
+            full_message = f"line {line}, column {column}: {message}"
+        else:
+            full_message = message
+        super().__init__(full_message, "SyntaxError")
 
 
 class JSTypeError(JSError):

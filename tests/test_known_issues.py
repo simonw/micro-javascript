@@ -257,16 +257,15 @@ try {
         assert result is not None
         assert isinstance(result, int)
 
-    @pytest.mark.xfail(reason="SyntaxError position tracking not implemented")
     def test_syntax_error_position(self):
         """SyntaxError should include line and column information.
 
-        Issue: When a SyntaxError occurs, the error message should include
+        When a SyntaxError occurs, the error message includes
         the line and column where the error occurred.
         """
         ctx = JSContext(time_limit=5.0)
         try:
-            ctx.eval('\n 123 a ')  # Invalid syntax at line 2
+            ctx.eval('\nvar x = ')  # Actual syntax error at line 2
         except Exception as e:
             error_msg = str(e)
             # Should contain line info

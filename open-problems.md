@@ -55,24 +55,6 @@ The Error constructor is a Python function that doesn't have access to the VM's 
 
 ---
 
-## SyntaxError Position Tracking
-
-**Tests affected:**
-- `test_syntax_error_position`
-
-**Problem:**
-When a SyntaxError occurs during parsing, the error message should include the line and column where the error occurred.
-
-**Current behavior:**
-The parser throws `JSSyntaxError` with line/column information, but this may not be propagated correctly to the final error message format.
-
-**Potential solution:**
-Update the error message formatting in `JSSyntaxError` to include position in a standard format like "SyntaxError at line 2, column 5: unexpected token".
-
-**Complexity:** Low
-
----
-
 ## Optional Lookahead Capture Semantics
 
 **Tests affected:**
@@ -156,12 +138,12 @@ The comprehensive regex test suites from the original QuickJS contain tests that
 | Category | Issue Count | Complexity |
 |----------|-------------|------------|
 | Deep nesting/recursion | 5 | High |
-| Error location tracking | 3 | Low-Medium |
+| Error location tracking | 2 | Medium |
 | Lookahead capture semantics | 2 | High |
 | Global eval edge cases | 1 | Medium |
 | Comprehensive test suites | 4 | Varies |
 
-**Total xfail tests:** 15
+**Total xfail tests:** 14
 
 Most issues fall into two categories:
 1. **Architectural limitations** (recursion, location tracking) - require significant refactoring

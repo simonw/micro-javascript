@@ -90,6 +90,9 @@ def js_typeof(value: JSValue) -> str:
         return "string"
     if isinstance(value, JSFunction):
         return "function"
+    # JSCallableObject (like Object, Array constructors) should be "function"
+    if isinstance(value, JSObject) and hasattr(value, '_call_fn'):
+        return "function"
     if isinstance(value, JSObject):
         return "object"
     return "undefined"

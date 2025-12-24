@@ -230,24 +230,69 @@ class TestRegexUnicode:
 class TestErrorLineColumn:
     """Tests for error line and column number tracking."""
 
-    @pytest.mark.xfail(reason="Error.lineNumber not implemented")
-    def test_error_has_line_number(self):
-        """Error objects should have lineNumber property.
+    def test_thrown_error_has_line_number(self):
+        """Thrown errors should have lineNumber property set."""
+        ctx = JSContext(time_limit=5.0)
+        result = ctx.eval('''
+var e;
+try {
+    throw new Error("test");
+} catch(ex) {
+    e = ex;
+}
+e.lineNumber
+''')
+        assert result == 4  # Line where throw statement is
+
+    def test_thrown_error_has_column_number(self):
+        """Thrown errors should have columnNumber property set."""
+        ctx = JSContext(time_limit=5.0)
+        result = ctx.eval('''
+var e;
+try {
+    throw new Error("test");
+} catch(ex) {
+    e = ex;
+}
+e.columnNumber
+''')
+        assert result == 5  # Column where throw statement starts
+
+    def test_thrown_error_line_column_multiline(self):
+        """Thrown errors track correct location in multiline code."""
+        ctx = JSContext(time_limit=5.0)
+        result = ctx.eval('''
+var e;
+try {
+    var x = 1;
+    var y = 2;
+    throw new Error("test");
+} catch(ex) {
+    e = ex;
+}
+[e.lineNumber, e.columnNumber]
+''')
+        assert result == [6, 5]  # Line 6, column 5
+
+    @pytest.mark.xfail(reason="Error constructor location tracking not implemented")
+    def test_error_constructor_has_line_number(self):
+        """Error objects created with 'new' should have lineNumber at creation.
 
         Issue: Error objects should have a lineNumber property indicating
-        where the error occurred. Currently returns None.
+        where they were created (not just where thrown). This requires
+        tracking the call location during Error construction.
         """
         ctx = JSContext(time_limit=5.0)
         result = ctx.eval('var e = new Error("test"); e.lineNumber')
         assert result is not None
         assert isinstance(result, int)
 
-    @pytest.mark.xfail(reason="Error.columnNumber not implemented")
-    def test_error_has_column_number(self):
-        """Error objects should have columnNumber property.
+    @pytest.mark.xfail(reason="Error constructor location tracking not implemented")
+    def test_error_constructor_has_column_number(self):
+        """Error objects created with 'new' should have columnNumber at creation.
 
         Issue: Error objects should have a columnNumber property indicating
-        the column where the error occurred. Currently returns None.
+        the column where they were created.
         """
         ctx = JSContext(time_limit=5.0)
         result = ctx.eval('var e = new Error("test"); e.columnNumber')

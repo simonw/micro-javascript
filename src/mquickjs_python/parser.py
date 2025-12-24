@@ -75,6 +75,20 @@ class Parser:
         """Check if we've reached the end of input."""
         return self.current.type == TokenType.EOF
 
+    def _is_keyword(self) -> bool:
+        """Check if current token is a keyword (reserved word)."""
+        # Keywords that can be used as property names in object literals
+        keyword_types = {
+            TokenType.IF, TokenType.ELSE, TokenType.FOR, TokenType.WHILE,
+            TokenType.DO, TokenType.SWITCH, TokenType.CASE, TokenType.DEFAULT,
+            TokenType.BREAK, TokenType.CONTINUE, TokenType.RETURN, TokenType.THROW,
+            TokenType.TRY, TokenType.CATCH, TokenType.FINALLY, TokenType.FUNCTION,
+            TokenType.VAR, TokenType.NEW, TokenType.DELETE, TokenType.TYPEOF,
+            TokenType.IN, TokenType.OF, TokenType.INSTANCEOF, TokenType.THIS,
+            TokenType.TRUE, TokenType.FALSE, TokenType.NULL, TokenType.VOID,
+        }
+        return self.current.type in keyword_types
+
     def _peek_next(self) -> Token:
         """Peek at the next token without consuming it."""
         # Save current state
@@ -651,9 +665,17 @@ class Parser:
 
         while True:
             if self._match(TokenType.DOT):
-                # Member access: a.b
-                prop = self._expect(TokenType.IDENTIFIER, "Expected property name")
-                expr = MemberExpression(expr, Identifier(prop.value), computed=False)
+                # Member access: a.b (keywords allowed as property names)
+                if self._check(TokenType.IDENTIFIER):
+                    prop = self._advance()
+                    expr = MemberExpression(expr, Identifier(prop.value), computed=False)
+                elif self._is_keyword():
+                    # Keywords can be used as property names
+                    prop_name = self.current.type.name.lower()
+                    self._advance()
+                    expr = MemberExpression(expr, Identifier(prop_name), computed=False)
+                else:
+                    raise self._error("Expected property name")
             elif self._match(TokenType.LBRACKET):
                 # Computed member access: a[b]
                 prop = self._parse_expression()
@@ -773,23 +795,37 @@ class Parser:
         kind = "init"
         if self._check(TokenType.IDENTIFIER):
             if self.current.value == "get":
-                # Could be getter or property named "get"
+                # Could be getter or property/method named "get"
                 self._advance()
-                if self._check(TokenType.IDENTIFIER, TokenType.STRING, TokenType.NUMBER):
+                if self._check(TokenType.IDENTIFIER, TokenType.STRING, TokenType.NUMBER, TokenType.LBRACKET):
+                    # get propertyName() {} - it's a getter
                     kind = "get"
+                elif self._check(TokenType.LPAREN):
+                    # get() {} - method shorthand named "get"
+                    key = Identifier("get")
+                    params = self._parse_function_params()
+                    body = self._parse_block_statement()
+                    value = FunctionExpression(None, params, body)
+                    return Property(key, value, "init", computed=False)
                 else:
-                    # It's a property named "get"
+                    # get: value or {get} shorthand
                     key = Identifier("get")
                     if self._match(TokenType.COLON):
                         value = self._parse_assignment_expression()
                     else:
-                        # Shorthand: {get}
                         value = key
                     return Property(key, value, "init", computed=False, shorthand=True)
             elif self.current.value == "set":
                 self._advance()
-                if self._check(TokenType.IDENTIFIER, TokenType.STRING, TokenType.NUMBER):
+                if self._check(TokenType.IDENTIFIER, TokenType.STRING, TokenType.NUMBER, TokenType.LBRACKET):
                     kind = "set"
+                elif self._check(TokenType.LPAREN):
+                    # set() {} - method shorthand named "set"
+                    key = Identifier("set")
+                    params = self._parse_function_params()
+                    body = self._parse_block_statement()
+                    value = FunctionExpression(None, params, body)
+                    return Property(key, value, "init", computed=False)
                 else:
                     key = Identifier("set")
                     if self._match(TokenType.COLON):
@@ -810,6 +846,10 @@ class Parser:
             key = NumericLiteral(self.previous.value)
         elif self._match(TokenType.IDENTIFIER):
             key = Identifier(self.previous.value)
+        elif self._is_keyword():
+            # Reserved words can be used as property names
+            key = Identifier(self.current.value if hasattr(self.current, 'value') else self.current.type.name.lower())
+            self._advance()
         else:
             raise self._error("Expected property name")
 

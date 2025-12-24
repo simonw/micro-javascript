@@ -1,74 +1,106 @@
-// Test closures - functions capturing outer scope variables
-
-function assert(actual, expected, message) {
-    if (arguments.length == 1)
-        expected = true;
-    if (actual === expected)
+function assert(b, str)
+{
+    if (b) {
         return;
-    throw Error("assertion failed: got |" + actual + "|" +
-                ", expected |" + expected + "|" +
-                (message ? " (" + message + ")" : ""));
+    } else {
+        throw "assertion failed: " + str;
+    }
 }
 
-// Test 1: Simple closure
-function test_simple_closure() {
+var log_str = "";
+
+function log(str)
+{
+    log_str += str + ",";
+}
+
+function f(a, b, c)
+{
     var x = 10;
-    function inner() {
-        return x;
-    }
-    assert(inner(), 10, "simple closure");
-}
-
-// Test 2: Closure modifying outer variable
-function test_closure_modify() {
-    var count = 0;
-    function inc() {
-        count = count + 1;
-        return count;
-    }
-    assert(inc(), 1, "closure modify 1");
-    assert(inc(), 2, "closure modify 2");
-    assert(count, 2, "outer var modified");
-}
-
-// Test 3: Multiple closures sharing variable
-function test_shared_closure() {
-    var value = 0;
-    function get() { return value; }
-    function set(v) { value = v; }
-    set(42);
-    assert(get(), 42, "shared closure");
-}
-
-// Test 4: Nested closures
-function test_nested_closure() {
-    var a = 1;
-    function level1() {
-        var b = 2;
-        function level2() {
-            return a + b;
+    log("a="+a);
+    function g(d) {
+        function h() {
+            log("d=" + d);
+            log("x=" + x);
         }
-        return level2();
+        log("b=" + b);
+        log("c=" + c);
+        h();
     }
-    assert(level1(), 3, "nested closure");
+    g(4);
+    return g;
 }
 
-// Test 5: Closure returned from function
-function test_returned_closure() {
-    function makeCounter() {
-        var count = 0;
-        return function() {
-            count = count + 1;
-            return count;
-        };
+var g1 = f(1, 2, 3);
+g1(5);
+
+assert(log_str === "a=1,b=2,c=3,d=4,x=10,b=2,c=3,d=5,x=10,", "closure1");
+
+function test_closure1()
+{
+    function f2()
+    {
+        var val = 1;
+        
+        function set(a) {
+            val = a;
+        }
+        function get(a) {
+            return val;
+        }
+        return { "set": set, "get": get };
     }
-    var counter = makeCounter();
-    assert(counter(), 1, "returned closure 1");
-    assert(counter(), 2, "returned closure 2");
+    
+    var obj = f2();
+    obj.set(10);
+    var r;
+    r = obj.get();
+    assert(r === 10, "closure2");
 }
 
-test_simple_closure();
-test_closure_modify();
-test_shared_closure();
-test_nested_closure();
-test_returned_closure();
+function test_closure2()
+{
+    var expr_func = function myfunc1(n) {
+        function myfunc2(n) {
+            return myfunc1(n - 1);
+        }
+        if (n == 0)
+            return 0;
+        else
+            return myfunc2(n);
+    };
+    var r;
+    r = expr_func(1);
+    assert(r === 0, "expr");
+}
+
+function test_closure3()
+{
+    function fib(n)
+    {
+        if (n <= 0)
+            return 0;
+        else if (n === 1)
+            return 1;
+        else {
+            return fib(n - 1) + fib(n - 2);
+        }
+    }
+
+    var fib_func = function fib1(n)
+    {
+        if (n <= 0)
+            return 0;
+        else if (n == 1)
+            return 1;
+        else
+            return fib1(n - 1) + fib1(n - 2);
+    };
+
+    assert(fib(6) === 8, "fib");
+    assert(fib_func(6) === 8, "fib");
+}
+
+test_closure1();
+test_closure2();
+test_closure3();

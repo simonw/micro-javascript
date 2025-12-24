@@ -384,8 +384,44 @@ function test_string()
    Python uses UTF-8/Unicode strings internally, so these tests are skipped. */
 function test_string2()
 {
-    // All tests in this function require UTF-16 surrogate pair behavior
-    // which differs from Python's UTF-8 string handling
+    // var str = "hé€\u{101234}o";
+    // assert(str, "h\xe9\u20ac\udbc4\u{de34}o", "parse");
+    // assert(str.length, 6, "length");
+    // assert(str.slice(1, 2), "é", "slice");
+    // assert(str.slice(1, 3), "é€", "slice");
+    // assert(str.slice(2, 5), "€\u{101234}", "slice");
+    // assert(str.slice(2, 4), "€\u{dbc4}", "slice");
+    // assert(str.slice(4, 6), "\u{de34}o", "slice");
+    // assert("hé€" + "\u{101234}o", str, "concat 1");
+    // assert("h\xe9\u20ac\udbc4" + "\u{de34}o", str, "concat 2");
+
+    // var ch = "\udbc4\u{de34}";
+    // assert(ch.slice(0, 2), "\udbc4\u{de34}", "slice 1");
+    // assert(ch.slice(0, 1), "\udbc4", "slice 1");
+    // assert(ch.slice(1, 2), "\u{de34}", "slice 1");
+
+    // assert("\udbc4" + "\u{de34}", "\u{101234}", "concat 3");
+    // assert("\udbc4" + "o\u{de34}", "\udbc4o\u{de34}", "concat 4");
+
+    // assert(str[0], "h", "char 1");
+    // assert(str[1], "é", "char 2");
+    // assert(str[3], "\u{dbc4}", "char 3");
+    // assert(str[4], "\u{de34}", "char 4");
+    // assert(str.charCodeAt(3), 0xdbc4, "char 4");
+    // assert("€"[0], "€", "char 5");
+    // assert("\u{101234}"[0], "\u{dbc4}", "char 6");
+    // assert("\u{101234}"[1], "\u{de34}", "char 6");
+
+    // assert("\udbc4" <= "\udbc4", true);
+    // assert("\udbc3" < "\u{101234}", true);
+    // assert("\udbc4" < "\u{101234}", true);
+    // assert("\udbc5" > "\u{101234}", true);
+
+    // assert("\u{101234}" > "\udbc3", true);
+    // assert("\u{101234}" > "\udbc4", true);
+    // assert("\u{101234}" < "\udbc5", true);
+
+    // assert("\u{101233}" < "\u{101234}", true);
 }
 
 function test_math()

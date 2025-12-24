@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 from .parser import Parser
 from .compiler import Compiler
 from .vm import VM
-from .values import UNDEFINED, NULL, JSValue, JSObject, JSCallableObject, JSArray, JSFunction, JSRegExp, to_string, to_number
+from .values import UNDEFINED, NULL, JSValue, JSObject, JSCallableObject, JSArray, JSFunction, JSRegExp, JSBoundMethod, to_string, to_number
 from .errors import JSError, MemoryLimitError, TimeLimitError
 
 
@@ -356,6 +356,48 @@ class JSContext:
 
         # Store for other uses
         self._array_prototype = array_prototype
+
+        # Array.prototype.sort() - sort in-place
+        def array_sort(this, *args):
+            if not isinstance(this, JSArray):
+                return this
+            comparator = args[0] if args else None
+
+            # Default string comparison
+            def default_compare(a, b):
+                # undefined values sort to the end
+                if a is UNDEFINED and b is UNDEFINED:
+                    return 0
+                if a is UNDEFINED:
+                    return 1
+                if b is UNDEFINED:
+                    return -1
+                # Convert to strings and compare
+                str_a = to_string(a)
+                str_b = to_string(b)
+                if str_a < str_b:
+                    return -1
+                if str_a > str_b:
+                    return 1
+                return 0
+
+            def compare_fn(a, b):
+                if comparator and callable(comparator):
+                    if isinstance(comparator, JSFunction):
+                        result = self._call_function(comparator, [a, b])
+                    else:
+                        result = comparator(a, b)
+                    # Convert to integer for cmp_to_key
+                    num = to_number(result) if result is not UNDEFINED else 0
+                    return int(num) if isinstance(num, (int, float)) else 0
+                return default_compare(a, b)
+
+            # Sort using Python's sort with custom key
+            from functools import cmp_to_key
+            this._elements.sort(key=cmp_to_key(compare_fn))
+            return this
+
+        array_prototype.set("sort", JSBoundMethod(array_sort))
 
         # Array.isArray()
         def is_array(*args):

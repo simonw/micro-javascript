@@ -76,7 +76,7 @@ try {
 
 ## Known Limitations
 
-See [open-problems.md](open-problems.md) for details on:
+See [open-problems.md]([open-problems.md](https://github.com/simonw/micro-javascript/blob/main/open-problems.md)) for details on:
 - Deep nesting limits (parser uses recursion)
 - Some regex edge cases with optional lookahead captures
 - Error constructor location tracking
@@ -92,6 +92,6 @@ uv run pytest
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file.
+MIT License - see [LICENSE](https://github.com/simonw/micro-javascript/blob/main/LICENSE) file.
 
 Based on MicroQuickJS by Fabrice Bellard.

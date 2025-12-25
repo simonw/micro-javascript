@@ -8,7 +8,7 @@ classes to the JavaScript context, demonstrating Python/JS interop.
 import pytest
 from pathlib import Path
 
-from microjs import JSContext
+from microjs import Context
 from microjs.values import JSObject, JSCallableObject, JSFunction, UNDEFINED
 
 
@@ -86,7 +86,7 @@ class TestRectangle:
 
     def test_rectangle_basic(self):
         """Test creating a Rectangle from JavaScript."""
-        ctx = JSContext()
+        ctx = Context()
 
         # Create and expose Rectangle constructor
         rect_constructor, rect_prototype = create_rectangle_constructor(
@@ -105,7 +105,7 @@ class TestRectangle:
 
     def test_rectangle_x_y_properties(self):
         """Test Rectangle x and y properties individually."""
-        ctx = JSContext()
+        ctx = Context()
 
         rect_constructor, rect_prototype = create_rectangle_constructor(
             ctx, ctx._object_prototype
@@ -117,7 +117,7 @@ class TestRectangle:
 
     def test_filled_rectangle_inheritance(self):
         """Test FilledRectangle inheriting from Rectangle."""
-        ctx = JSContext()
+        ctx = Context()
 
         rect_constructor, rect_prototype = create_rectangle_constructor(
             ctx, ctx._object_prototype
@@ -139,7 +139,7 @@ class TestRectangle:
 
     def test_rectangle_get_closure(self):
         """Test Rectangle.getClosure static method."""
-        ctx = JSContext()
+        ctx = Context()
 
         rect_constructor, rect_prototype = create_rectangle_constructor(
             ctx, ctx._object_prototype
@@ -156,7 +156,7 @@ class TestRectangle:
 
     def test_rectangle_call_callback(self):
         """Test Rectangle.call static method with JavaScript callback."""
-        ctx = JSContext()
+        ctx = Context()
 
         rect_constructor, rect_prototype = create_rectangle_constructor(
             ctx, ctx._object_prototype

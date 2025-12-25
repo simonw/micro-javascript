@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
 import math
 
 if TYPE_CHECKING:
-    from .context import JSContext
+    from .context import Context
 
 
 class JSUndefined:

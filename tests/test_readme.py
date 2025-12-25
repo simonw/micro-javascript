@@ -31,7 +31,7 @@ def find_return_comments(code_block: str) -> list[tuple[int, str, str]]:
 def get_base_namespace() -> dict:
     """Get a namespace with common imports for README examples."""
     namespace = {}
-    exec("from microjs import JSContext", namespace)
+    exec("from microjs import Context", namespace)
     exec("from microjs.values import JSObject, JSArray", namespace)
     return namespace
 
@@ -63,8 +63,8 @@ class TestReadmeExamples:
         """Test that we can extract Python blocks from README."""
         blocks = extract_python_blocks(readme_content)
         assert len(blocks) > 0, "Should find at least one Python block"
-        # First block should contain JSContext
-        assert "JSContext" in blocks[0]
+        # First block should contain Context
+        assert "Context" in blocks[0]
 
     def test_find_return_comments(self):
         """Test that we can find return comments in code."""

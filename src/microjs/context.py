@@ -25,7 +25,7 @@ from .values import (
 from .errors import JSError, MemoryLimitError, TimeLimitError
 
 
-class JSContext:
+class Context:
     """JavaScript execution context with configurable limits."""
 
     def __init__(
@@ -1296,3 +1296,8 @@ class JSContext:
         if callable(value):
             return value
         return UNDEFINED
+
+
+# Backwards-compatible alias: JSContext was the original name and may be used
+# by existing code. Keep this alias to avoid breaking changes.
+JSContext = Context

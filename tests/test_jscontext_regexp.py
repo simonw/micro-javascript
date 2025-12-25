@@ -1,7 +1,7 @@
-"""Test RegExp integration with JSContext."""
+"""Test RegExp integration with Context."""
 
 import pytest
-from microjs import JSContext
+from microjs import Context
 
 
 class TestRegExpConstructor:
@@ -9,25 +9,25 @@ class TestRegExpConstructor:
 
     def test_new_regexp_basic(self):
         """Create RegExp with constructor."""
-        ctx = JSContext()
+        ctx = Context()
         result = ctx.eval('var re = new RegExp("abc"); re.source')
         assert result == "abc"
 
     def test_new_regexp_flags(self):
         """Create RegExp with flags."""
-        ctx = JSContext()
+        ctx = Context()
         result = ctx.eval('var re = new RegExp("abc", "gi"); re.flags')
         assert result == "gi"
 
     def test_regexp_global_flag(self):
         """Check global flag property."""
-        ctx = JSContext()
+        ctx = Context()
         result = ctx.eval('var re = new RegExp("abc", "g"); re.global')
         assert result is True
 
     def test_regexp_ignorecase_flag(self):
         """Check ignoreCase flag property."""
-        ctx = JSContext()
+        ctx = Context()
         result = ctx.eval('var re = new RegExp("abc", "i"); re.ignoreCase')
         assert result is True
 
@@ -37,25 +37,25 @@ class TestRegExpTest:
 
     def test_simple_match(self):
         """Test simple pattern match."""
-        ctx = JSContext()
+        ctx = Context()
         result = ctx.eval('var re = new RegExp("hello"); re.test("hello world")')
         assert result is True
 
     def test_no_match(self):
         """Test no match."""
-        ctx = JSContext()
+        ctx = Context()
         result = ctx.eval('var re = new RegExp("hello"); re.test("goodbye")')
         assert result is False
 
     def test_case_insensitive_match(self):
         """Test case insensitive match."""
-        ctx = JSContext()
+        ctx = Context()
         result = ctx.eval('var re = new RegExp("hello", "i"); re.test("HELLO")')
         assert result is True
 
     def test_digit_pattern(self):
         """Test digit pattern."""
-        ctx = JSContext()
+        ctx = Context()
         result = ctx.eval('var re = new RegExp("\\\\d+"); re.test("abc123")')
         assert result is True
 
@@ -65,7 +65,7 @@ class TestRegExpExec:
 
     def test_exec_match(self):
         """Test exec returns match array."""
-        ctx = JSContext()
+        ctx = Context()
         result = ctx.eval(
             """
             var re = new RegExp("(\\\\w+)@(\\\\w+)");
@@ -77,7 +77,7 @@ class TestRegExpExec:
 
     def test_exec_group(self):
         """Test exec captures groups."""
-        ctx = JSContext()
+        ctx = Context()
         result = ctx.eval(
             """
             var re = new RegExp("(\\\\w+)@(\\\\w+)");
@@ -89,13 +89,13 @@ class TestRegExpExec:
 
     def test_exec_no_match(self):
         """Test exec returns null on no match."""
-        ctx = JSContext()
+        ctx = Context()
         result = ctx.eval('var re = new RegExp("xyz"); re.exec("abc")')
         assert result is None
 
     def test_exec_index(self):
         """Test exec result has index."""
-        ctx = JSContext()
+        ctx = Context()
         result = ctx.eval(
             """
             var re = new RegExp("world");
@@ -111,7 +111,7 @@ class TestRegExpGlobal:
 
     def test_global_exec_advances(self):
         """Test exec with global flag advances lastIndex."""
-        ctx = JSContext()
+        ctx = Context()
         result = ctx.eval(
             """
             var re = new RegExp("a", "g");
@@ -127,7 +127,7 @@ class TestRegExpGlobal:
 
     def test_lastindex_property(self):
         """Test lastIndex property is updated."""
-        ctx = JSContext()
+        ctx = Context()
         result = ctx.eval(
             """
             var re = new RegExp("a", "g");
@@ -145,13 +145,13 @@ class TestRegExpPatterns:
 
     def test_word_boundary(self):
         """Test word boundary."""
-        ctx = JSContext()
+        ctx = Context()
         result = ctx.eval('new RegExp("\\\\bword\\\\b").test("a word here")')
         assert result is True
 
     def test_anchors(self):
         """Test anchors."""
-        ctx = JSContext()
+        ctx = Context()
         result = ctx.eval('new RegExp("^hello").test("hello world")')
         assert result is True
         result = ctx.eval('new RegExp("^hello").test("say hello")')
@@ -159,7 +159,7 @@ class TestRegExpPatterns:
 
     def test_quantifiers(self):
         """Test quantifiers."""
-        ctx = JSContext()
+        ctx = Context()
         result = ctx.eval('new RegExp("a+").test("aaa")')
         assert result is True
         result = ctx.eval('new RegExp("a{2,3}").test("aaaa")')
@@ -167,7 +167,7 @@ class TestRegExpPatterns:
 
     def test_character_class(self):
         """Test character classes."""
-        ctx = JSContext()
+        ctx = Context()
         result = ctx.eval('new RegExp("[a-z]+").test("hello")')
         assert result is True
         result = ctx.eval('new RegExp("[0-9]+").test("123")')

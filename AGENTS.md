@@ -5,8 +5,8 @@ Uses uv. Run tests like this:
 Run the development version of the tool like this:
 
     uv run python -c '
-    from microjs import JSContext
-    ctx = JSContext(memory_limit=1024*1024, time_limit=5.0)
+    from microjs import Context
+    ctx = Context(memory_limit=1024*1024, time_limit=5.0)
     print(ctx.eval("1 + 2"))
     '
 Always practice TDD: write a faliing test, watch it fail, then make it pass.

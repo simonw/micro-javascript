@@ -77,23 +77,17 @@ class TestRegexCaptureGroups:
         expected = ["zaacbbbcac", "z", "ac", "a", None, "c"]
         assert result == expected
 
-    @pytest.mark.xfail(reason="Optional lookahead group retains capture")
     def test_optional_lookahead_no_match(self):
         """Optional lookahead that doesn't match should have undefined capture.
-
-        Issue: When an optional group containing a lookahead doesn't match,
-        the capture from the lookahead should be undefined. Currently the
-        capture from a previous successful lookahead attempt is retained.
 
         Pattern: /(?:(?=(abc)))?a/
         String:  'abc'
 
         The outer group (?:...)? is optional. The lookahead (?=(abc)) would
         match 'abc', but then 'a' must match. Since the lookahead consumed
-        nothing, 'a' matches at position 0. But since the outer optional
-        group could match (lookahead succeeded), it's unclear if the capture
-        should be retained. Per spec, if the outer group is skipped, captures
-        inside should be undefined.
+        nothing, 'a' matches at position 0. Since the optional group matched
+        zero-width (lookahead doesn't advance), captures inside should be
+        undefined per ECMAScript spec.
         """
         ctx = Context(time_limit=5.0)
         result = ctx.eval('/(?:(?=(abc)))?a/.exec("abc")')
@@ -102,13 +96,12 @@ class TestRegexCaptureGroups:
         expected = ["a", None]
         assert result == expected
 
-    @pytest.mark.xfail(reason="Repeated optional lookahead group retains capture")
     def test_repeated_optional_lookahead(self):
         """Repeated optional lookahead with {0,2} quantifier.
 
-        Issue: Similar to test_optional_lookahead_no_match, but with {0,2}.
-        The capture should be undefined since the lookahead group didn't
-        participate in the final match.
+        Similar to test_optional_lookahead_no_match, but with {0,2}.
+        The capture should be undefined since the lookahead group matched
+        zero-width (lookahead doesn't advance position).
         """
         ctx = Context(time_limit=5.0)
         result = ctx.eval('/(?:(?=(abc))){0,2}a/.exec("abc")')

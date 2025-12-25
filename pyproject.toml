@@ -25,5 +25,6 @@ module-name = "microjs"
 
 [dependency-groups]
 dev = [
+    "black>=25.12.0",
     "pytest>=9.0.2",
 ]

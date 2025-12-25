@@ -66,21 +66,25 @@ class TestRegExpExec:
     def test_exec_match(self):
         """Test exec returns match array."""
         ctx = JSContext()
-        result = ctx.eval('''
+        result = ctx.eval(
+            """
             var re = new RegExp("(\\\\w+)@(\\\\w+)");
             var m = re.exec("user@host");
             m[0]
-        ''')
+        """
+        )
         assert result == "user@host"
 
     def test_exec_group(self):
         """Test exec captures groups."""
         ctx = JSContext()
-        result = ctx.eval('''
+        result = ctx.eval(
+            """
             var re = new RegExp("(\\\\w+)@(\\\\w+)");
             var m = re.exec("user@host");
             m[1]
-        ''')
+        """
+        )
         assert result == "user"
 
     def test_exec_no_match(self):
@@ -92,11 +96,13 @@ class TestRegExpExec:
     def test_exec_index(self):
         """Test exec result has index."""
         ctx = JSContext()
-        result = ctx.eval('''
+        result = ctx.eval(
+            """
             var re = new RegExp("world");
             var m = re.exec("hello world");
             m.index
-        ''')
+        """
+        )
         assert result == 6
 
 
@@ -106,7 +112,8 @@ class TestRegExpGlobal:
     def test_global_exec_advances(self):
         """Test exec with global flag advances lastIndex."""
         ctx = JSContext()
-        result = ctx.eval('''
+        result = ctx.eval(
+            """
             var re = new RegExp("a", "g");
             var s = "abab";
             var r1 = re.exec(s);
@@ -114,19 +121,22 @@ class TestRegExpGlobal:
             var r2 = re.exec(s);
             var idx2 = r2.index;
             idx1 + "," + idx2
-        ''')
+        """
+        )
         assert result == "0,2"
 
     def test_lastindex_property(self):
         """Test lastIndex property is updated."""
         ctx = JSContext()
-        result = ctx.eval('''
+        result = ctx.eval(
+            """
             var re = new RegExp("a", "g");
             var li1 = re.lastIndex;
             re.exec("abab");
             var li2 = re.lastIndex;
             li1 + "," + li2
-        ''')
+        """
+        )
         assert result == "0,1"
 
 

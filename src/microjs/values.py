@@ -91,7 +91,7 @@ def js_typeof(value: JSValue) -> str:
     if isinstance(value, JSFunction):
         return "function"
     # JSCallableObject (like Object, Array constructors) should be "function"
-    if isinstance(value, JSObject) and hasattr(value, '_call_fn'):
+    if isinstance(value, JSObject) and hasattr(value, "_call_fn"):
         return "function"
     if isinstance(value, JSObject):
         return "object"
@@ -436,8 +436,9 @@ class JSTypedArray(JSObject):
     def _read_from_buffer(self, index: int):
         """Read a value from the underlying buffer."""
         import struct
+
         offset = self._byte_offset + index * self._element_size
-        data = bytes(self._buffer._data[offset:offset + self._element_size])
+        data = bytes(self._buffer._data[offset : offset + self._element_size])
         if len(data) < self._element_size:
             return 0
         return self._unpack_value(data)
@@ -445,6 +446,7 @@ class JSTypedArray(JSObject):
     def _write_to_buffer(self, index: int, value) -> None:
         """Write a value to the underlying buffer."""
         import struct
+
         offset = self._byte_offset + index * self._element_size
         packed = self._pack_value(value)
         for i, b in enumerate(packed):
@@ -452,11 +454,11 @@ class JSTypedArray(JSObject):
 
     def _unpack_value(self, data: bytes):
         """Unpack bytes to a value. Override in subclasses for float types."""
-        return int.from_bytes(data, 'little', signed=self._signed)
+        return int.from_bytes(data, "little", signed=self._signed)
 
     def _pack_value(self, value) -> bytes:
         """Pack a value to bytes. Override in subclasses for float types."""
-        return int(value).to_bytes(self._element_size, 'little', signed=self._signed)
+        return int(value).to_bytes(self._element_size, "little", signed=self._signed)
 
     def _coerce_value(self, value):
         """Coerce value to the appropriate type. Override in subclasses."""
@@ -515,12 +517,14 @@ class JSFloat64Array(JSTypedArray):
     def _unpack_value(self, data: bytes):
         """Unpack bytes to float64."""
         import struct
-        return struct.unpack('<d', data)[0]
+
+        return struct.unpack("<d", data)[0]
 
     def _pack_value(self, value) -> bytes:
         """Pack float64 to bytes."""
         import struct
-        return struct.pack('<d', float(value))
+
+        return struct.pack("<d", float(value))
 
 
 class JSUint8Array(JSTypedArray):
@@ -615,21 +619,24 @@ class JSFloat32Array(JSTypedArray):
     def _coerce_value(self, value):
         """Coerce to 32-bit float."""
         import struct
+
         if isinstance(value, (int, float)):
             # Convert to float32 and back to simulate precision loss
-            packed = struct.pack('<f', float(value))
-            return struct.unpack('<f', packed)[0]
+            packed = struct.pack("<f", float(value))
+            return struct.unpack("<f", packed)[0]
         return 0.0
 
     def _unpack_value(self, data: bytes):
         """Unpack bytes to float32."""
         import struct
-        return struct.unpack('<f', data)[0]
+
+        return struct.unpack("<f", data)[0]
 
     def _pack_value(self, value) -> bytes:
         """Pack float32 to bytes."""
         import struct
-        return struct.pack('<f', float(value))
+
+        return struct.pack("<f", float(value))
 
 
 class JSArrayBuffer(JSObject):

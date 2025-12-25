@@ -3,18 +3,51 @@
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from .ast_nodes import (
-    Node, Program, NumericLiteral, StringLiteral, BooleanLiteral, NullLiteral,
-    RegexLiteral, Identifier, ThisExpression, ArrayExpression, ObjectExpression, Property,
-    UnaryExpression, UpdateExpression, BinaryExpression, LogicalExpression,
-    ConditionalExpression, AssignmentExpression, SequenceExpression,
-    MemberExpression, CallExpression, NewExpression,
-    ExpressionStatement, BlockStatement, EmptyStatement,
-    VariableDeclaration, VariableDeclarator,
-    IfStatement, WhileStatement, DoWhileStatement, ForStatement,
-    ForInStatement, ForOfStatement, BreakStatement, ContinueStatement,
-    ReturnStatement, ThrowStatement, TryStatement, CatchClause,
-    SwitchStatement, SwitchCase, LabeledStatement,
-    FunctionDeclaration, FunctionExpression, ArrowFunctionExpression,
+    Node,
+    Program,
+    NumericLiteral,
+    StringLiteral,
+    BooleanLiteral,
+    NullLiteral,
+    RegexLiteral,
+    Identifier,
+    ThisExpression,
+    ArrayExpression,
+    ObjectExpression,
+    Property,
+    UnaryExpression,
+    UpdateExpression,
+    BinaryExpression,
+    LogicalExpression,
+    ConditionalExpression,
+    AssignmentExpression,
+    SequenceExpression,
+    MemberExpression,
+    CallExpression,
+    NewExpression,
+    ExpressionStatement,
+    BlockStatement,
+    EmptyStatement,
+    VariableDeclaration,
+    VariableDeclarator,
+    IfStatement,
+    WhileStatement,
+    DoWhileStatement,
+    ForStatement,
+    ForInStatement,
+    ForOfStatement,
+    BreakStatement,
+    ContinueStatement,
+    ReturnStatement,
+    ThrowStatement,
+    TryStatement,
+    CatchClause,
+    SwitchStatement,
+    SwitchCase,
+    LabeledStatement,
+    FunctionDeclaration,
+    FunctionExpression,
+    ArrowFunctionExpression,
 )
 from .opcodes import OpCode
 from .values import UNDEFINED
@@ -23,20 +56,28 @@ from .values import UNDEFINED
 @dataclass
 class CompiledFunction:
     """A compiled function."""
+
     name: str
     params: List[str]
     bytecode: bytes
     constants: List[Any]
     locals: List[str]
     num_locals: int
-    free_vars: List[str] = field(default_factory=list)  # Variables captured from outer scope
-    cell_vars: List[str] = field(default_factory=list)  # Local variables that are captured by inner functions
-    source_map: Dict[int, Tuple[int, int]] = field(default_factory=dict)  # bytecode_pos -> (line, column)
+    free_vars: List[str] = field(
+        default_factory=list
+    )  # Variables captured from outer scope
+    cell_vars: List[str] = field(
+        default_factory=list
+    )  # Local variables that are captured by inner functions
+    source_map: Dict[int, Tuple[int, int]] = field(
+        default_factory=dict
+    )  # bytecode_pos -> (line, column)
 
 
 @dataclass
 class LoopContext:
     """Context for loops (for break/continue)."""
+
     break_jumps: List[int] = field(default_factory=list)
     continue_jumps: List[int] = field(default_factory=list)
     label: Optional[str] = None
@@ -46,6 +87,7 @@ class LoopContext:
 @dataclass
 class TryContext:
     """Context for try-finally blocks (for break/continue/return)."""
+
     finalizer: Any = None  # The finally block AST node
 
 
@@ -58,13 +100,17 @@ class Compiler:
         self.names: List[str] = []
         self.locals: List[str] = []
         self.loop_stack: List[LoopContext] = []
-        self.try_stack: List[TryContext] = []  # Track try-finally for break/continue/return
+        self.try_stack: List[TryContext] = (
+            []
+        )  # Track try-finally for break/continue/return
         self.functions: List[CompiledFunction] = []
         self._in_function: bool = False  # Track if we're compiling inside a function
         self._outer_locals: List[List[str]] = []  # Stack of outer scope locals
         self._free_vars: List[str] = []  # Free variables captured from outer scopes
         self._cell_vars: List[str] = []  # Local variables captured by inner functions
-        self.source_map: Dict[int, Tuple[int, int]] = {}  # bytecode_pos -> (line, column)
+        self.source_map: Dict[int, Tuple[int, int]] = (
+            {}
+        )  # bytecode_pos -> (line, column)
         self._current_loc: Optional[Tuple[int, int]] = None  # Current source location
 
     def compile(self, node: Program) -> CompiledFunction:
@@ -95,7 +141,9 @@ class Compiler:
         )
 
     # Opcodes that use 16-bit arguments (jumps and jump-like)
-    _JUMP_OPCODES = frozenset([OpCode.JUMP, OpCode.JUMP_IF_FALSE, OpCode.JUMP_IF_TRUE, OpCode.TRY_START])
+    _JUMP_OPCODES = frozenset(
+        [OpCode.JUMP, OpCode.JUMP_IF_FALSE, OpCode.JUMP_IF_TRUE, OpCode.TRY_START]
+    )
 
     def _emit(self, opcode: OpCode, arg: Optional[int] = None) -> int:
         """Emit an opcode, return its position."""
@@ -201,7 +249,9 @@ class Compiler:
         captured = set()
 
         def visit(node):
-            if isinstance(node, (FunctionDeclaration, FunctionExpression, ArrowFunctionExpression)):
+            if isinstance(
+                node, (FunctionDeclaration, FunctionExpression, ArrowFunctionExpression)
+            ):
                 # Found inner function - check what variables it uses
                 inner_captured = self._find_free_vars_in_function(node, locals_set)
                 captured.update(inner_captured)
@@ -232,7 +282,7 @@ class Compiler:
                         visit(stmt)
             elif isinstance(node, LabeledStatement):
                 visit(node.body)
-            elif hasattr(node, '__dict__'):
+            elif hasattr(node, "__dict__"):
                 # For expression nodes (e.g., arrow function expression body)
                 for value in node.__dict__.values():
                     if isinstance(value, Node):
@@ -275,14 +325,16 @@ class Compiler:
             if isinstance(node, Identifier):
                 if node.name in outer_locals and node.name not in local_vars:
                     free_vars.add(node.name)
-            elif isinstance(node, (FunctionDeclaration, FunctionExpression, ArrowFunctionExpression)):
+            elif isinstance(
+                node, (FunctionDeclaration, FunctionExpression, ArrowFunctionExpression)
+            ):
                 # Recursively check nested functions - any outer variable they need
                 # must also be captured by this function (unless it's our local)
                 nested_free = self._find_free_vars_in_function(node, outer_locals)
                 for var in nested_free:
                     if var not in local_vars:
                         free_vars.add(var)
-            elif hasattr(node, '__dict__'):
+            elif hasattr(node, "__dict__"):
                 for value in node.__dict__.values():
                     if isinstance(value, Node):
                         visit_expr(value)
@@ -305,13 +357,23 @@ class Compiler:
         elif isinstance(node, BlockStatement):
             for stmt in node.body:
                 self._collect_var_decls(stmt, var_set)
-        elif hasattr(node, '__dict__'):
+        elif hasattr(node, "__dict__"):
             for key, value in node.__dict__.items():
-                if isinstance(value, Node) and not isinstance(value, (FunctionDeclaration, FunctionExpression, ArrowFunctionExpression)):
+                if isinstance(value, Node) and not isinstance(
+                    value,
+                    (FunctionDeclaration, FunctionExpression, ArrowFunctionExpression),
+                ):
                     self._collect_var_decls(value, var_set)
                 elif isinstance(value, list):
                     for item in value:
-                        if isinstance(item, Node) and not isinstance(item, (FunctionDeclaration, FunctionExpression, ArrowFunctionExpression)):
+                        if isinstance(item, Node) and not isinstance(
+                            item,
+                            (
+                                FunctionDeclaration,
+                                FunctionExpression,
+                                ArrowFunctionExpression,
+                            ),
+                        ):
                             self._collect_var_decls(item, var_set)
 
     # ---- Statements ----
@@ -504,7 +566,9 @@ class Compiler:
                 self._emit(OpCode.SET_PROP)
                 self._emit(OpCode.POP)  # Pop the result of SET_PROP
             else:
-                raise NotImplementedError(f"Unsupported for-in left: {type(node.left).__name__}")
+                raise NotImplementedError(
+                    f"Unsupported for-in left: {type(node.left).__name__}"
+                )
 
             self._compile_statement(node.body)
 
@@ -554,7 +618,9 @@ class Compiler:
                     self._emit(OpCode.STORE_NAME, idx)
                 self._emit(OpCode.POP)
             else:
-                raise NotImplementedError(f"Unsupported for-of left: {type(node.left).__name__}")
+                raise NotImplementedError(
+                    f"Unsupported for-of left: {type(node.left).__name__}"
+                )
 
             self._compile_statement(node.body)
 
@@ -775,7 +841,9 @@ class Compiler:
             self.loop_stack.pop()
 
         else:
-            raise NotImplementedError(f"Cannot compile statement: {type(node).__name__}")
+            raise NotImplementedError(
+                f"Cannot compile statement: {type(node).__name__}"
+            )
 
     def _compile_statement_for_value(self, node: Node) -> None:
         """Compile a statement leaving its completion value on the stack.
@@ -837,7 +905,9 @@ class Compiler:
             if isinstance(node, Identifier):
                 if node.name not in local_vars and self._is_in_outer_scope(node.name):
                     free_vars.add(node.name)
-            elif isinstance(node, (FunctionDeclaration, FunctionExpression, ArrowFunctionExpression)):
+            elif isinstance(
+                node, (FunctionDeclaration, FunctionExpression, ArrowFunctionExpression)
+            ):
                 # Check nested function's free vars - we need to pass through
                 # any outer scope vars that aren't our locals
                 nested_params = {p.name for p in node.params}
@@ -852,7 +922,7 @@ class Compiler:
             elif isinstance(node, BlockStatement):
                 for stmt in node.body:
                     visit(stmt)
-            elif hasattr(node, '__dict__'):
+            elif hasattr(node, "__dict__"):
                 for value in node.__dict__.values():
                     if isinstance(value, Node):
                         visit(value)
@@ -870,7 +940,9 @@ class Compiler:
 
         return free_vars
 
-    def _compile_arrow_function(self, node: ArrowFunctionExpression) -> CompiledFunction:
+    def _compile_arrow_function(
+        self, node: ArrowFunctionExpression
+    ) -> CompiledFunction:
         """Compile an arrow function."""
         # Save current state
         old_bytecode = self.bytecode
@@ -943,8 +1015,11 @@ class Compiler:
         return func
 
     def _compile_function(
-        self, name: str, params: List[Identifier], body: BlockStatement,
-        is_expression: bool = False
+        self,
+        name: str,
+        params: List[Identifier],
+        body: BlockStatement,
+        is_expression: bool = False,
     ) -> CompiledFunction:
         """Compile a function.
 
@@ -1343,11 +1418,16 @@ class Compiler:
                     self._compile_expression(node.right)
                     op = node.operator[:-1]  # Remove '='
                     op_map = {
-                        "+": OpCode.ADD, "-": OpCode.SUB,
-                        "*": OpCode.MUL, "/": OpCode.DIV,
-                        "%": OpCode.MOD, "&": OpCode.BAND,
-                        "|": OpCode.BOR, "^": OpCode.BXOR,
-                        "<<": OpCode.SHL, ">>": OpCode.SHR,
+                        "+": OpCode.ADD,
+                        "-": OpCode.SUB,
+                        "*": OpCode.MUL,
+                        "/": OpCode.DIV,
+                        "%": OpCode.MOD,
+                        "&": OpCode.BAND,
+                        "|": OpCode.BOR,
+                        "^": OpCode.BXOR,
+                        "<<": OpCode.SHL,
+                        ">>": OpCode.SHR,
                         ">>>": OpCode.USHR,
                     }
                     self._emit(op_map[op])
@@ -1424,7 +1504,9 @@ class Compiler:
 
         elif isinstance(node, FunctionExpression):
             name = node.id.name if node.id else ""
-            func = self._compile_function(name, node.params, node.body, is_expression=True)
+            func = self._compile_function(
+                name, node.params, node.body, is_expression=True
+            )
             func_idx = len(self.functions)
             self.functions.append(func)
 
@@ -1442,4 +1524,6 @@ class Compiler:
             self._emit(OpCode.MAKE_CLOSURE, func_idx)
 
         else:
-            raise NotImplementedError(f"Cannot compile expression: {type(node).__name__}")
+            raise NotImplementedError(
+                f"Cannot compile expression: {type(node).__name__}"
+            )

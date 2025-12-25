@@ -8,13 +8,28 @@ from dataclasses import dataclass
 from .opcodes import OpCode
 from .compiler import CompiledFunction
 from .values import (
-    UNDEFINED, NULL, JSUndefined, JSNull, JSValue,
-    JSObject, JSArray, JSFunction, JSRegExp, JSTypedArray, JSArrayBuffer,
-    to_boolean, to_number, to_string, js_typeof,
+    UNDEFINED,
+    NULL,
+    JSUndefined,
+    JSNull,
+    JSValue,
+    JSObject,
+    JSArray,
+    JSFunction,
+    JSRegExp,
+    JSTypedArray,
+    JSArrayBuffer,
+    to_boolean,
+    to_number,
+    to_string,
+    js_typeof,
 )
 from .errors import (
-    JSError, JSTypeError, JSReferenceError,
-    MemoryLimitError, TimeLimitError,
+    JSError,
+    JSTypeError,
+    JSReferenceError,
+    MemoryLimitError,
+    TimeLimitError,
 )
 
 
@@ -26,7 +41,7 @@ def js_round(x: float, ndigits: int = 0) -> float:
         else:
             return math.ceil(x - 0.5)
     else:
-        multiplier = 10 ** ndigits
+        multiplier = 10**ndigits
         if x >= 0:
             return math.floor(x * multiplier + 0.5) / multiplier
         else:
@@ -36,25 +51,32 @@ def js_round(x: float, ndigits: int = 0) -> float:
 @dataclass
 class ClosureCell:
     """A cell for closure variable - allows sharing between scopes."""
+
     value: JSValue
 
 
 @dataclass
 class CallFrame:
     """Call frame on the call stack."""
+
     func: CompiledFunction
     ip: int  # Instruction pointer
     bp: int  # Base pointer (stack base for this frame)
     locals: List[JSValue]
     this_value: JSValue
-    closure_cells: List[ClosureCell] = None  # Cells for captured variables (from outer function)
-    cell_storage: List[ClosureCell] = None  # Cells for variables captured by inner functions
+    closure_cells: List[ClosureCell] = (
+        None  # Cells for captured variables (from outer function)
+    )
+    cell_storage: List[ClosureCell] = (
+        None  # Cells for variables captured by inner functions
+    )
     is_constructor_call: bool = False  # True if this frame is from a "new" call
     new_target: JSValue = None  # The new object for constructor calls
 
 
 class ForInIterator:
     """Iterator for for-in loops."""
+
     def __init__(self, keys: List[str]):
         self.keys = keys
         self.index = 0
@@ -70,6 +92,7 @@ class ForInIterator:
 
 class ForOfIterator:
     """Iterator for for-of loops."""
+
     def __init__(self, values: List):
         self.values = values
         self.index = 0
@@ -158,20 +181,35 @@ class VM:
 
             # Get argument if needed
             arg = None
-            if op in (OpCode.JUMP, OpCode.JUMP_IF_FALSE, OpCode.JUMP_IF_TRUE, OpCode.TRY_START):
+            if op in (
+                OpCode.JUMP,
+                OpCode.JUMP_IF_FALSE,
+                OpCode.JUMP_IF_TRUE,
+                OpCode.TRY_START,
+            ):
                 # 16-bit little-endian argument for jumps
                 low = bytecode[frame.ip]
                 high = bytecode[frame.ip + 1]
                 arg = low | (high << 8)
                 frame.ip += 2
             elif op in (
-                OpCode.LOAD_CONST, OpCode.LOAD_NAME, OpCode.STORE_NAME,
-                OpCode.LOAD_LOCAL, OpCode.STORE_LOCAL,
-                OpCode.LOAD_CLOSURE, OpCode.STORE_CLOSURE,
-                OpCode.LOAD_CELL, OpCode.STORE_CELL,
-                OpCode.CALL, OpCode.CALL_METHOD, OpCode.NEW,
-                OpCode.BUILD_ARRAY, OpCode.BUILD_OBJECT, OpCode.BUILD_REGEX,
-                OpCode.MAKE_CLOSURE, OpCode.TYPEOF_NAME,
+                OpCode.LOAD_CONST,
+                OpCode.LOAD_NAME,
+                OpCode.STORE_NAME,
+                OpCode.LOAD_LOCAL,
+                OpCode.STORE_LOCAL,
+                OpCode.LOAD_CLOSURE,
+                OpCode.STORE_CLOSURE,
+                OpCode.LOAD_CELL,
+                OpCode.STORE_CELL,
+                OpCode.CALL,
+                OpCode.CALL_METHOD,
+                OpCode.NEW,
+                OpCode.BUILD_ARRAY,
+                OpCode.BUILD_OBJECT,
+                OpCode.BUILD_REGEX,
+                OpCode.MAKE_CLOSURE,
+                OpCode.TYPEOF_NAME,
             ):
                 arg = bytecode[frame.ip]
                 frame.ip += 1
@@ -317,7 +355,7 @@ class VM:
             arr._elements = elements
             # Set prototype from Array constructor
             array_constructor = self.globals.get("Array")
-            if array_constructor and hasattr(array_constructor, '_prototype'):
+            if array_constructor and hasattr(array_constructor, "_prototype"):
                 arr._prototype = array_constructor._prototype
             self.stack.append(arr)
 
@@ -325,7 +363,7 @@ class VM:
             obj = JSObject()
             # Set prototype from Object constructor
             object_constructor = self.globals.get("Object")
-            if object_constructor and hasattr(object_constructor, '_prototype'):
+            if object_constructor and hasattr(object_constructor, "_prototype"):
                 obj._prototype = object_constructor._prototype
             props = []
             for _ in range(arg):
@@ -381,11 +419,11 @@ class VM:
                 # Check sign of zero using copysign
                 b_sign = math.copysign(1, b_num)
                 if a_num == 0:
-                    self.stack.append(float('nan'))
+                    self.stack.append(float("nan"))
                 elif (a_num > 0) == (b_sign > 0):  # Same sign
-                    self.stack.append(float('inf'))
+                    self.stack.append(float("inf"))
                 else:  # Different signs
-                    self.stack.append(float('-inf'))
+                    self.stack.append(float("-inf"))
             else:
                 self.stack.append(a_num / b_num)
 
@@ -395,7 +433,7 @@ class VM:
             b_num = to_number(b)
             a_num = to_number(a)
             if b_num == 0:
-                self.stack.append(float('nan'))
+                self.stack.append(float("nan"))
             else:
                 self.stack.append(a_num % b_num)
 
@@ -524,8 +562,13 @@ class VM:
             constructor = self.stack.pop()
             obj = self.stack.pop()
             # Check if constructor is callable
-            if not (isinstance(constructor, JSFunction) or
-                    (isinstance(constructor, JSObject) and hasattr(constructor, '_call_fn'))):
+            if not (
+                isinstance(constructor, JSFunction)
+                or (
+                    isinstance(constructor, JSObject)
+                    and hasattr(constructor, "_call_fn")
+                )
+            ):
                 raise JSTypeError("Right-hand side of instanceof is not callable")
 
             # Check prototype chain
@@ -536,22 +579,25 @@ class VM:
                 # For JSFunction, check _prototype attribute (if set and not None)
                 # For JSCallableObject and other constructors, use get("prototype")
                 proto = None
-                if isinstance(constructor, JSFunction) and getattr(constructor, '_prototype', None) is not None:
+                if (
+                    isinstance(constructor, JSFunction)
+                    and getattr(constructor, "_prototype", None) is not None
+                ):
                     proto = constructor._prototype
                 elif isinstance(constructor, JSObject):
                     # Try get("prototype") first for callable objects, fall back to _prototype
                     proto = constructor.get("prototype")
                     if proto is None or proto is UNDEFINED:
-                        proto = getattr(constructor, '_prototype', None)
+                        proto = getattr(constructor, "_prototype", None)
 
                 # Walk the prototype chain
                 result = False
-                current = getattr(obj, '_prototype', None)
+                current = getattr(obj, "_prototype", None)
                 while current is not None:
                     if current is proto:
                         result = True
                         break
-                    current = getattr(current, '_prototype', None)
+                    current = getattr(current, "_prototype", None)
                 self.stack.append(result)
 
         elif op == OpCode.IN:
@@ -715,11 +761,15 @@ class VM:
                     closure_cells = []
                     for var_name in compiled_func.free_vars:
                         # First check if it's in our cell_storage (cell var)
-                        if frame.cell_storage and var_name in getattr(frame.func, 'cell_vars', []):
+                        if frame.cell_storage and var_name in getattr(
+                            frame.func, "cell_vars", []
+                        ):
                             idx = frame.func.cell_vars.index(var_name)
                             # Share the same cell!
                             closure_cells.append(frame.cell_storage[idx])
-                        elif frame.closure_cells and var_name in getattr(frame.func, 'free_vars', []):
+                        elif frame.closure_cells and var_name in getattr(
+                            frame.func, "free_vars", []
+                        ):
                             # Variable is in our own closure
                             idx = frame.func.free_vars.index(var_name)
                             closure_cells.append(frame.closure_cells[idx])
@@ -909,7 +959,7 @@ class VM:
                 return obj._element_size
             if key_str == "buffer":
                 # Return the underlying buffer if it exists
-                return getattr(obj, '_buffer', UNDEFINED)
+                return getattr(obj, "_buffer", UNDEFINED)
             # Built-in typed array methods
             typed_array_methods = ["toString", "join", "subarray", "set"]
             if key_str in typed_array_methods:
@@ -928,10 +978,29 @@ class VM:
                 return obj.length
             # Built-in array methods
             array_methods = [
-                "push", "pop", "shift", "unshift", "toString", "join",
-                "map", "filter", "reduce", "reduceRight", "forEach", "indexOf", "lastIndexOf",
-                "find", "findIndex", "some", "every", "concat", "slice", "splice",
-                "reverse", "includes", "sort",
+                "push",
+                "pop",
+                "shift",
+                "unshift",
+                "toString",
+                "join",
+                "map",
+                "filter",
+                "reduce",
+                "reduceRight",
+                "forEach",
+                "indexOf",
+                "lastIndexOf",
+                "find",
+                "findIndex",
+                "some",
+                "every",
+                "concat",
+                "slice",
+                "splice",
+                "reverse",
+                "includes",
+                "sort",
             ]
             if key_str in array_methods:
                 return self._make_array_method(obj, key_str)
@@ -942,8 +1011,17 @@ class VM:
             if key_str in ("test", "exec"):
                 return self._make_regexp_method(obj, key_str)
             # RegExp properties
-            if key_str in ("source", "flags", "global", "ignoreCase", "multiline",
-                          "dotAll", "unicode", "sticky", "lastIndex"):
+            if key_str in (
+                "source",
+                "flags",
+                "global",
+                "ignoreCase",
+                "multiline",
+                "dotAll",
+                "unicode",
+                "sticky",
+                "lastIndex",
+            ):
                 return obj.get(key_str)
             return UNDEFINED
 
@@ -956,7 +1034,7 @@ class VM:
             if key_str == "name":
                 return obj.name
             if key_str == "prototype":
-                return getattr(obj, '_prototype', UNDEFINED) or UNDEFINED
+                return getattr(obj, "_prototype", UNDEFINED) or UNDEFINED
             return UNDEFINED
 
         if isinstance(obj, JSObject):
@@ -968,11 +1046,11 @@ class VM:
             if obj.has(key_str):
                 return obj.get(key_str)
             # Check prototype chain
-            proto = getattr(obj, '_prototype', None)
+            proto = getattr(obj, "_prototype", None)
             while proto is not None:
                 if isinstance(proto, JSObject) and proto.has(key_str):
                     return proto.get(key_str)
-                proto = getattr(proto, '_prototype', None)
+                proto = getattr(proto, "_prototype", None)
             # Built-in Object methods as fallback
             if key_str in ("toString", "hasOwnProperty"):
                 return self._make_object_method(obj, key_str)
@@ -990,10 +1068,28 @@ class VM:
                 return len(obj)
             # String methods
             string_methods = [
-                "charAt", "charCodeAt", "indexOf", "lastIndexOf",
-                "substring", "slice", "split", "toLowerCase", "toUpperCase",
-                "trim", "trimStart", "trimEnd", "concat", "repeat", "startsWith", "endsWith",
-                "includes", "replace", "replaceAll", "match", "search", "toString",
+                "charAt",
+                "charCodeAt",
+                "indexOf",
+                "lastIndexOf",
+                "substring",
+                "slice",
+                "split",
+                "toLowerCase",
+                "toUpperCase",
+                "trim",
+                "trimStart",
+                "trimEnd",
+                "concat",
+                "repeat",
+                "startsWith",
+                "endsWith",
+                "includes",
+                "replace",
+                "replaceAll",
+                "match",
+                "search",
+                "toString",
             ]
             if key_str in string_methods:
                 return self._make_string_method(obj, key_str)
@@ -1001,7 +1097,13 @@ class VM:
 
         if isinstance(obj, (int, float)):
             # Number methods
-            if key_str in ("toFixed", "toString", "toExponential", "toPrecision", "valueOf"):
+            if key_str in (
+                "toFixed",
+                "toString",
+                "toExponential",
+                "toPrecision",
+                "valueOf",
+            ):
                 return self._make_number_method(obj, key_str)
             return UNDEFINED
 
@@ -1108,7 +1210,9 @@ class VM:
 
         def splice_fn(*args):
             start = int(to_number(args[0])) if args else 0
-            delete_count = int(to_number(args[1])) if len(args) > 1 else len(arr._elements) - start
+            delete_count = (
+                int(to_number(args[1])) if len(args) > 1 else len(arr._elements) - start
+            )
             items = list(args[2:]) if len(args) > 2 else []
 
             length = len(arr._elements)
@@ -1121,10 +1225,12 @@ class VM:
 
             # Create result array with deleted elements
             result = JSArray()
-            result._elements = arr._elements[start:start + delete_count]
+            result._elements = arr._elements[start : start + delete_count]
 
             # Modify original array
-            arr._elements = arr._elements[:start] + items + arr._elements[start + delete_count:]
+            arr._elements = (
+                arr._elements[:start] + items + arr._elements[start + delete_count :]
+            )
 
             return result
 
@@ -1254,7 +1360,9 @@ class VM:
                 if b is UNDEFINED:
                     return -1
                 # Use comparator if provided
-                if comparator and (callable(comparator) or isinstance(comparator, JSFunction)):
+                if comparator and (
+                    callable(comparator) or isinstance(comparator, JSFunction)
+                ):
                     result = vm._call_callback(comparator, [a, b])
                     # Convert to integer for cmp_to_key
                     num = to_number(result) if result is not UNDEFINED else 0
@@ -1263,6 +1371,7 @@ class VM:
 
             # Sort using Python's sort with custom key
             from functools import cmp_to_key
+
             arr._elements.sort(key=cmp_to_key(compare_fn))
             return arr
 
@@ -1295,6 +1404,7 @@ class VM:
 
     def _make_object_method(self, obj: JSObject, method: str) -> Any:
         """Create a bound object method."""
+
         def toString_fn(*args):
             return "[object Object]"
 
@@ -1320,14 +1430,16 @@ class VM:
             # Create a new function that wraps the original
             bound_func = JSFunction(
                 name=func.name,
-                params=func.params[len(bound_args):],  # Remaining params after bound args
+                params=func.params[
+                    len(bound_args) :
+                ],  # Remaining params after bound args
                 bytecode=func.bytecode,
             )
             # Copy compiled function reference
-            if hasattr(func, '_compiled'):
+            if hasattr(func, "_compiled"):
                 bound_func._compiled = func._compiled
             # Copy closure cells
-            if hasattr(func, '_closure_cells'):
+            if hasattr(func, "_closure_cells"):
                 bound_func._closure_cells = func._closure_cells
             # Store binding info on the function
             bound_func._bound_this = bound_this
@@ -1409,11 +1521,15 @@ class VM:
             bound_args = list(args[1:]) if len(args) > 1 else []
 
             if isinstance(fn, JSBoundMethod):
+
                 def bound(*call_args):
                     return fn(bound_this, *bound_args, *call_args)
+
             else:
+
                 def bound(*call_args):
                     return fn(*bound_args, *call_args)
+
             return bound
 
         methods = {
@@ -1428,11 +1544,11 @@ class VM:
     ) -> JSValue:
         """Internal method to call a function with explicit this and args."""
         # Handle bound functions
-        if hasattr(func, '_bound_this'):
+        if hasattr(func, "_bound_this"):
             this_val = func._bound_this
-        if hasattr(func, '_bound_args'):
+        if hasattr(func, "_bound_args"):
             args = list(func._bound_args) + list(args)
-        if hasattr(func, '_original_func'):
+        if hasattr(func, "_original_func"):
             func = func._original_func
 
         # Use existing invoke mechanism
@@ -1442,6 +1558,7 @@ class VM:
 
     def _make_regexp_method(self, re: JSRegExp, method: str) -> Any:
         """Create a bound RegExp method."""
+
         def test_fn(*args):
             string = to_string(args[0]) if args else ""
             return re.test(string)
@@ -1458,6 +1575,7 @@ class VM:
 
     def _make_typed_array_method(self, arr: JSTypedArray, method: str) -> Any:
         """Create a bound typed array method."""
+
         def toString_fn(*args):
             # Join elements with comma
             return ",".join(str(arr.get_index(i)) for i in range(arr.length))
@@ -1485,7 +1603,7 @@ class VM:
             for i in range(begin, end):
                 result.set_index(i - begin, arr.get_index(i))
             # Share the same buffer if the original has one
-            if hasattr(arr, '_buffer'):
+            if hasattr(arr, "_buffer"):
                 result._buffer = arr._buffer
             return result
 
@@ -1509,6 +1627,7 @@ class VM:
 
     def _make_number_method(self, n: float, method: str) -> Any:
         """Create a bound number method."""
+
         def toFixed(*args):
             digits = int(to_number(args[0])) if args else 0
             if digits < 0 or digits > 100:
@@ -1537,6 +1656,7 @@ class VM:
 
         def toExponential(*args):
             import math
+
             if args and args[0] is not UNDEFINED:
                 digits = int(to_number(args[0]))
             else:
@@ -1555,9 +1675,9 @@ class VM:
                 sign = "-" if n < 0 else ""
                 abs_n = abs(n)
                 exp = int(math.floor(math.log10(abs_n)))
-                mantissa = abs_n / (10 ** exp)
+                mantissa = abs_n / (10**exp)
                 # Format mantissa without trailing zeros
-                mantissa_str = f"{mantissa:.15g}".rstrip('0').rstrip('.')
+                mantissa_str = f"{mantissa:.15g}".rstrip("0").rstrip(".")
                 exp_sign = "+" if exp >= 0 else ""
                 return f"{sign}{mantissa_str}e{exp_sign}{exp}"
             else:
@@ -1569,7 +1689,7 @@ class VM:
                 sign = "-" if n < 0 else ""
                 abs_n = abs(n)
                 exp = int(math.floor(math.log10(abs_n)))
-                mantissa = abs_n / (10 ** exp)
+                mantissa = abs_n / (10**exp)
                 # Round mantissa to specified digits using JS-style rounding
                 rounded = js_round(mantissa, digits)
                 if rounded >= 10:
@@ -1584,6 +1704,7 @@ class VM:
 
         def toPrecision(*args):
             import math
+
             if not args or args[0] is UNDEFINED:
                 if isinstance(n, float) and n.is_integer():
                     return str(int(n))
@@ -1610,7 +1731,7 @@ class VM:
             # Decide if we use exponential or fixed notation
             if exp < -6 or exp >= precision:
                 # Use exponential notation
-                mantissa = abs_n / (10 ** exp)
+                mantissa = abs_n / (10**exp)
                 rounded = js_round(mantissa, precision - 1)
                 if rounded >= 10:
                     rounded /= 10
@@ -1662,6 +1783,7 @@ class VM:
 
     def _make_string_method(self, s: str, method: str) -> Any:
         """Create a bound string method."""
+
         def charAt(*args):
             idx = int(to_number(args[0])) if args else 0
             if 0 <= idx < len(s):
@@ -1672,7 +1794,7 @@ class VM:
             idx = int(to_number(args[0])) if args else 0
             if 0 <= idx < len(s):
                 return ord(s[idx])
-            return float('nan')
+            return float("nan")
 
         def indexOf(*args):
             search = to_string(args[0]) if args else ""
@@ -1718,6 +1840,7 @@ class VM:
             elif isinstance(sep, JSRegExp):
                 # Split with regex
                 import re
+
                 flags = 0
                 if "i" in sep._flags:
                     flags |= re.IGNORECASE
@@ -1786,6 +1909,7 @@ class VM:
             if isinstance(pattern, JSRegExp):
                 # Replace with regex
                 import re
+
                 flags = 0
                 if "i" in pattern._flags:
                     flags |= re.IGNORECASE
@@ -1825,7 +1949,7 @@ class VM:
                 # Find first occurrence and replace
                 idx = s.find(search)
                 if idx >= 0:
-                    return s[:idx] + repl + s[idx + len(search):]
+                    return s[:idx] + repl + s[idx + len(search) :]
                 return s
 
         def replaceAll(*args):
@@ -1861,6 +1985,7 @@ class VM:
                 return arr
 
             import re
+
             if isinstance(pattern, JSRegExp):
                 flags = 0
                 if "i" in pattern._flags:
@@ -1902,6 +2027,7 @@ class VM:
                 return 0  # Match empty string at start
 
             import re
+
             if isinstance(pattern, JSRegExp):
                 flags = 0
                 if "i" in pattern._flags:
@@ -1986,7 +2112,11 @@ class VM:
             # Check if it looks like a float
             try:
                 float_val = float(key_str)
-                if not float_val.is_integer() or math.isinf(float_val) or math.isnan(float_val):
+                if (
+                    not float_val.is_integer()
+                    or math.isinf(float_val)
+                    or math.isnan(float_val)
+                ):
                     raise JSTypeError(f"Cannot set property '{key_str}' on array")
             except ValueError:
                 pass  # Not a number, allow as string property
@@ -2039,9 +2169,12 @@ class VM:
         else:
             raise JSTypeError(f"{callee} is not a function")
 
-    def _call_method(self, method: JSValue, this_val: JSValue, args: List[JSValue]) -> None:
+    def _call_method(
+        self, method: JSValue, this_val: JSValue, args: List[JSValue]
+    ) -> None:
         """Call a method."""
         from .values import JSBoundMethod
+
         if isinstance(method, JSFunction):
             self._invoke_js_function(method, args, this_val)
         elif isinstance(method, JSBoundMethod):
@@ -2054,7 +2187,9 @@ class VM:
         else:
             raise JSTypeError(f"{method} is not a function")
 
-    def _call_callback(self, callback: JSValue, args: List[JSValue], this_val: JSValue = None) -> JSValue:
+    def _call_callback(
+        self, callback: JSValue, args: List[JSValue], this_val: JSValue = None
+    ) -> JSValue:
         """Call a callback function synchronously and return the result."""
         if isinstance(callback, JSFunction):
             # Save current stack position AND call stack depth
@@ -2062,7 +2197,9 @@ class VM:
             call_stack_len = len(self.call_stack)
 
             # Invoke the function
-            self._invoke_js_function(callback, args, this_val if this_val is not None else UNDEFINED)
+            self._invoke_js_function(
+                callback, args, this_val if this_val is not None else UNDEFINED
+            )
 
             # Execute until the call returns (back to original call stack depth)
             while len(self.call_stack) > call_stack_len:
@@ -2082,18 +2219,32 @@ class VM:
 
                 # Get argument if needed
                 arg = None
-                if op in (OpCode.JUMP, OpCode.JUMP_IF_FALSE, OpCode.JUMP_IF_TRUE, OpCode.TRY_START):
+                if op in (
+                    OpCode.JUMP,
+                    OpCode.JUMP_IF_FALSE,
+                    OpCode.JUMP_IF_TRUE,
+                    OpCode.TRY_START,
+                ):
                     low = bytecode[frame.ip]
                     high = bytecode[frame.ip + 1]
                     arg = low | (high << 8)
                     frame.ip += 2
                 elif op in (
-                    OpCode.LOAD_CONST, OpCode.LOAD_NAME, OpCode.STORE_NAME,
-                    OpCode.LOAD_LOCAL, OpCode.STORE_LOCAL,
-                    OpCode.LOAD_CLOSURE, OpCode.STORE_CLOSURE,
-                    OpCode.LOAD_CELL, OpCode.STORE_CELL,
-                    OpCode.CALL, OpCode.CALL_METHOD, OpCode.NEW,
-                    OpCode.BUILD_ARRAY, OpCode.BUILD_OBJECT, OpCode.BUILD_REGEX,
+                    OpCode.LOAD_CONST,
+                    OpCode.LOAD_NAME,
+                    OpCode.STORE_NAME,
+                    OpCode.LOAD_LOCAL,
+                    OpCode.STORE_LOCAL,
+                    OpCode.LOAD_CLOSURE,
+                    OpCode.STORE_CLOSURE,
+                    OpCode.LOAD_CELL,
+                    OpCode.STORE_CELL,
+                    OpCode.CALL,
+                    OpCode.CALL_METHOD,
+                    OpCode.NEW,
+                    OpCode.BUILD_ARRAY,
+                    OpCode.BUILD_OBJECT,
+                    OpCode.BUILD_REGEX,
                     OpCode.MAKE_CLOSURE,
                 ):
                     arg = bytecode[frame.ip]
@@ -2121,14 +2272,14 @@ class VM:
     ) -> None:
         """Invoke a JavaScript function."""
         # Handle bound functions
-        if hasattr(func, '_bound_this'):
+        if hasattr(func, "_bound_this"):
             this_val = func._bound_this
-        if hasattr(func, '_bound_args'):
+        if hasattr(func, "_bound_args"):
             args = list(func._bound_args) + list(args)
-        if hasattr(func, '_original_func'):
+        if hasattr(func, "_original_func"):
             func = func._original_func
 
-        compiled = getattr(func, '_compiled', None)
+        compiled = getattr(func, "_compiled", None)
         if compiled is None:
             raise JSTypeError("Function has no bytecode")
 
@@ -2154,7 +2305,7 @@ class VM:
                 locals_list[name_slot] = func
 
         # Get closure cells from the function
-        closure_cells = getattr(func, '_closure_cells', None)
+        closure_cells = getattr(func, "_closure_cells", None)
 
         # Create cell storage for variables that will be captured by inner functions
         cell_storage = None
@@ -2193,13 +2344,15 @@ class VM:
             # Create new object
             obj = JSObject()
             # Set prototype from constructor's prototype property
-            if hasattr(constructor, '_prototype'):
+            if hasattr(constructor, "_prototype"):
                 obj._prototype = constructor._prototype
             # Call constructor with new object as 'this'
             # Mark this as a constructor call so RETURN knows to return the object
-            self._invoke_js_function(constructor, args, obj, is_constructor=True, new_target=obj)
+            self._invoke_js_function(
+                constructor, args, obj, is_constructor=True, new_target=obj
+            )
             # Don't push obj here - RETURN/RETURN_UNDEFINED will handle it
-        elif isinstance(constructor, JSObject) and hasattr(constructor, '_call_fn'):
+        elif isinstance(constructor, JSObject) and hasattr(constructor, "_call_fn"):
             # Built-in constructor (like Object, Array, RegExp)
             result = constructor._call_fn(*args)
             self.stack.append(result)
@@ -2211,7 +2364,7 @@ class VM:
         if not self.call_stack:
             return None, None
         frame = self.call_stack[-1]
-        source_map = getattr(frame.func, 'source_map', None)
+        source_map = getattr(frame.func, "source_map", None)
         if source_map:
             # Find the closest source location at or before current IP
             # Walk backwards from current IP to find a mapped position
@@ -2257,11 +2410,11 @@ class VM:
         """Convert a Python exception to a JavaScript exception and throw it."""
         # Get the error constructor from globals
         error_constructor = self.globals.get(error_type)
-        if error_constructor and hasattr(error_constructor, '_call_fn'):
+        if error_constructor and hasattr(error_constructor, "_call_fn"):
             # Create the error object using the constructor
             # Strip the "TypeError: " prefix from the message if present
             if message.startswith(f"{error_type}: "):
-                message = message[len(error_type) + 2:]
+                message = message[len(error_type) + 2 :]
             error_obj = error_constructor._call_fn(message)
             self._throw(error_obj)
         else:

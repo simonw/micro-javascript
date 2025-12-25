@@ -139,7 +139,9 @@ class Lexer:
                     # Unknown escape - just use the character
                     result.append(escape)
             elif ch == "\n":
-                raise JSSyntaxError("Unterminated string literal", self.line, self.column)
+                raise JSSyntaxError(
+                    "Unterminated string literal", self.line, self.column
+                )
             else:
                 result.append(ch)
 
@@ -442,12 +444,7 @@ class Lexer:
         while self._current() and self._current() in "gimsuy":
             flags.append(self._advance())
 
-        return Token(
-            TokenType.REGEX,
-            ("".join(pattern), "".join(flags)),
-            line,
-            column
-        )
+        return Token(TokenType.REGEX, ("".join(pattern), "".join(flags)), line, column)
 
     def tokenize(self) -> Iterator[Token]:
         """Tokenize the entire source."""

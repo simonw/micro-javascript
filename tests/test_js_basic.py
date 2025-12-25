@@ -5,6 +5,7 @@ Parameterized pytest tests for JavaScript files.
 - Each .js file in tests/compat/ are passing original mquickjs tests
 - Each .js file in tests/ (original mquickjs tests) is run with xfail (expected to fail)
 """
+
 from pathlib import Path
 
 import pytest
@@ -51,7 +52,9 @@ def test_basic_js(name: str, path: Path):
     ctx.eval(source)
 
 
-@pytest.mark.timeout(60)  # Allow up to 60 seconds for compat tests (e.g., mandelbrot.js)
+@pytest.mark.timeout(
+    60
+)  # Allow up to 60 seconds for compat tests (e.g., mandelbrot.js)
 @pytest.mark.parametrize(
     "name,path",
     get_compat_test_files(),

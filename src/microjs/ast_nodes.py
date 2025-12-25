@@ -7,6 +7,7 @@ from typing import Any, List, Optional, Union
 @dataclass
 class SourceLocation:
     """Source location information for AST nodes."""
+
     line: int = 0
     column: int = 0
 
@@ -18,12 +19,12 @@ class Node:
     def __post_init__(self):
         # Source location - can be set by parser after creation
         # Using __post_init__ avoids dataclass field ordering issues
-        if not hasattr(self, '_loc'):
+        if not hasattr(self, "_loc"):
             self._loc: Optional[SourceLocation] = None
 
     @property
     def loc(self) -> Optional[SourceLocation]:
-        return getattr(self, '_loc', None)
+        return getattr(self, "_loc", None)
 
     @loc.setter
     def loc(self, value: Optional[SourceLocation]):
@@ -33,15 +34,12 @@ class Node:
         """Convert node to dictionary for testing/serialization."""
         result = {"type": self.__class__.__name__}
         for key, value in self.__dict__.items():
-            if key.startswith('_'):
+            if key.startswith("_"):
                 continue  # Skip private attributes like _loc
             if isinstance(value, Node):
                 result[key] = value.to_dict()
             elif isinstance(value, list):
-                result[key] = [
-                    v.to_dict() if isinstance(v, Node) else v
-                    for v in value
-                ]
+                result[key] = [v.to_dict() if isinstance(v, Node) else v for v in value]
             else:
                 result[key] = value
         return result
@@ -51,30 +49,35 @@ class Node:
 @dataclass
 class NumericLiteral(Node):
     """Numeric literal: 42, 3.14, etc."""
+
     value: Union[int, float]
 
 
 @dataclass
 class StringLiteral(Node):
     """String literal: "hello", 'world'"""
+
     value: str
 
 
 @dataclass
 class BooleanLiteral(Node):
     """Boolean literal: true, false"""
+
     value: bool
 
 
 @dataclass
 class NullLiteral(Node):
     """Null literal: null"""
+
     pass
 
 
 @dataclass
 class RegexLiteral(Node):
     """Regex literal: /pattern/flags"""
+
     pattern: str
     flags: str
 
@@ -82,12 +85,14 @@ class RegexLiteral(Node):
 @dataclass
 class Identifier(Node):
     """Identifier: variable names, property names"""
+
     name: str
 
 
 @dataclass
 class ThisExpression(Node):
     """The 'this' keyword."""
+
     pass
 
 
@@ -95,18 +100,21 @@ class ThisExpression(Node):
 @dataclass
 class ArrayExpression(Node):
     """Array literal: [1, 2, 3]"""
+
     elements: List[Node]
 
 
 @dataclass
 class ObjectExpression(Node):
     """Object literal: {a: 1, b: 2}"""
+
     properties: List["Property"]
 
 
 @dataclass
 class Property(Node):
     """Object property: key: value"""
+
     key: Node  # Identifier or Literal
     value: Node
     kind: str = "init"  # "init", "get", or "set"
@@ -117,6 +125,7 @@ class Property(Node):
 @dataclass
 class UnaryExpression(Node):
     """Unary expression: -x, !x, typeof x, etc."""
+
     operator: str
     argument: Node
     prefix: bool = True
@@ -125,6 +134,7 @@ class UnaryExpression(Node):
 @dataclass
 class UpdateExpression(Node):
     """Update expression: ++x, x++, --x, x--"""
+
     operator: str  # "++" or "--"
     argument: Node
     prefix: bool
@@ -133,6 +143,7 @@ class UpdateExpression(Node):
 @dataclass
 class BinaryExpression(Node):
     """Binary expression: a + b, a * b, etc."""
+
     operator: str
     left: Node
     right: Node
@@ -141,6 +152,7 @@ class BinaryExpression(Node):
 @dataclass
 class LogicalExpression(Node):
     """Logical expression: a && b, a || b"""
+
     operator: str  # "&&" or "||"
     left: Node
     right: Node
@@ -149,6 +161,7 @@ class LogicalExpression(Node):
 @dataclass
 class ConditionalExpression(Node):
     """Conditional (ternary) expression: a ? b : c"""
+
     test: Node
     consequent: Node
     alternate: Node
@@ -157,6 +170,7 @@ class ConditionalExpression(Node):
 @dataclass
 class AssignmentExpression(Node):
     """Assignment expression: a = b, a += b, etc."""
+
     operator: str
     left: Node
     right: Node
@@ -165,12 +179,14 @@ class AssignmentExpression(Node):
 @dataclass
 class SequenceExpression(Node):
     """Sequence expression: a, b, c"""
+
     expressions: List[Node]
 
 
 @dataclass
 class MemberExpression(Node):
     """Member expression: a.b, a[b]"""
+
     object: Node
     property: Node
     computed: bool  # True for a[b], False for a.b
@@ -179,6 +195,7 @@ class MemberExpression(Node):
 @dataclass
 class CallExpression(Node):
     """Call expression: f(a, b)"""
+
     callee: Node
     arguments: List[Node]
 
@@ -186,6 +203,7 @@ class CallExpression(Node):
 @dataclass
 class NewExpression(Node):
     """New expression: new Foo(a, b)"""
+
     callee: Node
     arguments: List[Node]
 
@@ -194,30 +212,35 @@ class NewExpression(Node):
 @dataclass
 class Program(Node):
     """Program node - root of AST."""
+
     body: List[Node]
 
 
 @dataclass
 class ExpressionStatement(Node):
     """Expression statement: expression;"""
+
     expression: Node
 
 
 @dataclass
 class BlockStatement(Node):
     """Block statement: { ... }"""
+
     body: List[Node]
 
 
 @dataclass
 class EmptyStatement(Node):
     """Empty statement: ;"""
+
     pass
 
 
 @dataclass
 class VariableDeclaration(Node):
     """Variable declaration: var a = 1, b = 2;"""
+
     declarations: List["VariableDeclarator"]
     kind: str = "var"
 
@@ -225,6 +248,7 @@ class VariableDeclaration(Node):
 @dataclass
 class VariableDeclarator(Node):
     """Variable declarator: a = 1"""
+
     id: Identifier
     init: Optional[Node]
 
@@ -232,6 +256,7 @@ class VariableDeclarator(Node):
 @dataclass
 class IfStatement(Node):
     """If statement: if (test) consequent else alternate"""
+
     test: Node
     consequent: Node
     alternate: Optional[Node]
@@ -240,6 +265,7 @@ class IfStatement(Node):
 @dataclass
 class WhileStatement(Node):
     """While statement: while (test) body"""
+
     test: Node
     body: Node
 
@@ -247,6 +273,7 @@ class WhileStatement(Node):
 @dataclass
 class DoWhileStatement(Node):
     """Do-while statement: do body while (test)"""
+
     body: Node
     test: Node
 
@@ -254,6 +281,7 @@ class DoWhileStatement(Node):
 @dataclass
 class ForStatement(Node):
     """For statement: for (init; test; update) body"""
+
     init: Optional[Node]  # VariableDeclaration or Expression
     test: Optional[Node]
     update: Optional[Node]
@@ -263,6 +291,7 @@ class ForStatement(Node):
 @dataclass
 class ForInStatement(Node):
     """For-in statement: for (left in right) body"""
+
     left: Node  # VariableDeclaration or Pattern
     right: Node
     body: Node
@@ -271,6 +300,7 @@ class ForInStatement(Node):
 @dataclass
 class ForOfStatement(Node):
     """For-of statement: for (left of right) body"""
+
     left: Node
     right: Node
     body: Node
@@ -279,30 +309,35 @@ class ForOfStatement(Node):
 @dataclass
 class BreakStatement(Node):
     """Break statement: break; or break label;"""
+
     label: Optional[Identifier]
 
 
 @dataclass
 class ContinueStatement(Node):
     """Continue statement: continue; or continue label;"""
+
     label: Optional[Identifier]
 
 
 @dataclass
 class ReturnStatement(Node):
     """Return statement: return; or return expr;"""
+
     argument: Optional[Node]
 
 
 @dataclass
 class ThrowStatement(Node):
     """Throw statement: throw expr;"""
+
     argument: Node
 
 
 @dataclass
 class TryStatement(Node):
     """Try statement: try { } catch (e) { } finally { }"""
+
     block: BlockStatement
     handler: Optional["CatchClause"]
     finalizer: Optional[BlockStatement]
@@ -311,6 +346,7 @@ class TryStatement(Node):
 @dataclass
 class CatchClause(Node):
     """Catch clause: catch (param) { body }"""
+
     param: Identifier
     body: BlockStatement
 
@@ -318,6 +354,7 @@ class CatchClause(Node):
 @dataclass
 class SwitchStatement(Node):
     """Switch statement: switch (discriminant) { cases }"""
+
     discriminant: Node
     cases: List["SwitchCase"]
 
@@ -325,6 +362,7 @@ class SwitchStatement(Node):
 @dataclass
 class SwitchCase(Node):
     """Switch case: case test: consequent or default: consequent"""
+
     test: Optional[Node]  # None for default
     consequent: List[Node]
 
@@ -332,6 +370,7 @@ class SwitchCase(Node):
 @dataclass
 class LabeledStatement(Node):
     """Labeled statement: label: statement"""
+
     label: Identifier
     body: Node
 
@@ -339,6 +378,7 @@ class LabeledStatement(Node):
 @dataclass
 class FunctionDeclaration(Node):
     """Function declaration: function name(params) { body }"""
+
     id: Identifier
     params: List[Identifier]
     body: BlockStatement
@@ -347,6 +387,7 @@ class FunctionDeclaration(Node):
 @dataclass
 class FunctionExpression(Node):
     """Function expression: function name(params) { body }"""
+
     id: Optional[Identifier]
     params: List[Identifier]
     body: BlockStatement
@@ -355,6 +396,7 @@ class FunctionExpression(Node):
 @dataclass
 class ArrowFunctionExpression(Node):
     """Arrow function: (params) => body or param => body"""
+
     params: List[Identifier]
     body: Node  # Can be BlockStatement or expression
     expression: bool  # True if body is an expression, False if block

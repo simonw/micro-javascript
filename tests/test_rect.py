@@ -4,6 +4,7 @@ Test for exposing Python classes to JavaScript.
 This replicates the test_rect.js test but exposes Python Rectangle and FilledRectangle
 classes to the JavaScript context, demonstrating Python/JS interop.
 """
+
 import pytest
 from pathlib import Path
 
@@ -33,8 +34,10 @@ def create_rectangle_constructor(ctx, object_prototype):
     # Static method: Rectangle.getClosure(str) returns a function that returns str
     def get_closure(*args):
         captured = args[0] if args else UNDEFINED
+
         def closure_fn(*inner_args):
             return captured
+
         return closure_fn
 
     rect_constructor.set("getClosure", get_closure)
@@ -86,21 +89,27 @@ class TestRectangle:
         ctx = JSContext()
 
         # Create and expose Rectangle constructor
-        rect_constructor, rect_prototype = create_rectangle_constructor(ctx, ctx._object_prototype)
+        rect_constructor, rect_prototype = create_rectangle_constructor(
+            ctx, ctx._object_prototype
+        )
         ctx.set("Rectangle", rect_constructor)
 
         # Test from JavaScript
-        result = ctx.eval("""
+        result = ctx.eval(
+            """
             var r = new Rectangle(100, 200);
             r.x + ',' + r.y;
-        """)
+        """
+        )
         assert result == "100,200"
 
     def test_rectangle_x_y_properties(self):
         """Test Rectangle x and y properties individually."""
         ctx = JSContext()
 
-        rect_constructor, rect_prototype = create_rectangle_constructor(ctx, ctx._object_prototype)
+        rect_constructor, rect_prototype = create_rectangle_constructor(
+            ctx, ctx._object_prototype
+        )
         ctx.set("Rectangle", rect_constructor)
 
         assert ctx.eval("new Rectangle(100, 200).x") == 100
@@ -110,43 +119,56 @@ class TestRectangle:
         """Test FilledRectangle inheriting from Rectangle."""
         ctx = JSContext()
 
-        rect_constructor, rect_prototype = create_rectangle_constructor(ctx, ctx._object_prototype)
-        filled_constructor = create_filled_rectangle_constructor(ctx._object_prototype, rect_prototype)
+        rect_constructor, rect_prototype = create_rectangle_constructor(
+            ctx, ctx._object_prototype
+        )
+        filled_constructor = create_filled_rectangle_constructor(
+            ctx._object_prototype, rect_prototype
+        )
 
         ctx.set("Rectangle", rect_constructor)
         ctx.set("FilledRectangle", filled_constructor)
 
-        result = ctx.eval("""
+        result = ctx.eval(
+            """
             var r2 = new FilledRectangle(100, 200, 0x123456);
             r2.x + ',' + r2.y + ',' + r2.color;
-        """)
+        """
+        )
         assert result == "100,200,1193046"
 
     def test_rectangle_get_closure(self):
         """Test Rectangle.getClosure static method."""
         ctx = JSContext()
 
-        rect_constructor, rect_prototype = create_rectangle_constructor(ctx, ctx._object_prototype)
+        rect_constructor, rect_prototype = create_rectangle_constructor(
+            ctx, ctx._object_prototype
+        )
         ctx.set("Rectangle", rect_constructor)
 
-        result = ctx.eval("""
+        result = ctx.eval(
+            """
             var func = Rectangle.getClosure("abcd");
             func();
-        """)
+        """
+        )
         assert result == "abcd"
 
     def test_rectangle_call_callback(self):
         """Test Rectangle.call static method with JavaScript callback."""
         ctx = JSContext()
 
-        rect_constructor, rect_prototype = create_rectangle_constructor(ctx, ctx._object_prototype)
+        rect_constructor, rect_prototype = create_rectangle_constructor(
+            ctx, ctx._object_prototype
+        )
         ctx.set("Rectangle", rect_constructor)
 
-        result = ctx.eval("""
+        result = ctx.eval(
+            """
             function cb(param) {
                 return "test" + param;
             }
             Rectangle.call(cb, "abc");
-        """)
+        """
+        )
         assert result == "testabc"
-

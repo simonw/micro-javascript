@@ -7,35 +7,37 @@ class OpCode(IntEnum):
     """Bytecode operation codes."""
 
     # Stack operations
-    POP = auto()          # Pop and discard top of stack
-    DUP = auto()          # Duplicate top of stack
-    DUP2 = auto()         # Duplicate top two stack items: a, b -> a, b, a, b
-    SWAP = auto()         # Swap top two stack items
-    ROT3 = auto()         # Rotate 3 items: a, b, c -> b, c, a
-    ROT4 = auto()         # Rotate 4 items: a, b, c, d -> b, c, d, a
+    POP = auto()  # Pop and discard top of stack
+    DUP = auto()  # Duplicate top of stack
+    DUP2 = auto()  # Duplicate top two stack items: a, b -> a, b, a, b
+    SWAP = auto()  # Swap top two stack items
+    ROT3 = auto()  # Rotate 3 items: a, b, c -> b, c, a
+    ROT4 = auto()  # Rotate 4 items: a, b, c, d -> b, c, d, a
 
     # Constants
-    LOAD_CONST = auto()   # Load constant from pool: arg = constant index
+    LOAD_CONST = auto()  # Load constant from pool: arg = constant index
     LOAD_UNDEFINED = auto()
     LOAD_NULL = auto()
     LOAD_TRUE = auto()
     LOAD_FALSE = auto()
 
     # Variables
-    LOAD_NAME = auto()    # Load variable by name: arg = name index
-    STORE_NAME = auto()   # Store variable by name: arg = name index
-    LOAD_LOCAL = auto()   # Load local variable: arg = slot index
+    LOAD_NAME = auto()  # Load variable by name: arg = name index
+    STORE_NAME = auto()  # Store variable by name: arg = name index
+    LOAD_LOCAL = auto()  # Load local variable: arg = slot index
     STORE_LOCAL = auto()  # Store local variable: arg = slot index
 
     # Properties
-    GET_PROP = auto()     # Get property: obj, key -> value
-    SET_PROP = auto()     # Set property: obj, key, value -> value
+    GET_PROP = auto()  # Get property: obj, key -> value
+    SET_PROP = auto()  # Set property: obj, key, value -> value
     DELETE_PROP = auto()  # Delete property: obj, key -> bool
 
     # Arrays/Objects
     BUILD_ARRAY = auto()  # Build array from stack: arg = element count
-    BUILD_OBJECT = auto() # Build object from stack: arg = property count
-    BUILD_REGEX = auto()  # Build regex from constant: constant index points to (pattern, flags) tuple
+    BUILD_OBJECT = auto()  # Build object from stack: arg = property count
+    BUILD_REGEX = (
+        auto()
+    )  # Build regex from constant: constant index points to (pattern, flags) tuple
 
     # Arithmetic
     ADD = auto()
@@ -44,58 +46,60 @@ class OpCode(IntEnum):
     DIV = auto()
     MOD = auto()
     POW = auto()
-    NEG = auto()          # Unary minus
-    POS = auto()          # Unary plus
+    NEG = auto()  # Unary minus
+    POS = auto()  # Unary plus
 
     # Bitwise
-    BAND = auto()         # Bitwise AND
-    BOR = auto()          # Bitwise OR
-    BXOR = auto()         # Bitwise XOR
-    BNOT = auto()         # Bitwise NOT
-    SHL = auto()          # Shift left
-    SHR = auto()          # Shift right (signed)
-    USHR = auto()         # Shift right (unsigned)
+    BAND = auto()  # Bitwise AND
+    BOR = auto()  # Bitwise OR
+    BXOR = auto()  # Bitwise XOR
+    BNOT = auto()  # Bitwise NOT
+    SHL = auto()  # Shift left
+    SHR = auto()  # Shift right (signed)
+    USHR = auto()  # Shift right (unsigned)
 
     # Comparison
-    LT = auto()           # Less than
-    LE = auto()           # Less than or equal
-    GT = auto()           # Greater than
-    GE = auto()           # Greater than or equal
-    EQ = auto()           # Equal (==)
-    NE = auto()           # Not equal (!=)
-    SEQ = auto()          # Strict equal (===)
-    SNE = auto()          # Strict not equal (!==)
+    LT = auto()  # Less than
+    LE = auto()  # Less than or equal
+    GT = auto()  # Greater than
+    GE = auto()  # Greater than or equal
+    EQ = auto()  # Equal (==)
+    NE = auto()  # Not equal (!=)
+    SEQ = auto()  # Strict equal (===)
+    SNE = auto()  # Strict not equal (!==)
 
     # Logical
-    NOT = auto()          # Logical NOT
+    NOT = auto()  # Logical NOT
     # && and || are handled by conditional jumps
 
     # Type operations
-    TYPEOF = auto()       # typeof operator
-    TYPEOF_NAME = auto()  # typeof with name lookup (returns "undefined" for undeclared vars)
-    INSTANCEOF = auto()   # instanceof operator
-    IN = auto()           # in operator
+    TYPEOF = auto()  # typeof operator
+    TYPEOF_NAME = (
+        auto()
+    )  # typeof with name lookup (returns "undefined" for undeclared vars)
+    INSTANCEOF = auto()  # instanceof operator
+    IN = auto()  # in operator
 
     # Control flow
-    JUMP = auto()         # Unconditional jump: arg = offset
-    JUMP_IF_FALSE = auto() # Conditional jump: arg = offset
+    JUMP = auto()  # Unconditional jump: arg = offset
+    JUMP_IF_FALSE = auto()  # Conditional jump: arg = offset
     JUMP_IF_TRUE = auto()  # Conditional jump: arg = offset
 
     # Function operations
-    CALL = auto()         # Call function: arg = argument count
+    CALL = auto()  # Call function: arg = argument count
     CALL_METHOD = auto()  # Call method: arg = argument count
-    RETURN = auto()       # Return from function
+    RETURN = auto()  # Return from function
     RETURN_UNDEFINED = auto()  # Return undefined from function
 
     # Object operations
-    NEW = auto()          # New object: arg = argument count
-    THIS = auto()         # Load 'this' value
+    NEW = auto()  # New object: arg = argument count
+    THIS = auto()  # Load 'this' value
 
     # Exception handling
-    THROW = auto()        # Throw exception
-    TRY_START = auto()    # Start try block: arg = catch offset
-    TRY_END = auto()      # End try block
-    CATCH = auto()        # Catch handler
+    THROW = auto()  # Throw exception
+    TRY_START = auto()  # Start try block: arg = catch offset
+    TRY_END = auto()  # End try block
+    CATCH = auto()  # Catch handler
 
     # Iteration
     FOR_IN_INIT = auto()  # Initialize for-in: obj -> iterator
@@ -104,17 +108,17 @@ class OpCode(IntEnum):
     FOR_OF_NEXT = auto()  # Get next for-of: iterator -> value, done
 
     # Increment/Decrement
-    INC = auto()          # Increment
-    DEC = auto()          # Decrement
-    POST_INC = auto()     # Post-increment (returns old value)
-    POST_DEC = auto()     # Post-decrement (returns old value)
+    INC = auto()  # Increment
+    DEC = auto()  # Decrement
+    POST_INC = auto()  # Post-increment (returns old value)
+    POST_DEC = auto()  # Post-decrement (returns old value)
 
     # Closures
-    MAKE_CLOSURE = auto() # Create closure: arg = function index
-    LOAD_CLOSURE = auto() # Load from closure: arg = closure slot (for inner function)
-    STORE_CLOSURE = auto() # Store to closure: arg = closure slot (for inner function)
-    LOAD_CELL = auto()    # Load from cell: arg = cell slot (for outer function)
-    STORE_CELL = auto()   # Store to cell: arg = cell slot (for outer function)
+    MAKE_CLOSURE = auto()  # Create closure: arg = function index
+    LOAD_CLOSURE = auto()  # Load from closure: arg = closure slot (for inner function)
+    STORE_CLOSURE = auto()  # Store to closure: arg = closure slot (for inner function)
+    LOAD_CELL = auto()  # Load from cell: arg = cell slot (for outer function)
+    STORE_CELL = auto()  # Store to cell: arg = cell slot (for outer function)
 
 
 def disassemble(bytecode: bytes, constants: list) -> str:
@@ -126,12 +130,23 @@ def disassemble(bytecode: bytes, constants: list) -> str:
         line = f"{i:4d}: {op.name}"
 
         if op in (
-            OpCode.LOAD_CONST, OpCode.LOAD_NAME, OpCode.STORE_NAME,
-            OpCode.LOAD_LOCAL, OpCode.STORE_LOCAL,
-            OpCode.JUMP, OpCode.JUMP_IF_FALSE, OpCode.JUMP_IF_TRUE,
-            OpCode.CALL, OpCode.CALL_METHOD, OpCode.NEW,
-            OpCode.BUILD_ARRAY, OpCode.BUILD_OBJECT, OpCode.BUILD_REGEX,
-            OpCode.TRY_START, OpCode.MAKE_CLOSURE, OpCode.TYPEOF_NAME,
+            OpCode.LOAD_CONST,
+            OpCode.LOAD_NAME,
+            OpCode.STORE_NAME,
+            OpCode.LOAD_LOCAL,
+            OpCode.STORE_LOCAL,
+            OpCode.JUMP,
+            OpCode.JUMP_IF_FALSE,
+            OpCode.JUMP_IF_TRUE,
+            OpCode.CALL,
+            OpCode.CALL_METHOD,
+            OpCode.NEW,
+            OpCode.BUILD_ARRAY,
+            OpCode.BUILD_OBJECT,
+            OpCode.BUILD_REGEX,
+            OpCode.TRY_START,
+            OpCode.MAKE_CLOSURE,
+            OpCode.TYPEOF_NAME,
         ):
             # Has argument
             if i + 1 < len(bytecode):

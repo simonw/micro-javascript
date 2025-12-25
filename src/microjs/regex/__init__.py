@@ -18,18 +18,18 @@ from .regex import (
     MatchResult,
     match,
     search,
-    test
+    test,
 )
 
 __all__ = [
-    'RegExp',
-    'RegExpError',
-    'RegexTimeoutError',
-    'RegexStackOverflow',
-    'MatchResult',
-    'match',
-    'search',
-    'test'
+    "RegExp",
+    "RegExpError",
+    "RegexTimeoutError",
+    "RegexStackOverflow",
+    "MatchResult",
+    "match",
+    "search",
+    "test",
 ]
 
-__version__ = '0.1.0'
+__version__ = "0.1.0"

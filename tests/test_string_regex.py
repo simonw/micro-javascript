@@ -38,10 +38,12 @@ class TestStringMatch:
     def test_match_index(self):
         """Match result has index property."""
         ctx = JSContext()
-        result = ctx.eval('''
+        result = ctx.eval(
+            """
             var m = "hello world".match(/world/);
             m.index
-        ''')
+        """
+        )
         assert result == 6
 
     def test_match_with_string_pattern(self):

@@ -98,14 +98,16 @@ class TestFunctions:
         assert run_js("function add(a, b) { return a + b; } add(3, 4)") == 7
 
     def test_closure(self):
-        result = run_js("""
+        result = run_js(
+            """
             function makeCounter() {
                 var count = 0;
                 return function() { return ++count; };
             }
             var counter = makeCounter();
             counter(); counter(); counter()
-        """)
+        """
+        )
         assert result == 3
 
     def test_arrow_function(self):
@@ -125,7 +127,10 @@ class TestControlFlow:
         assert run_js("var sum = 0; for (var i = 1; i <= 5; i++) sum += i; sum") == 15
 
     def test_while_loop(self):
-        assert run_js("var n = 5; var fact = 1; while (n > 1) { fact *= n; n--; } fact") == 120
+        assert (
+            run_js("var n = 5; var fact = 1; while (n > 1) { fact *= n; n--; } fact")
+            == 120
+        )
 
 
 class TestMath:

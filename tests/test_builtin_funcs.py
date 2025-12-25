@@ -4,6 +4,7 @@ Parameterized pytest tests for test_builtin.js functions.
 This file loads test_builtin.js and runs each test function as a separate
 pytest test case, providing better visibility into which specific tests pass/fail.
 """
+
 import re
 from pathlib import Path
 
@@ -22,7 +23,7 @@ def get_test_functions_from_js(js_file_path: Path) -> list[tuple[str, str]]:
     content = js_file_path.read_text(encoding="utf-8")
 
     # Find all function declarations that start with "test"
-    func_pattern = re.compile(r'function\s+(test\w*)\s*\(')
+    func_pattern = re.compile(r"function\s+(test\w*)\s*\(")
     test_funcs = func_pattern.findall(content)
 
     if not test_funcs:
@@ -30,16 +31,16 @@ def get_test_functions_from_js(js_file_path: Path) -> list[tuple[str, str]]:
 
     # Remove the test invocations at the end of the file
     # These are lines like "test();" or "test_string();" at module level
-    lines = content.split('\n')
+    lines = content.split("\n")
     func_only_lines = []
     for line in lines:
         stripped = line.strip()
         # Skip lines that are just test function calls (not inside a function)
-        if stripped and re.match(r'^test\w*\(\);?$', stripped):
+        if stripped and re.match(r"^test\w*\(\);?$", stripped):
             continue
         func_only_lines.append(line)
 
-    func_code = '\n'.join(func_only_lines)
+    func_code = "\n".join(func_only_lines)
 
     return [(name, func_code) for name in test_funcs]
 

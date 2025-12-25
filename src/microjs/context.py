@@ -9,7 +9,19 @@ from typing import Any, Dict, Optional
 from .parser import Parser
 from .compiler import Compiler
 from .vm import VM
-from .values import UNDEFINED, NULL, JSValue, JSObject, JSCallableObject, JSArray, JSFunction, JSRegExp, JSBoundMethod, to_string, to_number
+from .values import (
+    UNDEFINED,
+    NULL,
+    JSValue,
+    JSObject,
+    JSCallableObject,
+    JSArray,
+    JSFunction,
+    JSRegExp,
+    JSBoundMethod,
+    to_string,
+    to_number,
+)
 from .errors import JSError, MemoryLimitError, TimeLimitError
 
 
@@ -50,7 +62,9 @@ class JSContext:
         self._globals["Error"] = self._create_error_constructor("Error")
         self._globals["TypeError"] = self._create_error_constructor("TypeError")
         self._globals["SyntaxError"] = self._create_error_constructor("SyntaxError")
-        self._globals["ReferenceError"] = self._create_error_constructor("ReferenceError")
+        self._globals["ReferenceError"] = self._create_error_constructor(
+            "ReferenceError"
+        )
         self._globals["RangeError"] = self._create_error_constructor("RangeError")
         self._globals["URIError"] = self._create_error_constructor("URIError")
         self._globals["EvalError"] = self._create_error_constructor("EvalError")
@@ -81,14 +95,24 @@ class JSContext:
 
         # Typed array constructors
         self._globals["Int32Array"] = self._create_typed_array_constructor("Int32Array")
-        self._globals["Uint32Array"] = self._create_typed_array_constructor("Uint32Array")
-        self._globals["Float64Array"] = self._create_typed_array_constructor("Float64Array")
-        self._globals["Float32Array"] = self._create_typed_array_constructor("Float32Array")
+        self._globals["Uint32Array"] = self._create_typed_array_constructor(
+            "Uint32Array"
+        )
+        self._globals["Float64Array"] = self._create_typed_array_constructor(
+            "Float64Array"
+        )
+        self._globals["Float32Array"] = self._create_typed_array_constructor(
+            "Float32Array"
+        )
         self._globals["Uint8Array"] = self._create_typed_array_constructor("Uint8Array")
         self._globals["Int8Array"] = self._create_typed_array_constructor("Int8Array")
         self._globals["Int16Array"] = self._create_typed_array_constructor("Int16Array")
-        self._globals["Uint16Array"] = self._create_typed_array_constructor("Uint16Array")
-        self._globals["Uint8ClampedArray"] = self._create_typed_array_constructor("Uint8ClampedArray")
+        self._globals["Uint16Array"] = self._create_typed_array_constructor(
+            "Uint16Array"
+        )
+        self._globals["Uint8ClampedArray"] = self._create_typed_array_constructor(
+            "Uint8ClampedArray"
+        )
 
         # ArrayBuffer constructor
         self._globals["ArrayBuffer"] = self._create_arraybuffer_constructor()
@@ -151,9 +175,17 @@ class JSContext:
                         return True
                 except (ValueError, TypeError):
                     pass
-                return this_val.has(prop) or prop in this_val._getters or prop in this_val._setters
+                return (
+                    this_val.has(prop)
+                    or prop in this_val._getters
+                    or prop in this_val._setters
+                )
             if isinstance(this_val, JSObject):
-                return this_val.has(prop) or prop in this_val._getters or prop in this_val._setters
+                return (
+                    this_val.has(prop)
+                    or prop in this_val._getters
+                    or prop in this_val._setters
+                )
             return False
 
         def proto_valueOf(this_val, *args):
@@ -163,15 +195,16 @@ class JSContext:
             obj = args[0] if args else UNDEFINED
             if not isinstance(obj, JSObject):
                 return False
-            proto = getattr(obj, '_prototype', None)
+            proto = getattr(obj, "_prototype", None)
             while proto is not None:
                 if proto is this_val:
                     return True
-                proto = getattr(proto, '_prototype', None)
+                proto = getattr(proto, "_prototype", None)
             return False
 
         # These methods need special handling for 'this'
         from .values import JSBoundMethod
+
         object_prototype.set("toString", JSBoundMethod(proto_toString))
         object_prototype.set("hasOwnProperty", JSBoundMethod(proto_hasOwnProperty))
         object_prototype.set("valueOf", JSBoundMethod(proto_valueOf))
@@ -225,7 +258,7 @@ class JSContext:
             obj = args[0] if args else UNDEFINED
             if not isinstance(obj, JSObject):
                 return NULL
-            return getattr(obj, '_prototype', NULL) or NULL
+            return getattr(obj, "_prototype", NULL) or NULL
 
         def set_prototype_of(*args):
             if len(args) < 2:
@@ -305,7 +338,11 @@ class JSContext:
                 return UNDEFINED
             prop_name = to_string(prop)
 
-            if not obj.has(prop_name) and prop_name not in obj._getters and prop_name not in obj._setters:
+            if (
+                not obj.has(prop_name)
+                and prop_name not in obj._getters
+                and prop_name not in obj._setters
+            ):
                 return UNDEFINED
 
             descriptor = JSObject()
@@ -399,6 +436,7 @@ class JSContext:
 
             # Sort using Python's sort with custom key
             from functools import cmp_to_key
+
             this._elements.sort(key=cmp_to_key(compare_fn))
             return this
 
@@ -454,99 +492,99 @@ class JSContext:
 
         # Basic functions
         def abs_fn(*args):
-            x = to_number(args[0]) if args else float('nan')
+            x = to_number(args[0]) if args else float("nan")
             return abs(x)
 
         def floor_fn(*args):
-            x = to_number(args[0]) if args else float('nan')
+            x = to_number(args[0]) if args else float("nan")
             return math.floor(x)
 
         def ceil_fn(*args):
-            x = to_number(args[0]) if args else float('nan')
+            x = to_number(args[0]) if args else float("nan")
             return math.ceil(x)
 
         def round_fn(*args):
-            x = to_number(args[0]) if args else float('nan')
+            x = to_number(args[0]) if args else float("nan")
             # JavaScript-style round (round half towards positive infinity)
             return math.floor(x + 0.5)
 
         def trunc_fn(*args):
-            x = to_number(args[0]) if args else float('nan')
+            x = to_number(args[0]) if args else float("nan")
             return math.trunc(x)
 
         def min_fn(*args):
             if not args:
-                return float('inf')
+                return float("inf")
             nums = [to_number(a) for a in args]
             return min(nums)
 
         def max_fn(*args):
             if not args:
-                return float('-inf')
+                return float("-inf")
             nums = [to_number(a) for a in args]
             return max(nums)
 
         def pow_fn(*args):
-            x = to_number(args[0]) if args else float('nan')
-            y = to_number(args[1]) if len(args) > 1 else float('nan')
+            x = to_number(args[0]) if args else float("nan")
+            y = to_number(args[1]) if len(args) > 1 else float("nan")
             return math.pow(x, y)
 
         def sqrt_fn(*args):
-            x = to_number(args[0]) if args else float('nan')
+            x = to_number(args[0]) if args else float("nan")
             if x < 0:
-                return float('nan')
+                return float("nan")
             return math.sqrt(x)
 
         def sin_fn(*args):
-            x = to_number(args[0]) if args else float('nan')
+            x = to_number(args[0]) if args else float("nan")
             return math.sin(x)
 
         def cos_fn(*args):
-            x = to_number(args[0]) if args else float('nan')
+            x = to_number(args[0]) if args else float("nan")
             return math.cos(x)
 
         def tan_fn(*args):
-            x = to_number(args[0]) if args else float('nan')
+            x = to_number(args[0]) if args else float("nan")
             return math.tan(x)
 
         def asin_fn(*args):
-            x = to_number(args[0]) if args else float('nan')
+            x = to_number(args[0]) if args else float("nan")
             if x < -1 or x > 1:
-                return float('nan')
+                return float("nan")
             return math.asin(x)
 
         def acos_fn(*args):
-            x = to_number(args[0]) if args else float('nan')
+            x = to_number(args[0]) if args else float("nan")
             if x < -1 or x > 1:
-                return float('nan')
+                return float("nan")
             return math.acos(x)
 
         def atan_fn(*args):
-            x = to_number(args[0]) if args else float('nan')
+            x = to_number(args[0]) if args else float("nan")
             return math.atan(x)
 
         def atan2_fn(*args):
-            y = to_number(args[0]) if args else float('nan')
-            x = to_number(args[1]) if len(args) > 1 else float('nan')
+            y = to_number(args[0]) if args else float("nan")
+            x = to_number(args[1]) if len(args) > 1 else float("nan")
             return math.atan2(y, x)
 
         def log_fn(*args):
-            x = to_number(args[0]) if args else float('nan')
+            x = to_number(args[0]) if args else float("nan")
             if x <= 0:
-                return float('-inf') if x == 0 else float('nan')
+                return float("-inf") if x == 0 else float("nan")
             return math.log(x)
 
         def exp_fn(*args):
-            x = to_number(args[0]) if args else float('nan')
+            x = to_number(args[0]) if args else float("nan")
             return math.exp(x)
 
         def random_fn(*args):
             return random.random()
 
         def sign_fn(*args):
-            x = to_number(args[0]) if args else float('nan')
+            x = to_number(args[0]) if args else float("nan")
             if math.isnan(x):
-                return float('nan')
+                return float("nan")
             if x > 0:
                 return 1
             if x < 0:
@@ -572,10 +610,11 @@ class JSContext:
         def fround_fn(*args):
             # Convert to 32-bit float
             import struct
-            x = to_number(args[0]) if args else float('nan')
+
+            x = to_number(args[0]) if args else float("nan")
             # Pack as 32-bit float and unpack as 64-bit
-            packed = struct.pack('f', x)
-            return struct.unpack('f', packed)[0]
+            packed = struct.pack("f", x)
+            return struct.unpack("f", packed)[0]
 
         def clz32_fn(*args):
             # Count leading zeros in 32-bit integer
@@ -596,26 +635,26 @@ class JSContext:
             return math.hypot(*nums)
 
         def cbrt_fn(*args):
-            x = to_number(args[0]) if args else float('nan')
+            x = to_number(args[0]) if args else float("nan")
             if x < 0:
-                return -(-x) ** (1/3)
-            return x ** (1/3)
+                return -((-x) ** (1 / 3))
+            return x ** (1 / 3)
 
         def log2_fn(*args):
-            x = to_number(args[0]) if args else float('nan')
-            return math.log2(x) if x > 0 else float('nan')
+            x = to_number(args[0]) if args else float("nan")
+            return math.log2(x) if x > 0 else float("nan")
 
         def log10_fn(*args):
-            x = to_number(args[0]) if args else float('nan')
-            return math.log10(x) if x > 0 else float('nan')
+            x = to_number(args[0]) if args else float("nan")
+            return math.log10(x) if x > 0 else float("nan")
 
         def expm1_fn(*args):
-            x = to_number(args[0]) if args else float('nan')
+            x = to_number(args[0]) if args else float("nan")
             return math.expm1(x)
 
         def log1p_fn(*args):
-            x = to_number(args[0]) if args else float('nan')
-            return math.log1p(x) if x > -1 else float('nan')
+            x = to_number(args[0]) if args else float("nan")
+            return math.log1p(x) if x > -1 else float("nan")
 
         # Set all methods
         math_obj.set("abs", abs_fn)
@@ -662,10 +701,12 @@ class JSContext:
                 return ctx._to_js(py_value)
             except json.JSONDecodeError as e:
                 from .errors import JSSyntaxError
+
                 raise JSSyntaxError(f"JSON.parse: {e}")
 
         def stringify_fn(*args):
             value = args[0] if args else UNDEFINED
+
             # Convert JS value to Python for json.dumps, handling undefined specially
             def to_json_value(v):
                 if v is UNDEFINED:
@@ -680,7 +721,10 @@ class JSContext:
                     return v
                 if isinstance(v, JSArray):
                     # For arrays, undefined becomes null
-                    return [None if elem is UNDEFINED else to_json_value(elem) for elem in v._elements]
+                    return [
+                        None if elem is UNDEFINED else to_json_value(elem)
+                        for elem in v._elements
+                    ]
                 if isinstance(v, JSObject):
                     # For objects, skip undefined values
                     result = {}
@@ -692,9 +736,10 @@ class JSContext:
 
             py_value = to_json_value(value)
             try:
-                return json.dumps(py_value, separators=(',', ':'))
+                return json.dumps(py_value, separators=(",", ":"))
             except (TypeError, ValueError) as e:
                 from .errors import JSTypeError
+
                 raise JSTypeError(f"JSON.stringify: {e}")
 
         json_obj.set("parse", parse_fn)
@@ -741,16 +786,16 @@ class JSContext:
                 radix = 10
             s = s.strip()
             if not s:
-                return float('nan')
+                return float("nan")
             # Handle leading sign
             sign = 1
-            if s.startswith('-'):
+            if s.startswith("-"):
                 sign = -1
                 s = s[1:]
-            elif s.startswith('+'):
+            elif s.startswith("+"):
                 s = s[1:]
             # Handle 0x prefix for hex
-            if s.startswith('0x') or s.startswith('0X'):
+            if s.startswith("0x") or s.startswith("0X"):
                 radix = 16
                 s = s[2:]
             # Parse digits
@@ -758,9 +803,9 @@ class JSContext:
             found = False
             for ch in s:
                 if ch.isdigit():
-                    digit = ord(ch) - ord('0')
+                    digit = ord(ch) - ord("0")
                 elif ch.isalpha():
-                    digit = ord(ch.lower()) - ord('a') + 10
+                    digit = ord(ch.lower()) - ord("a") + 10
                 else:
                     break
                 if digit >= radix:
@@ -768,39 +813,39 @@ class JSContext:
                 result = result * radix + digit
                 found = True
             if not found:
-                return float('nan')
+                return float("nan")
             return sign * result
 
         def parseFloat_fn(*args):
             s = to_string(args[0]) if args else ""
             s = s.strip()
             if not s:
-                return float('nan')
+                return float("nan")
             # Find the longest valid float prefix
             i = 0
             has_dot = False
             has_exp = False
-            if s[i] in '+-':
+            if s[i] in "+-":
                 i += 1
             while i < len(s):
                 if s[i].isdigit():
                     i += 1
-                elif s[i] == '.' and not has_dot:
+                elif s[i] == "." and not has_dot:
                     has_dot = True
                     i += 1
-                elif s[i] in 'eE' and not has_exp:
+                elif s[i] in "eE" and not has_exp:
                     has_exp = True
                     i += 1
-                    if i < len(s) and s[i] in '+-':
+                    if i < len(s) and s[i] in "+-":
                         i += 1
                 else:
                     break
             if i == 0:
-                return float('nan')
+                return float("nan")
             try:
                 return float(s[:i])
             except ValueError:
-                return float('nan')
+                return float("nan")
 
         num_constructor.set("isNaN", isNaN_fn)
         num_constructor.set("isFinite", isFinite_fn)
@@ -867,6 +912,7 @@ class JSContext:
 
     def _create_regexp_constructor(self) -> JSCallableObject:
         """Create the RegExp constructor."""
+
         def regexp_constructor_fn(*args):
             pattern = to_string(args[0]) if args else ""
             flags = to_string(args[1]) if len(args) > 1 else ""
@@ -915,6 +961,7 @@ class JSContext:
                     return JSFunction("anonymous", params, bytes(), {})
             except Exception as e:
                 from .errors import JSError
+
                 raise JSError(f"SyntaxError: {str(e)}")
 
         fn_constructor = JSCallableObject(function_constructor_fn)
@@ -931,9 +978,17 @@ class JSContext:
     def _create_typed_array_constructor(self, name: str) -> JSCallableObject:
         """Create a typed array constructor (Int32Array, Uint8Array, etc.)."""
         from .values import (
-            JSInt32Array, JSUint32Array, JSFloat64Array, JSFloat32Array,
-            JSUint8Array, JSInt8Array, JSInt16Array, JSUint16Array,
-            JSUint8ClampedArray, JSArrayBuffer, JSArray
+            JSInt32Array,
+            JSUint32Array,
+            JSFloat64Array,
+            JSFloat32Array,
+            JSUint8Array,
+            JSInt8Array,
+            JSInt16Array,
+            JSUint16Array,
+            JSUint8ClampedArray,
+            JSArrayBuffer,
+            JSArray,
         )
 
         type_classes = {
@@ -974,13 +1029,20 @@ class JSContext:
 
                 # Read values from buffer
                 import struct
+
                 for i in range(length):
                     offset = byte_offset + i * element_size
                     if name in ("Float32Array", "Float64Array"):
-                        fmt = 'f' if element_size == 4 else 'd'
-                        val = struct.unpack(fmt, bytes(buffer._data[offset:offset+element_size]))[0]
+                        fmt = "f" if element_size == 4 else "d"
+                        val = struct.unpack(
+                            fmt, bytes(buffer._data[offset : offset + element_size])
+                        )[0]
                     else:
-                        val = int.from_bytes(buffer._data[offset:offset+element_size], 'little', signed='Int' in name)
+                        val = int.from_bytes(
+                            buffer._data[offset : offset + element_size],
+                            "little",
+                            signed="Int" in name,
+                        )
                     result._data[i] = result._coerce_value(val)
 
                 return result
@@ -1032,18 +1094,19 @@ class JSContext:
                 return vm.run(bytecode_module)
             except Exception as e:
                 from .errors import JSError
+
                 raise JSError(f"EvalError: {str(e)}")
 
         return eval_fn
 
     def _global_isnan(self, *args) -> bool:
         """Global isNaN - converts argument to number first."""
-        x = to_number(args[0]) if args else float('nan')
+        x = to_number(args[0]) if args else float("nan")
         return math.isnan(x)
 
     def _global_isfinite(self, *args) -> bool:
         """Global isFinite - converts argument to number first."""
-        x = to_number(args[0]) if args else float('nan')
+        x = to_number(args[0]) if args else float("nan")
         return not (math.isnan(x) or math.isinf(x))
 
     def _global_parseint(self, *args):
@@ -1054,23 +1117,23 @@ class JSContext:
             radix = 10
         s = s.strip()
         if not s:
-            return float('nan')
+            return float("nan")
         sign = 1
-        if s.startswith('-'):
+        if s.startswith("-"):
             sign = -1
             s = s[1:]
-        elif s.startswith('+'):
+        elif s.startswith("+"):
             s = s[1:]
-        if s.startswith('0x') or s.startswith('0X'):
+        if s.startswith("0x") or s.startswith("0X"):
             radix = 16
             s = s[2:]
         result = 0
         found = False
         for ch in s:
             if ch.isdigit():
-                digit = ord(ch) - ord('0')
+                digit = ord(ch) - ord("0")
             elif ch.isalpha():
-                digit = ord(ch.lower()) - ord('a') + 10
+                digit = ord(ch.lower()) - ord("a") + 10
             else:
                 break
             if digit >= radix:
@@ -1078,7 +1141,7 @@ class JSContext:
             result = result * radix + digit
             found = True
         if not found:
-            return float('nan')
+            return float("nan")
         return sign * result
 
     def _global_parsefloat(self, *args):
@@ -1086,40 +1149,40 @@ class JSContext:
         s = to_string(args[0]) if args else ""
         s = s.strip()
         if not s:
-            return float('nan')
+            return float("nan")
 
         # Handle Infinity
         if s.startswith("Infinity"):
-            return float('inf')
+            return float("inf")
         if s.startswith("-Infinity"):
-            return float('-inf')
+            return float("-inf")
         if s.startswith("+Infinity"):
-            return float('inf')
+            return float("inf")
 
         i = 0
         has_dot = False
         has_exp = False
-        if s[i] in '+-':
+        if s[i] in "+-":
             i += 1
         while i < len(s):
             if s[i].isdigit():
                 i += 1
-            elif s[i] == '.' and not has_dot:
+            elif s[i] == "." and not has_dot:
                 has_dot = True
                 i += 1
-            elif s[i] in 'eE' and not has_exp:
+            elif s[i] in "eE" and not has_exp:
                 has_exp = True
                 i += 1
-                if i < len(s) and s[i] in '+-':
+                if i < len(s) and s[i] in "+-":
                     i += 1
             else:
                 break
         if i == 0:
-            return float('nan')
+            return float("nan")
         try:
             return float(s[:i])
         except ValueError:
-            return float('nan')
+            return float("nan")
 
     def eval(self, code: str) -> Any:
         """Evaluate JavaScript code and return the result.

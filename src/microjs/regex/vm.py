@@ -14,11 +14,13 @@ from .opcodes import RegexOpCode as Op
 
 class RegexTimeoutError(Exception):
     """Raised when regex execution times out."""
+
     pass
 
 
 class RegexStackOverflow(Exception):
     """Raised when regex stack limit is exceeded."""
+
     pass
 
 
@@ -68,7 +70,7 @@ class RegexVM:
         poll_callback: Optional[Callable[[], bool]] = None,
         stack_limit: int = DEFAULT_STACK_LIMIT,
         poll_interval: int = DEFAULT_POLL_INTERVAL,
-        step_limit: int = DEFAULT_STEP_LIMIT
+        step_limit: int = DEFAULT_STEP_LIMIT,
     ):
         """
         Initialize regex VM.
@@ -90,9 +92,9 @@ class RegexVM:
         self.poll_interval = poll_interval
         self.step_limit = step_limit
 
-        self.ignorecase = 'i' in flags
-        self.multiline = 'm' in flags
-        self.dotall = 's' in flags
+        self.ignorecase = "i" in flags
+        self.multiline = "m" in flags
+        self.dotall = "s" in flags
 
     def match(self, string: str, start_pos: int = 0) -> Optional[MatchResult]:
         """
@@ -125,7 +127,9 @@ class RegexVM:
                 return result
         return None
 
-    def _execute(self, string: str, start_pos: int, anchored: bool) -> Optional[MatchResult]:
+    def _execute(
+        self, string: str, start_pos: int, anchored: bool
+    ) -> Optional[MatchResult]:
         """
         Execute bytecode against string.
 
@@ -196,7 +200,7 @@ class RegexVM:
                     pc, sp, captures, registers = self._backtrack(stack)
 
             elif opcode == Op.DOT:
-                if sp >= len(string) or string[sp] == '\n':
+                if sp >= len(string) or string[sp] == "\n":
                     if not stack:
                         return None
                     pc, sp, captures, registers = self._backtrack(stack)
@@ -232,7 +236,7 @@ class RegexVM:
                 pc += 1
 
             elif opcode == Op.WORD:
-                if sp >= len(string) or not (string[sp].isalnum() or string[sp] == '_'):
+                if sp >= len(string) or not (string[sp].isalnum() or string[sp] == "_"):
                     if not stack:
                         return None
                     pc, sp, captures, registers = self._backtrack(stack)
@@ -241,7 +245,7 @@ class RegexVM:
                 pc += 1
 
             elif opcode == Op.NOT_WORD:
-                if sp >= len(string) or (string[sp].isalnum() or string[sp] == '_'):
+                if sp >= len(string) or (string[sp].isalnum() or string[sp] == "_"):
                     if not stack:
                         return None
                     pc, sp, captures, registers = self._backtrack(stack)
@@ -336,7 +340,7 @@ class RegexVM:
                 pc += 1
 
             elif opcode == Op.LINE_START_M:
-                if sp != 0 and (sp >= len(string) or string[sp - 1] != '\n'):
+                if sp != 0 and (sp >= len(string) or string[sp - 1] != "\n"):
                     if not stack:
                         return None
                     pc, sp, captures, registers = self._backtrack(stack)
@@ -352,7 +356,7 @@ class RegexVM:
                 pc += 1
 
             elif opcode == Op.LINE_END_M:
-                if sp != len(string) and string[sp] != '\n':
+                if sp != len(string) and string[sp] != "\n":
                     if not stack:
                         return None
                     pc, sp, captures, registers = self._backtrack(stack)
@@ -384,24 +388,18 @@ class RegexVM:
                 # Try current path first, backup alternative
                 alt_pc = instr[1]
                 # Save state for backtracking
-                stack.append((
-                    alt_pc,
-                    sp,
-                    [c.copy() for c in captures],
-                    registers.copy()
-                ))
+                stack.append(
+                    (alt_pc, sp, [c.copy() for c in captures], registers.copy())
+                )
                 pc += 1
 
             elif opcode == Op.SPLIT_NEXT:
                 # Try alternative first, backup current
                 alt_pc = instr[1]
                 # Save state for backtracking to continue after this
-                stack.append((
-                    pc + 1,
-                    sp,
-                    [c.copy() for c in captures],
-                    registers.copy()
-                ))
+                stack.append(
+                    (pc + 1, sp, [c.copy() for c in captures], registers.copy())
+                )
                 pc = alt_pc
 
             elif opcode == Op.SAVE_START:
@@ -445,7 +443,7 @@ class RegexVM:
                     pc, sp, captures, registers = self._backtrack(stack)
                     continue
 
-                if string[sp:sp + len(captured)] == captured:
+                if string[sp : sp + len(captured)] == captured:
                     sp += len(captured)
                     pc += 1
                 else:
@@ -473,7 +471,7 @@ class RegexVM:
                     pc, sp, captures, registers = self._backtrack(stack)
                     continue
 
-                if string[sp:sp + len(captured)].lower() == captured.lower():
+                if string[sp : sp + len(captured)].lower() == captured.lower():
                     sp += len(captured)
                     pc += 1
                 else:
@@ -488,7 +486,9 @@ class RegexVM:
                 saved_captures = [c.copy() for c in captures]
 
                 # Create sub-execution for lookahead, passing current captures
-                la_captures = self._execute_lookahead(string, sp, pc + 1, end_offset, captures)
+                la_captures = self._execute_lookahead(
+                    string, sp, pc + 1, end_offset, captures
+                )
 
                 if la_captures is not None:
                     # Lookahead succeeded - restore position but keep captures from lookahead
@@ -506,7 +506,9 @@ class RegexVM:
                 saved_sp = sp
                 saved_captures = [c.copy() for c in captures]
 
-                la_captures = self._execute_lookahead(string, sp, pc + 1, end_offset, captures)
+                la_captures = self._execute_lookahead(
+                    string, sp, pc + 1, end_offset, captures
+                )
 
                 if la_captures is None:
                     # Negative lookahead succeeded (inner didn't match)
@@ -599,15 +601,22 @@ class RegexVM:
 
     def _is_word_boundary(self, string: str, pos: int) -> bool:
         """Check if position is at a word boundary."""
+
         def is_word_char(ch: str) -> bool:
-            return ch.isalnum() or ch == '_'
+            return ch.isalnum() or ch == "_"
 
         before = pos > 0 and is_word_char(string[pos - 1])
         after = pos < len(string) and is_word_char(string[pos])
         return before != after
 
-    def _execute_lookahead(self, string: str, start_pos: int, start_pc: int, end_pc: int,
-                            input_captures: List[List[int]]) -> Optional[List[List[int]]]:
+    def _execute_lookahead(
+        self,
+        string: str,
+        start_pos: int,
+        start_pc: int,
+        end_pc: int,
+        input_captures: List[List[int]],
+    ) -> Optional[List[List[int]]]:
         """Execute bytecode for lookahead assertion.
 
         Returns the captures list if lookahead succeeds, None if it fails.
@@ -673,7 +682,7 @@ class RegexVM:
                     pc, sp, captures, registers = stack.pop()
 
             elif opcode == Op.DOT:
-                if sp >= len(string) or string[sp] == '\n':
+                if sp >= len(string) or string[sp] == "\n":
                     if not stack:
                         return None
                     pc, sp, captures, registers = stack.pop()
@@ -683,12 +692,16 @@ class RegexVM:
 
             elif opcode == Op.SPLIT_FIRST:
                 alt_pc = instr[1]
-                stack.append((alt_pc, sp, [c.copy() for c in captures], registers.copy()))
+                stack.append(
+                    (alt_pc, sp, [c.copy() for c in captures], registers.copy())
+                )
                 pc += 1
 
             elif opcode == Op.SPLIT_NEXT:
                 alt_pc = instr[1]
-                stack.append((pc + 1, sp, [c.copy() for c in captures], registers.copy()))
+                stack.append(
+                    (pc + 1, sp, [c.copy() for c in captures], registers.copy())
+                )
                 pc = alt_pc
 
             elif opcode == Op.JUMP:
@@ -701,7 +714,9 @@ class RegexVM:
                 # Handle other opcodes similarly to main loop
                 pc += 1
 
-    def _execute_lookbehind(self, string: str, end_pos: int, start_pc: int, end_pc: int) -> bool:
+    def _execute_lookbehind(
+        self, string: str, end_pos: int, start_pc: int, end_pc: int
+    ) -> bool:
         """Execute bytecode for lookbehind assertion.
 
         Lookbehind matches if the pattern matches text ending at end_pos.
@@ -710,13 +725,16 @@ class RegexVM:
         # Try all possible starting positions from 0 to end_pos
         # We want the pattern to match and end exactly at end_pos
         for start_pos in range(end_pos, -1, -1):
-            result = self._try_lookbehind_at(string, start_pos, end_pos, start_pc, end_pc)
+            result = self._try_lookbehind_at(
+                string, start_pos, end_pos, start_pc, end_pc
+            )
             if result:
                 return True
         return False
 
-    def _try_lookbehind_at(self, string: str, start_pos: int, end_pos: int,
-                           start_pc: int, end_pc: int) -> bool:
+    def _try_lookbehind_at(
+        self, string: str, start_pos: int, end_pos: int, start_pc: int, end_pc: int
+    ) -> bool:
         """Try to match lookbehind pattern from start_pos, checking it ends at end_pos."""
         pc = start_pc
         sp = start_pos
@@ -765,7 +783,7 @@ class RegexVM:
                     pc, sp, captures, registers = stack.pop()
 
             elif opcode == Op.DOT:
-                if sp >= len(string) or string[sp] == '\n':
+                if sp >= len(string) or string[sp] == "\n":
                     if not stack:
                         return False
                     pc, sp, captures, registers = stack.pop()
@@ -789,7 +807,7 @@ class RegexVM:
                     pc, sp, captures, registers = stack.pop()
                     continue
                 ch = string[sp]
-                if ch.isalnum() or ch == '_':
+                if ch.isalnum() or ch == "_":
                     sp += 1
                     pc += 1
                 else:
@@ -799,12 +817,16 @@ class RegexVM:
 
             elif opcode == Op.SPLIT_FIRST:
                 alt_pc = instr[1]
-                stack.append((alt_pc, sp, [c.copy() for c in captures], registers.copy()))
+                stack.append(
+                    (alt_pc, sp, [c.copy() for c in captures], registers.copy())
+                )
                 pc += 1
 
             elif opcode == Op.SPLIT_NEXT:
                 alt_pc = instr[1]
-                stack.append((pc + 1, sp, [c.copy() for c in captures], registers.copy()))
+                stack.append(
+                    (pc + 1, sp, [c.copy() for c in captures], registers.copy())
+                )
                 pc = alt_pc
 
             elif opcode == Op.JUMP:

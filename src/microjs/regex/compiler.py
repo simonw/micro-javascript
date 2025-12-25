@@ -8,9 +8,20 @@ Includes ReDoS protection via zero-advance detection.
 from typing import List, Tuple, Optional
 from .opcodes import RegexOpCode as Op
 from .parser import (
-    Node, Char, Dot, CharClass, Shorthand, Anchor, Backref,
-    Group, Lookahead, Lookbehind, Quantifier, Alternative, Disjunction,
-    RegExpError
+    Node,
+    Char,
+    Dot,
+    CharClass,
+    Shorthand,
+    Anchor,
+    Backref,
+    Group,
+    Lookahead,
+    Lookbehind,
+    Quantifier,
+    Alternative,
+    Disjunction,
+    RegExpError,
 )
 
 
@@ -21,9 +32,9 @@ class RegexCompiler:
         self.flags = flags
         self.bytecode: List[Tuple] = []
         self.register_count = 0
-        self.multiline = 'm' in flags
-        self.ignorecase = 'i' in flags
-        self.dotall = 's' in flags
+        self.multiline = "m" in flags
+        self.ignorecase = "i" in flags
+        self.dotall = "s" in flags
 
     def compile(self, ast: Node, capture_count: int) -> List[Tuple]:
         """
@@ -113,7 +124,7 @@ class RegexCompiler:
         ranges = []
         for start, end in node.ranges:
             # Handle shorthand escapes in character classes
-            if len(start) == 2 and start[0] == '\\':
+            if len(start) == 2 and start[0] == "\\":
                 # Expand shorthand
                 shorthand_ranges = self._expand_shorthand(start[1])
                 ranges.extend(shorthand_ranges)
@@ -127,32 +138,32 @@ class RegexCompiler:
 
     def _expand_shorthand(self, ch: str) -> List[Tuple[int, int]]:
         """Expand shorthand character class to ranges."""
-        if ch == 'd':
-            return [(ord('0'), ord('9'))]
-        elif ch == 'D':
+        if ch == "d":
+            return [(ord("0"), ord("9"))]
+        elif ch == "D":
             # Non-digit: everything except 0-9
-            return [(0, ord('0') - 1), (ord('9') + 1, 0x10FFFF)]
-        elif ch == 'w':
+            return [(0, ord("0") - 1), (ord("9") + 1, 0x10FFFF)]
+        elif ch == "w":
             return [
-                (ord('0'), ord('9')),
-                (ord('A'), ord('Z')),
-                (ord('a'), ord('z')),
-                (ord('_'), ord('_'))
+                (ord("0"), ord("9")),
+                (ord("A"), ord("Z")),
+                (ord("a"), ord("z")),
+                (ord("_"), ord("_")),
             ]
-        elif ch == 'W':
+        elif ch == "W":
             # Non-word: complex negation
             return [
-                (0, ord('0') - 1),
-                (ord('9') + 1, ord('A') - 1),
-                (ord('Z') + 1, ord('_') - 1),
-                (ord('_') + 1, ord('a') - 1),
-                (ord('z') + 1, 0x10FFFF)
+                (0, ord("0") - 1),
+                (ord("9") + 1, ord("A") - 1),
+                (ord("Z") + 1, ord("_") - 1),
+                (ord("_") + 1, ord("a") - 1),
+                (ord("z") + 1, 0x10FFFF),
             ]
-        elif ch == 's':
+        elif ch == "s":
             # Whitespace
             return [
-                (ord(' '), ord(' ')),
-                (ord('\t'), ord('\r')),  # \t, \n, \v, \f, \r
+                (ord(" "), ord(" ")),
+                (ord("\t"), ord("\r")),  # \t, \n, \v, \f, \r
                 (0x00A0, 0x00A0),  # NBSP
                 (0x1680, 0x1680),  # Other Unicode spaces
                 (0x2000, 0x200A),
@@ -160,41 +171,41 @@ class RegexCompiler:
                 (0x202F, 0x202F),
                 (0x205F, 0x205F),
                 (0x3000, 0x3000),
-                (0xFEFF, 0xFEFF)
+                (0xFEFF, 0xFEFF),
             ]
-        elif ch == 'S':
+        elif ch == "S":
             # Non-whitespace - simplified
-            return [(ord('!'), ord('~'))]  # Printable ASCII
+            return [(ord("!"), ord("~"))]  # Printable ASCII
         else:
             raise RegExpError(f"Unknown shorthand: \\{ch}")
 
     def _compile_shorthand(self, node: Shorthand):
         """Compile shorthand character class."""
         shorthand_ops = {
-            'd': Op.DIGIT,
-            'D': Op.NOT_DIGIT,
-            'w': Op.WORD,
-            'W': Op.NOT_WORD,
-            's': Op.SPACE,
-            'S': Op.NOT_SPACE,
+            "d": Op.DIGIT,
+            "D": Op.NOT_DIGIT,
+            "w": Op.WORD,
+            "W": Op.NOT_WORD,
+            "s": Op.SPACE,
+            "S": Op.NOT_SPACE,
         }
         self._emit(shorthand_ops[node.type])
 
     def _compile_anchor(self, node: Anchor):
         """Compile anchor."""
-        if node.type == 'start':
+        if node.type == "start":
             if self.multiline:
                 self._emit(Op.LINE_START_M)
             else:
                 self._emit(Op.LINE_START)
-        elif node.type == 'end':
+        elif node.type == "end":
             if self.multiline:
                 self._emit(Op.LINE_END_M)
             else:
                 self._emit(Op.LINE_END)
-        elif node.type == 'boundary':
+        elif node.type == "boundary":
             self._emit(Op.WORD_BOUNDARY)
-        elif node.type == 'not_boundary':
+        elif node.type == "not_boundary":
             self._emit(Op.NOT_WORD_BOUNDARY)
 
     def _compile_backref(self, node: Backref):
@@ -311,7 +322,9 @@ class RegexCompiler:
             self._compile_at_least(node.body, min_count, greedy, need_advance_check)
         else:
             # {n,m} quantifier
-            self._compile_range(node.body, min_count, max_count, greedy, need_advance_check)
+            self._compile_range(
+                node.body, min_count, max_count, greedy, need_advance_check
+            )
 
     def _needs_advance_check(self, node: Node) -> bool:
         """
@@ -470,7 +483,9 @@ class RegexCompiler:
             else:
                 self._patch(split_idx, Op.SPLIT_NEXT, self._current_offset())
 
-    def _compile_at_least(self, body: Node, min_count: int, greedy: bool, need_advance_check: bool):
+    def _compile_at_least(
+        self, body: Node, min_count: int, greedy: bool, need_advance_check: bool
+    ):
         """Compile {n,} quantifier."""
         # Emit body min_count times
         for _ in range(min_count):
@@ -479,7 +494,14 @@ class RegexCompiler:
         # Then emit * for the rest
         self._compile_star(body, greedy, need_advance_check)
 
-    def _compile_range(self, body: Node, min_count: int, max_count: int, greedy: bool, need_advance_check: bool):
+    def _compile_range(
+        self,
+        body: Node,
+        min_count: int,
+        max_count: int,
+        greedy: bool,
+        need_advance_check: bool,
+    ):
         """Compile {n,m} quantifier."""
         # Emit body min_count times (required)
         for _ in range(min_count):

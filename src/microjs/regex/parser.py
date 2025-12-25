@@ -19,26 +19,31 @@ from typing import List, Optional, Tuple, Union
 
 class RegExpError(Exception):
     """Exception raised for regex parsing errors."""
+
     pass
 
 
 # AST Node Types
 
+
 @dataclass
 class Char:
     """Literal character."""
+
     char: str
 
 
 @dataclass
 class Dot:
     """Match any character (except newline by default)."""
+
     pass
 
 
 @dataclass
 class CharClass:
     """Character class like [a-z]."""
+
     ranges: List[Tuple[str, str]]  # List of (start, end) ranges
     negated: bool = False
 
@@ -46,25 +51,29 @@ class CharClass:
 @dataclass
 class Shorthand:
     """Shorthand character class like \\d, \\w, \\s."""
+
     type: str  # 'd', 'D', 'w', 'W', 's', 'S'
 
 
 @dataclass
 class Anchor:
     """Anchor like ^, $, \\b, \\B."""
+
     type: str  # 'start', 'end', 'boundary', 'not_boundary'
 
 
 @dataclass
 class Backref:
     """Backreference like \\1."""
+
     group: int
 
 
 @dataclass
 class Group:
     """Capturing or non-capturing group."""
-    body: 'Node'
+
+    body: "Node"
     capturing: bool = True
     group_index: int = 0
 
@@ -72,21 +81,24 @@ class Group:
 @dataclass
 class Lookahead:
     """Lookahead assertion (?=...) or (?!...)."""
-    body: 'Node'
+
+    body: "Node"
     positive: bool = True
 
 
 @dataclass
 class Lookbehind:
     """Lookbehind assertion (?<=...) or (?<!...)."""
-    body: 'Node'
+
+    body: "Node"
     positive: bool = True
 
 
 @dataclass
 class Quantifier:
     """Quantifier like *, +, ?, {n,m}."""
-    body: 'Node'
+
+    body: "Node"
     min: int
     max: int  # -1 means unlimited
     greedy: bool = True
@@ -95,18 +107,32 @@ class Quantifier:
 @dataclass
 class Alternative:
     """Sequence of terms (AND)."""
-    terms: List['Node']
+
+    terms: List["Node"]
 
 
 @dataclass
 class Disjunction:
     """Alternation (OR)."""
-    alternatives: List['Node']
+
+    alternatives: List["Node"]
 
 
 # Union type for all nodes
-Node = Union[Char, Dot, CharClass, Shorthand, Anchor, Backref,
-             Group, Lookahead, Lookbehind, Quantifier, Alternative, Disjunction]
+Node = Union[
+    Char,
+    Dot,
+    CharClass,
+    Shorthand,
+    Anchor,
+    Backref,
+    Group,
+    Lookahead,
+    Lookbehind,
+    Quantifier,
+    Alternative,
+    Disjunction,
+]
 
 
 class RegexParser:
@@ -117,7 +143,7 @@ class RegexParser:
         self.flags = flags
         self.pos = 0
         self.group_count = 0
-        self.unicode = 'u' in flags
+        self.unicode = "u" in flags
 
     def parse(self) -> Tuple[Node, int]:
         """
@@ -132,7 +158,9 @@ class RegexParser:
         ast = self._parse_disjunction()
 
         if self.pos < len(self.pattern):
-            raise RegExpError(f"Unexpected character '{self.pattern[self.pos]}' at position {self.pos}")
+            raise RegExpError(
+                f"Unexpected character '{self.pattern[self.pos]}' at position {self.pos}"
+            )
 
         return ast, self.group_count + 1  # +1 for group 0 (full match)
 
@@ -161,7 +189,7 @@ class RegexParser:
         """Parse alternation (a|b|c)."""
         alternatives = [self._parse_alternative()]
 
-        while self._match('|'):
+        while self._match("|"):
             alternatives.append(self._parse_alternative())
 
         if len(alternatives) == 1:
@@ -172,7 +200,7 @@ class RegexParser:
         """Parse sequence of terms."""
         terms = []
 
-        while self._peek() is not None and self._peek() not in '|)':
+        while self._peek() is not None and self._peek() not in "|)":
             old_pos = self.pos
             term = self._parse_term()
             if term is not None:
@@ -180,7 +208,7 @@ class RegexParser:
             elif self.pos == old_pos:
                 # No progress - check for quantifier at start (error)
                 ch = self._peek()
-                if ch in '*+?':
+                if ch in "*+?":
                     raise RegExpError(f"Nothing to repeat at position {self.pos}")
                 # Unknown character - skip to prevent infinite loop
                 break
@@ -214,12 +242,12 @@ class RegexParser:
         """Try to parse an assertion (^, $, \\b, \\B)."""
         ch = self._peek()
 
-        if ch == '^':
+        if ch == "^":
             self._advance()
-            return Anchor('start')
-        if ch == '$':
+            return Anchor("start")
+        if ch == "$":
             self._advance()
-            return Anchor('end')
+            return Anchor("end")
 
         # \b and \B are handled in _parse_escape
         return None
@@ -231,32 +259,32 @@ class RegexParser:
         if ch is None:
             return None
 
-        if ch == '.':
+        if ch == ".":
             self._advance()
             return Dot()
 
-        if ch == '[':
+        if ch == "[":
             return self._parse_char_class()
 
-        if ch == '(':
+        if ch == "(":
             return self._parse_group()
 
-        if ch == '\\':
+        if ch == "\\":
             return self._parse_escape()
 
         # Regular character (not special)
-        special_chars = '.*+?^${}[]()|\\'
+        special_chars = ".*+?^${}[]()|\\"
         if ch not in special_chars:
             self._advance()
             return Char(ch)
 
         # Special characters that can appear literally in some contexts
-        if ch in '-/':
+        if ch in "-/":
             # Hyphen and slash outside character class are literal
             self._advance()
             return Char(ch)
 
-        if ch in '{}':
+        if ch in "{}":
             # Check if it's a valid quantifier
             if not self._is_quantifier_start():
                 self._advance()
@@ -267,12 +295,12 @@ class RegexParser:
 
     def _is_quantifier_start(self) -> bool:
         """Check if we're at the start of a {n,m} quantifier."""
-        if self.pos >= len(self.pattern) or self.pattern[self.pos] != '{':
+        if self.pos >= len(self.pattern) or self.pattern[self.pos] != "{":
             return False
         # Look ahead to see if this looks like {n} or {n,} or {n,m}
         i = self.pos + 1
         # Check for empty {} which is invalid
-        if i < len(self.pattern) and self.pattern[i] == '}':
+        if i < len(self.pattern) and self.pattern[i] == "}":
             return True  # Will be caught as error in _parse_brace_quantifier
         while i < len(self.pattern) and self.pattern[i].isdigit():
             i += 1
@@ -280,13 +308,13 @@ class RegexParser:
             return False
         if i >= len(self.pattern):
             return False
-        if self.pattern[i] == '}':
+        if self.pattern[i] == "}":
             return True
-        if self.pattern[i] == ',':
+        if self.pattern[i] == ",":
             i += 1
             while i < len(self.pattern) and self.pattern[i].isdigit():
                 i += 1
-            if i < len(self.pattern) and self.pattern[i] == '}':
+            if i < len(self.pattern) and self.pattern[i] == "}":
                 return True
         return False
 
@@ -294,27 +322,31 @@ class RegexParser:
         """Parse character class [...]."""
         self._advance()  # consume '['
 
-        negated = self._match('^')
+        negated = self._match("^")
         ranges = []
 
-        while self._peek() is not None and self._peek() != ']':
+        while self._peek() is not None and self._peek() != "]":
             start = self._parse_class_char()
             if start is None:
                 break
 
-            if self._peek() == '-' and self.pos + 1 < len(self.pattern) and self.pattern[self.pos + 1] != ']':
+            if (
+                self._peek() == "-"
+                and self.pos + 1 < len(self.pattern)
+                and self.pattern[self.pos + 1] != "]"
+            ):
                 self._advance()  # consume '-'
                 end = self._parse_class_char()
                 if end is None:
                     # Treat '-' as literal at end
                     ranges.append((start, start))
-                    ranges.append(('-', '-'))
+                    ranges.append(("-", "-"))
                 else:
                     ranges.append((start, end))
             else:
                 ranges.append((start, start))
 
-        if not self._match(']'):
+        if not self._match("]"):
             raise RegExpError("Unterminated character class")
 
         return CharClass(ranges, negated)
@@ -322,10 +354,10 @@ class RegexParser:
     def _parse_class_char(self) -> Optional[str]:
         """Parse a character inside a character class."""
         ch = self._peek()
-        if ch is None or ch == ']':
+        if ch is None or ch == "]":
             return None
 
-        if ch == '\\':
+        if ch == "\\":
             self._advance()
             escaped = self._peek()
             if escaped is None:
@@ -335,15 +367,20 @@ class RegexParser:
 
             # Handle escape sequences
             escape_map = {
-                'n': '\n', 't': '\t', 'r': '\r', 'f': '\f', 'v': '\v',
-                '0': '\0', 'b': '\b',
+                "n": "\n",
+                "t": "\t",
+                "r": "\r",
+                "f": "\f",
+                "v": "\v",
+                "0": "\0",
+                "b": "\b",
             }
             if escaped in escape_map:
                 return escape_map[escaped]
-            if escaped in 'dDwWsS':
+            if escaped in "dDwWsS":
                 # These need special handling - return as-is for now
                 # The compiler will expand them
-                return '\\' + escaped
+                return "\\" + escaped
             # Literal escape
             return escaped
 
@@ -360,36 +397,36 @@ class RegexParser:
         is_lookbehind = False
         positive = True
 
-        if self._peek() == '?':
+        if self._peek() == "?":
             self._advance()
             next_ch = self._peek()
 
-            if next_ch == ':':
+            if next_ch == ":":
                 # Non-capturing group (?:...)
                 self._advance()
                 capturing = False
-            elif next_ch == '=':
+            elif next_ch == "=":
                 # Positive lookahead (?=...)
                 self._advance()
                 is_lookahead = True
                 capturing = False  # Lookahead itself is not a capturing group
                 positive = True
-            elif next_ch == '!':
+            elif next_ch == "!":
                 # Negative lookahead (?!...)
                 self._advance()
                 is_lookahead = True
                 capturing = False  # Lookahead itself is not a capturing group
                 positive = False
-            elif next_ch == '<':
+            elif next_ch == "<":
                 self._advance()
                 next_ch2 = self._peek()
-                if next_ch2 == '=':
+                if next_ch2 == "=":
                     # Positive lookbehind (?<=...)
                     self._advance()
                     is_lookbehind = True
                     capturing = False  # Lookbehind itself is not a capturing group
                     positive = True
-                elif next_ch2 == '!':
+                elif next_ch2 == "!":
                     # Negative lookbehind (?<!...)
                     self._advance()
                     is_lookbehind = True
@@ -406,7 +443,7 @@ class RegexParser:
 
         body = self._parse_disjunction()
 
-        if not self._match(')'):
+        if not self._match(")"):
             raise RegExpError("Unterminated group")
 
         if is_lookahead:
@@ -427,17 +464,17 @@ class RegexParser:
         self._advance()
 
         # Shorthand character classes
-        if ch in 'dDwWsS':
+        if ch in "dDwWsS":
             return Shorthand(ch)
 
         # Word boundary
-        if ch == 'b':
-            return Anchor('boundary')
-        if ch == 'B':
-            return Anchor('not_boundary')
+        if ch == "b":
+            return Anchor("boundary")
+        if ch == "B":
+            return Anchor("not_boundary")
 
         # Backreference
-        if ch.isdigit() and ch != '0':
+        if ch.isdigit() and ch != "0":
             # Parse multi-digit backreference
             num = ch
             while self._peek() is not None and self._peek().isdigit():
@@ -449,26 +486,30 @@ class RegexParser:
             return Backref(group_num)
 
         # Unicode escape
-        if ch == 'u':
+        if ch == "u":
             return self._parse_unicode_escape()
 
         # Hex escape
-        if ch == 'x':
+        if ch == "x":
             return self._parse_hex_escape()
 
         # Control character
-        if ch == 'c':
+        if ch == "c":
             ctrl = self._peek()
             if ctrl is not None and (ctrl.isalpha()):
                 self._advance()
                 return Char(chr(ord(ctrl.upper()) - 64))
             # Non-letter after \c: treat as literal \c (backslash + c)
-            return Alternative([Char('\\'), Char('c')])
+            return Alternative([Char("\\"), Char("c")])
 
         # Simple escapes
         escape_map = {
-            'n': '\n', 't': '\t', 'r': '\r', 'f': '\f', 'v': '\v',
-            '0': '\0',
+            "n": "\n",
+            "t": "\t",
+            "r": "\r",
+            "f": "\f",
+            "v": "\v",
+            "0": "\0",
         }
         if ch in escape_map:
             return Char(escape_map[ch])
@@ -478,13 +519,13 @@ class RegexParser:
 
     def _parse_unicode_escape(self) -> Char:
         """Parse \\uXXXX or \\u{XXXX} escape."""
-        if self._peek() == '{':
+        if self._peek() == "{":
             # \u{XXXX} form
             self._advance()
-            hex_digits = ''
-            while self._peek() is not None and self._peek() != '}':
+            hex_digits = ""
+            while self._peek() is not None and self._peek() != "}":
                 hex_digits += self._advance()
-            if not self._match('}'):
+            if not self._match("}"):
                 raise RegExpError("Unterminated unicode escape")
             if not hex_digits:
                 raise RegExpError("Empty unicode escape")
@@ -494,10 +535,10 @@ class RegexParser:
                 raise RegExpError(f"Invalid unicode escape: {hex_digits}")
         else:
             # \uXXXX form
-            hex_digits = ''
+            hex_digits = ""
             for _ in range(4):
                 ch = self._peek()
-                if ch is not None and ch in '0123456789abcdefABCDEF':
+                if ch is not None and ch in "0123456789abcdefABCDEF":
                     hex_digits += self._advance()
                 else:
                     break
@@ -507,10 +548,10 @@ class RegexParser:
 
     def _parse_hex_escape(self) -> Char:
         """Parse \\xXX escape."""
-        hex_digits = ''
+        hex_digits = ""
         for _ in range(2):
             ch = self._peek()
-            if ch is not None and ch in '0123456789abcdefABCDEF':
+            if ch is not None and ch in "0123456789abcdefABCDEF":
                 hex_digits += self._advance()
             else:
                 break
@@ -525,16 +566,16 @@ class RegexParser:
         min_count = 0
         max_count = -1  # -1 = unlimited
 
-        if ch == '*':
+        if ch == "*":
             self._advance()
             min_count, max_count = 0, -1
-        elif ch == '+':
+        elif ch == "+":
             self._advance()
             min_count, max_count = 1, -1
-        elif ch == '?':
+        elif ch == "?":
             self._advance()
             min_count, max_count = 0, 1
-        elif ch == '{':
+        elif ch == "{":
             result = self._parse_brace_quantifier()
             if result is None:
                 return None
@@ -543,7 +584,7 @@ class RegexParser:
             return None
 
         # Check for lazy modifier
-        greedy = not self._match('?')
+        greedy = not self._match("?")
 
         return Quantifier(atom, min_count, max_count, greedy)
 
@@ -555,7 +596,7 @@ class RegexParser:
         self._advance()  # consume '{'
 
         # Parse min
-        min_str = ''
+        min_str = ""
         while self._peek() is not None and self._peek().isdigit():
             min_str += self._advance()
 
@@ -565,9 +606,9 @@ class RegexParser:
         min_count = int(min_str)
         max_count = min_count
 
-        if self._match(','):
+        if self._match(","):
             # Check for max
-            max_str = ''
+            max_str = ""
             while self._peek() is not None and self._peek().isdigit():
                 max_str += self._advance()
 
@@ -576,7 +617,7 @@ class RegexParser:
             else:
                 max_count = -1  # Unlimited
 
-        if not self._match('}'):
+        if not self._match("}"):
             raise RegExpError("Unterminated quantifier")
 
         if max_count != -1 and max_count < min_count:

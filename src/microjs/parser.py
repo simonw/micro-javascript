@@ -5,18 +5,51 @@ from .lexer import Lexer
 from .tokens import Token, TokenType
 from .errors import JSSyntaxError
 from .ast_nodes import (
-    Node, Program, NumericLiteral, StringLiteral, BooleanLiteral, NullLiteral,
-    RegexLiteral, Identifier, ThisExpression, ArrayExpression, ObjectExpression, Property,
-    UnaryExpression, UpdateExpression, BinaryExpression, LogicalExpression,
-    ConditionalExpression, AssignmentExpression, SequenceExpression,
-    MemberExpression, CallExpression, NewExpression,
-    ExpressionStatement, BlockStatement, EmptyStatement,
-    VariableDeclaration, VariableDeclarator,
-    IfStatement, WhileStatement, DoWhileStatement, ForStatement,
-    ForInStatement, ForOfStatement, BreakStatement, ContinueStatement,
-    ReturnStatement, ThrowStatement, TryStatement, CatchClause,
-    SwitchStatement, SwitchCase, LabeledStatement,
-    FunctionDeclaration, FunctionExpression, ArrowFunctionExpression,
+    Node,
+    Program,
+    NumericLiteral,
+    StringLiteral,
+    BooleanLiteral,
+    NullLiteral,
+    RegexLiteral,
+    Identifier,
+    ThisExpression,
+    ArrayExpression,
+    ObjectExpression,
+    Property,
+    UnaryExpression,
+    UpdateExpression,
+    BinaryExpression,
+    LogicalExpression,
+    ConditionalExpression,
+    AssignmentExpression,
+    SequenceExpression,
+    MemberExpression,
+    CallExpression,
+    NewExpression,
+    ExpressionStatement,
+    BlockStatement,
+    EmptyStatement,
+    VariableDeclaration,
+    VariableDeclarator,
+    IfStatement,
+    WhileStatement,
+    DoWhileStatement,
+    ForStatement,
+    ForInStatement,
+    ForOfStatement,
+    BreakStatement,
+    ContinueStatement,
+    ReturnStatement,
+    ThrowStatement,
+    TryStatement,
+    CatchClause,
+    SwitchStatement,
+    SwitchCase,
+    LabeledStatement,
+    FunctionDeclaration,
+    FunctionExpression,
+    ArrowFunctionExpression,
     SourceLocation,
 )
 
@@ -28,11 +61,24 @@ PRECEDENCE = {
     "|": 3,
     "^": 4,
     "&": 5,
-    "==": 6, "!=": 6, "===": 6, "!==": 6,
-    "<": 7, ">": 7, "<=": 7, ">=": 7, "in": 7, "instanceof": 7,
-    "<<": 8, ">>": 8, ">>>": 8,
-    "+": 9, "-": 9,
-    "*": 10, "/": 10, "%": 10,
+    "==": 6,
+    "!=": 6,
+    "===": 6,
+    "!==": 6,
+    "<": 7,
+    ">": 7,
+    "<=": 7,
+    ">=": 7,
+    "in": 7,
+    "instanceof": 7,
+    "<<": 8,
+    ">>": 8,
+    ">>>": 8,
+    "+": 9,
+    "-": 9,
+    "*": 10,
+    "/": 10,
+    "%": 10,
     "**": 11,
 }
 
@@ -86,13 +132,34 @@ class Parser:
         """Check if current token is a keyword (reserved word)."""
         # Keywords that can be used as property names in object literals
         keyword_types = {
-            TokenType.IF, TokenType.ELSE, TokenType.FOR, TokenType.WHILE,
-            TokenType.DO, TokenType.SWITCH, TokenType.CASE, TokenType.DEFAULT,
-            TokenType.BREAK, TokenType.CONTINUE, TokenType.RETURN, TokenType.THROW,
-            TokenType.TRY, TokenType.CATCH, TokenType.FINALLY, TokenType.FUNCTION,
-            TokenType.VAR, TokenType.NEW, TokenType.DELETE, TokenType.TYPEOF,
-            TokenType.IN, TokenType.OF, TokenType.INSTANCEOF, TokenType.THIS,
-            TokenType.TRUE, TokenType.FALSE, TokenType.NULL, TokenType.VOID,
+            TokenType.IF,
+            TokenType.ELSE,
+            TokenType.FOR,
+            TokenType.WHILE,
+            TokenType.DO,
+            TokenType.SWITCH,
+            TokenType.CASE,
+            TokenType.DEFAULT,
+            TokenType.BREAK,
+            TokenType.CONTINUE,
+            TokenType.RETURN,
+            TokenType.THROW,
+            TokenType.TRY,
+            TokenType.CATCH,
+            TokenType.FINALLY,
+            TokenType.FUNCTION,
+            TokenType.VAR,
+            TokenType.NEW,
+            TokenType.DELETE,
+            TokenType.TYPEOF,
+            TokenType.IN,
+            TokenType.OF,
+            TokenType.INSTANCEOF,
+            TokenType.THIS,
+            TokenType.TRUE,
+            TokenType.FALSE,
+            TokenType.NULL,
+            TokenType.VOID,
         }
         return self.current.type in keyword_types
 
@@ -318,7 +385,10 @@ class Parser:
         """Parse break statement."""
         label = None
         # Only consume identifier as label if on same line (ASI rule)
-        if self._check(TokenType.IDENTIFIER) and self.current.line == self.previous.line:
+        if (
+            self._check(TokenType.IDENTIFIER)
+            and self.current.line == self.previous.line
+        ):
             label = Identifier(self._advance().value)
         self._consume_semicolon()
         return BreakStatement(label)
@@ -327,7 +397,10 @@ class Parser:
         """Parse continue statement."""
         label = None
         # Only consume identifier as label if on same line (ASI rule)
-        if self._check(TokenType.IDENTIFIER) and self.current.line == self.previous.line:
+        if (
+            self._check(TokenType.IDENTIFIER)
+            and self.current.line == self.previous.line
+        ):
             label = Identifier(self._advance().value)
         self._consume_semicolon()
         return ContinueStatement(label)
@@ -457,10 +530,18 @@ class Parser:
         expr = self._parse_conditional_expression(exclude_in)
 
         if self._check(
-            TokenType.ASSIGN, TokenType.PLUS_ASSIGN, TokenType.MINUS_ASSIGN,
-            TokenType.STAR_ASSIGN, TokenType.SLASH_ASSIGN, TokenType.PERCENT_ASSIGN,
-            TokenType.AND_ASSIGN, TokenType.OR_ASSIGN, TokenType.XOR_ASSIGN,
-            TokenType.LSHIFT_ASSIGN, TokenType.RSHIFT_ASSIGN, TokenType.URSHIFT_ASSIGN,
+            TokenType.ASSIGN,
+            TokenType.PLUS_ASSIGN,
+            TokenType.MINUS_ASSIGN,
+            TokenType.STAR_ASSIGN,
+            TokenType.SLASH_ASSIGN,
+            TokenType.PERCENT_ASSIGN,
+            TokenType.AND_ASSIGN,
+            TokenType.OR_ASSIGN,
+            TokenType.XOR_ASSIGN,
+            TokenType.LSHIFT_ASSIGN,
+            TokenType.RSHIFT_ASSIGN,
+            TokenType.URSHIFT_ASSIGN,
         ):
             op = self._advance().value
             right = self._parse_assignment_expression(exclude_in)
@@ -541,9 +622,19 @@ class Parser:
 
         params: List[Identifier] = []
         if not self._check(TokenType.RPAREN):
-            params.append(Identifier(self._expect(TokenType.IDENTIFIER, "Expected parameter name").value))
+            params.append(
+                Identifier(
+                    self._expect(TokenType.IDENTIFIER, "Expected parameter name").value
+                )
+            )
             while self._match(TokenType.COMMA):
-                params.append(Identifier(self._expect(TokenType.IDENTIFIER, "Expected parameter name").value))
+                params.append(
+                    Identifier(
+                        self._expect(
+                            TokenType.IDENTIFIER, "Expected parameter name"
+                        ).value
+                    )
+                )
 
         self._expect(TokenType.RPAREN, "Expected ')'")
         self._expect(TokenType.ARROW, "Expected '=>'")
@@ -569,7 +660,9 @@ class Parser:
 
         return expr
 
-    def _parse_binary_expression(self, min_precedence: int = 0, exclude_in: bool = False) -> Node:
+    def _parse_binary_expression(
+        self, min_precedence: int = 0, exclude_in: bool = False
+    ) -> Node:
         """Parse binary expression with operator precedence."""
         left = self._parse_unary_expression()
 
@@ -659,8 +752,13 @@ class Parser:
         """Parse unary expression."""
         # Prefix operators
         if self._check(
-            TokenType.MINUS, TokenType.PLUS, TokenType.NOT, TokenType.TILDE,
-            TokenType.TYPEOF, TokenType.VOID, TokenType.DELETE,
+            TokenType.MINUS,
+            TokenType.PLUS,
+            TokenType.NOT,
+            TokenType.TILDE,
+            TokenType.TYPEOF,
+            TokenType.VOID,
+            TokenType.DELETE,
         ):
             op_token = self._advance()
             op = op_token.value
@@ -684,7 +782,9 @@ class Parser:
                 # Member access: a.b (keywords allowed as property names)
                 if self._check(TokenType.IDENTIFIER):
                     prop = self._advance()
-                    expr = MemberExpression(expr, Identifier(prop.value), computed=False)
+                    expr = MemberExpression(
+                        expr, Identifier(prop.value), computed=False
+                    )
                 elif self._is_keyword():
                     # Keywords can be used as property names
                     prop_name = self.current.type.name.lower()
@@ -813,7 +913,12 @@ class Parser:
             if self.current.value == "get":
                 # Could be getter or property/method named "get"
                 self._advance()
-                if self._check(TokenType.IDENTIFIER, TokenType.STRING, TokenType.NUMBER, TokenType.LBRACKET):
+                if self._check(
+                    TokenType.IDENTIFIER,
+                    TokenType.STRING,
+                    TokenType.NUMBER,
+                    TokenType.LBRACKET,
+                ):
                     # get propertyName() {} - it's a getter
                     kind = "get"
                 elif self._check(TokenType.LPAREN):
@@ -833,7 +938,12 @@ class Parser:
                     return Property(key, value, "init", computed=False, shorthand=True)
             elif self.current.value == "set":
                 self._advance()
-                if self._check(TokenType.IDENTIFIER, TokenType.STRING, TokenType.NUMBER, TokenType.LBRACKET):
+                if self._check(
+                    TokenType.IDENTIFIER,
+                    TokenType.STRING,
+                    TokenType.NUMBER,
+                    TokenType.LBRACKET,
+                ):
                     kind = "set"
                 elif self._check(TokenType.LPAREN):
                     # set() {} - method shorthand named "set"
@@ -854,7 +964,9 @@ class Parser:
         computed = False
         if self._match(TokenType.LBRACKET):
             key = self._parse_assignment_expression()
-            self._expect(TokenType.RBRACKET, "Expected ']' after computed property name")
+            self._expect(
+                TokenType.RBRACKET, "Expected ']' after computed property name"
+            )
             computed = True
         elif self._match(TokenType.STRING):
             key = StringLiteral(self.previous.value)
@@ -864,7 +976,11 @@ class Parser:
             key = Identifier(self.previous.value)
         elif self._is_keyword():
             # Reserved words can be used as property names
-            key = Identifier(self.current.value if hasattr(self.current, 'value') else self.current.type.name.lower())
+            key = Identifier(
+                self.current.value
+                if hasattr(self.current, "value")
+                else self.current.type.name.lower()
+            )
             self._advance()
         else:
             raise self._error("Expected property name")
@@ -880,7 +996,9 @@ class Parser:
             params = []
             if not self._check(TokenType.RPAREN):
                 while True:
-                    param = self._expect(TokenType.IDENTIFIER, "Expected parameter name")
+                    param = self._expect(
+                        TokenType.IDENTIFIER, "Expected parameter name"
+                    )
                     params.append(Identifier(param.value))
                     if not self._match(TokenType.COMMA):
                         break

@@ -14,6 +14,7 @@ Issues are organized by category:
 - Error line/column tracking
 - Deep nesting (recursion limits)
 """
+
 import pytest
 from microjs import JSContext
 
@@ -21,6 +22,7 @@ from microjs import JSContext
 # =============================================================================
 # INDIRECT EVAL ISSUES
 # =============================================================================
+
 
 class TestIndirectEval:
     """Tests for indirect eval ((1,eval)(...)) behavior."""
@@ -34,24 +36,24 @@ class TestIndirectEval:
     def test_indirect_eval_var_declaration(self):
         """Indirect eval can declare new global variables."""
         ctx = JSContext(time_limit=5.0)
-        ctx.eval('var g_eval = (1,eval);')
+        ctx.eval("var g_eval = (1,eval);")
         ctx.eval('g_eval("var z = 2")')
-        assert ctx.eval('z') == 2
+        assert ctx.eval("z") == 2
 
     def test_indirect_eval_reads_global(self):
         """Indirect eval can read existing global variables."""
         ctx = JSContext(time_limit=5.0)
-        ctx.eval('var z = 2;')
-        ctx.eval('var g_eval = (1,eval);')
+        ctx.eval("var z = 2;")
+        ctx.eval("var g_eval = (1,eval);")
         assert ctx.eval('g_eval("z")') == 2
 
     def test_indirect_eval_writes_global(self):
         """Indirect eval should persist writes to existing global variables."""
         ctx = JSContext(time_limit=5.0)
-        ctx.eval('var z = 2;')
-        ctx.eval('var g_eval = (1,eval);')
+        ctx.eval("var z = 2;")
+        ctx.eval("var g_eval = (1,eval);")
         ctx.eval('g_eval("z = 3")')
-        assert ctx.eval('z') == 3  # Currently returns 2
+        assert ctx.eval("z") == 3  # Currently returns 2
 
     def test_indirect_eval_if_statement(self):
         """Indirect eval can evaluate if statements."""
@@ -64,6 +66,7 @@ class TestIndirectEval:
 # REGEX CAPTURE GROUP ISSUES
 # =============================================================================
 
+
 class TestRegexCaptureGroups:
     """Tests for regex capture group behavior."""
 
@@ -71,7 +74,7 @@ class TestRegexCaptureGroups:
         """Capture groups in repetitions should reset to undefined."""
         ctx = JSContext(time_limit=5.0)
         result = ctx.eval('/(z)((a+)?(b+)?(c))*/.exec("zaacbbbcac")')
-        expected = ['zaacbbbcac', 'z', 'ac', 'a', None, 'c']
+        expected = ["zaacbbbcac", "z", "ac", "a", None, "c"]
         assert result == expected
 
     @pytest.mark.xfail(reason="Optional lookahead group retains capture")
@@ -96,7 +99,7 @@ class TestRegexCaptureGroups:
         result = ctx.eval('/(?:(?=(abc)))?a/.exec("abc")')
         # The lookahead succeeds but the optional group as a whole is not required
         # Per ES spec, group 1 should be undefined when the optional path is taken
-        expected = ['a', None]
+        expected = ["a", None]
         assert result == expected
 
     @pytest.mark.xfail(reason="Repeated optional lookahead group retains capture")
@@ -109,7 +112,7 @@ class TestRegexCaptureGroups:
         """
         ctx = JSContext(time_limit=5.0)
         result = ctx.eval('/(?:(?=(abc))){0,2}a/.exec("abc")')
-        expected = ['a', None]
+        expected = ["a", None]
         assert result == expected
 
     def test_mandatory_lookahead_preserves_capture(self):
@@ -117,13 +120,14 @@ class TestRegexCaptureGroups:
         ctx = JSContext(time_limit=5.0)
         result = ctx.eval('/(?:(?=(abc)))a/.exec("abc")')
         # Here the non-capturing group is mandatory, so the lookahead runs
-        expected = ['a', 'abc']
+        expected = ["a", "abc"]
         assert result == expected
 
 
 # =============================================================================
 # REGEX ALTERNATION ISSUES
 # =============================================================================
+
 
 class TestRegexAlternation:
     """Tests for regex alternation behavior."""
@@ -132,13 +136,14 @@ class TestRegexAlternation:
         """Empty alternative in repeated group should work correctly."""
         ctx = JSContext(time_limit=5.0)
         result = ctx.eval('/(?:|[\\w])+([0-9])/.exec("123a23")')
-        expected = ['123a23', '3']
+        expected = ["123a23", "3"]
         assert result == expected
 
 
 # =============================================================================
 # REGEX CHARACTER CLASS ISSUES
 # =============================================================================
+
 
 class TestRegexCharacterClass:
     """Tests for regex character class behavior."""
@@ -168,16 +173,17 @@ class TestRegexCharacterClass:
 # REGEX UNICODE ISSUES
 # =============================================================================
 
+
 class TestRegexUnicode:
     """Tests for regex Unicode handling."""
 
     def test_lastindex_surrogate_pair(self):
         """lastIndex pointing to second surrogate should reset to 0."""
         ctx = JSContext(time_limit=5.0)
-        ctx.eval('var a = /(?:)/gu;')
-        ctx.eval('a.lastIndex = 1;')  # Point to middle of surrogate pair
+        ctx.eval("var a = /(?:)/gu;")
+        ctx.eval("a.lastIndex = 1;")  # Point to middle of surrogate pair
         ctx.eval('a.exec("🐱");')  # 🐱 is a surrogate pair
-        result = ctx.eval('a.lastIndex')
+        result = ctx.eval("a.lastIndex")
         assert result == 0
 
 
@@ -185,13 +191,15 @@ class TestRegexUnicode:
 # ERROR LINE/COLUMN TRACKING ISSUES
 # =============================================================================
 
+
 class TestErrorLineColumn:
     """Tests for error line and column number tracking."""
 
     def test_thrown_error_has_line_number(self):
         """Thrown errors should have lineNumber property set."""
         ctx = JSContext(time_limit=5.0)
-        result = ctx.eval('''
+        result = ctx.eval(
+            """
 var e;
 try {
     throw new Error("test");
@@ -199,13 +207,15 @@ try {
     e = ex;
 }
 e.lineNumber
-''')
+"""
+        )
         assert result == 4  # Line where throw statement is
 
     def test_thrown_error_has_column_number(self):
         """Thrown errors should have columnNumber property set."""
         ctx = JSContext(time_limit=5.0)
-        result = ctx.eval('''
+        result = ctx.eval(
+            """
 var e;
 try {
     throw new Error("test");
@@ -213,13 +223,15 @@ try {
     e = ex;
 }
 e.columnNumber
-''')
+"""
+        )
         assert result == 5  # Column where throw statement starts
 
     def test_thrown_error_line_column_multiline(self):
         """Thrown errors track correct location in multiline code."""
         ctx = JSContext(time_limit=5.0)
-        result = ctx.eval('''
+        result = ctx.eval(
+            """
 var e;
 try {
     var x = 1;
@@ -229,7 +241,8 @@ try {
     e = ex;
 }
 [e.lineNumber, e.columnNumber]
-''')
+"""
+        )
         assert result == [6, 5]  # Line 6, column 5
 
     @pytest.mark.xfail(reason="Error constructor location tracking not implemented")
@@ -266,16 +279,17 @@ try {
         """
         ctx = JSContext(time_limit=5.0)
         try:
-            ctx.eval('\n 123 a ')  # Invalid syntax at line 2
+            ctx.eval("\n 123 a ")  # Invalid syntax at line 2
         except Exception as e:
             error_msg = str(e)
             # Should contain line info
-            assert 'line 2' in error_msg.lower() or ':2:' in error_msg
+            assert "line 2" in error_msg.lower() or ":2:" in error_msg
 
 
 # =============================================================================
 # DEEP NESTING / RECURSION LIMIT ISSUES
 # =============================================================================
+
 
 class TestDeepNesting:
     """Tests for handling deeply nested expressions."""
@@ -350,14 +364,16 @@ class TestDeepNesting:
         """
         ctx = JSContext(time_limit=10.0)
         n = 10000
-        ctx.eval(f'''
+        ctx.eval(
+            f"""
             function repeat(s, n) {{
                 var result = "";
                 for (var i = 0; i < n; i++) result += s;
                 return result;
             }}
             var a = new RegExp(repeat("(?:", {n}) + "a+" + repeat(")", {n}));
-        ''')
+        """
+        )
         result = ctx.eval('a.exec("aa")')
-        expected = ['aa']
+        expected = ["aa"]
         assert result == expected

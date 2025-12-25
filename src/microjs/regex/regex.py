@@ -10,8 +10,16 @@ from .compiler import RegexCompiler
 from .vm import RegexVM, MatchResult, RegexTimeoutError, RegexStackOverflow
 
 
-__all__ = ['RegExp', 'RegExpError', 'match', 'search', 'test',
-           'RegexTimeoutError', 'RegexStackOverflow', 'MatchResult']
+__all__ = [
+    "RegExp",
+    "RegExpError",
+    "match",
+    "search",
+    "test",
+    "RegexTimeoutError",
+    "RegexStackOverflow",
+    "MatchResult",
+]
 
 
 def _utf16_len(s: str) -> int:
@@ -80,7 +88,7 @@ class RegExp:
         flags: str = "",
         poll_callback: Optional[Callable[[], bool]] = None,
         stack_limit: int = 10000,
-        poll_interval: int = 100
+        poll_interval: int = 100,
     ):
         """
         Create a new RegExp.
@@ -94,12 +102,12 @@ class RegExp:
         """
         self.source = pattern
         self.flags = flags
-        self._global = 'g' in flags
-        self._ignore_case = 'i' in flags
-        self._multiline = 'm' in flags
-        self._dotall = 's' in flags
-        self._unicode = 'u' in flags
-        self._sticky = 'y' in flags
+        self._global = "g" in flags
+        self._ignore_case = "i" in flags
+        self._multiline = "m" in flags
+        self._dotall = "s" in flags
+        self._unicode = "u" in flags
+        self._sticky = "y" in flags
         self.lastIndex = 0
 
         self._poll_callback = poll_callback
@@ -151,7 +159,7 @@ class RegExp:
             self.flags,
             self._poll_callback,
             self._stack_limit,
-            self._poll_interval
+            self._poll_interval,
         )
 
     def test(self, string: str) -> bool:
@@ -170,7 +178,9 @@ class RegExp:
             result = vm.match(string, self.lastIndex)
             if result:
                 if self._global:
-                    self.lastIndex = result.index + len(result[0]) if result[0] else result.index
+                    self.lastIndex = (
+                        result.index + len(result[0]) if result[0] else result.index
+                    )
                 return True
             if self._global:
                 self.lastIndex = 0
@@ -179,7 +189,9 @@ class RegExp:
         result = vm.search(string, self.lastIndex if self._global else 0)
         if result:
             if self._global:
-                self.lastIndex = result.index + len(result[0]) if result[0] else result.index + 1
+                self.lastIndex = (
+                    result.index + len(result[0]) if result[0] else result.index + 1
+                )
             return True
 
         if self._global:
@@ -214,7 +226,9 @@ class RegExp:
             result = vm.match(string, start_pos)
             if result:
                 if self._global or self._sticky:
-                    end_cp = result.index + len(result[0]) if result[0] else result.index
+                    end_cp = (
+                        result.index + len(result[0]) if result[0] else result.index
+                    )
                     if self._unicode:
                         self.lastIndex = _codepoint_to_utf16_index(string, end_cp)
                     else:
@@ -228,7 +242,9 @@ class RegExp:
 
         if result:
             if self._global:
-                end_cp = result.index + len(result[0]) if result[0] else result.index + 1
+                end_cp = (
+                    result.index + len(result[0]) if result[0] else result.index + 1
+                )
                 if self._unicode:
                     self.lastIndex = _codepoint_to_utf16_index(string, end_cp)
                 else:

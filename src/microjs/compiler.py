@@ -385,8 +385,16 @@ class Compiler:
             self._emit(OpCode.POP)
 
         elif isinstance(node, BlockStatement):
-            for stmt in node.body:
-                self._compile_statement(stmt)
+            # Handle nested blocks iteratively to avoid deep recursion
+            work_stack = [node]
+            while work_stack:
+                current = work_stack.pop()
+                if isinstance(current, BlockStatement):
+                    # Push body statements in reverse order
+                    for stmt in reversed(current.body):
+                        work_stack.append(stmt)
+                else:
+                    self._compile_statement(current)
 
         elif isinstance(node, EmptyStatement):
             pass
@@ -856,14 +864,29 @@ class Compiler:
 
         elif isinstance(node, BlockStatement):
             # Block statement: value is the last statement's value
-            if not node.body:
-                self._emit(OpCode.LOAD_UNDEFINED)
-            else:
-                # Compile all but last normally
-                for stmt in node.body[:-1]:
-                    self._compile_statement(stmt)
-                # Compile last for value
-                self._compile_statement_for_value(node.body[-1])
+            # Handle nested blocks iteratively to avoid deep recursion
+            current = node
+            intermediate_stmts = []
+
+            # Drill down through nested blocks, collecting intermediate statements
+            while isinstance(current, BlockStatement):
+                if not current.body:
+                    # Empty block returns undefined
+                    for stmt in intermediate_stmts:
+                        self._compile_statement(stmt)
+                    self._emit(OpCode.LOAD_UNDEFINED)
+                    return
+                # Collect all but last statement
+                intermediate_stmts.extend(current.body[:-1])
+                # Continue with last statement
+                current = current.body[-1]
+
+            # Compile all intermediate statements
+            for stmt in intermediate_stmts:
+                self._compile_statement(stmt)
+
+            # Compile the innermost last statement for value
+            self._compile_statement_for_value(current)
 
         elif isinstance(node, IfStatement):
             # If statement: value is the chosen branch's value
@@ -1161,9 +1184,35 @@ class Compiler:
             self._emit(OpCode.THIS)
 
         elif isinstance(node, ArrayExpression):
-            for elem in node.elements:
-                self._compile_expression(elem)
-            self._emit(OpCode.BUILD_ARRAY, len(node.elements))
+            # Handle arrays using a stack-based approach to avoid deep recursion
+            # Stack entries: ('ARRAY', array_node, elem_index) or ('BUILD', num_elements)
+            work_stack = [("ARRAY", node, 0)]
+
+            while work_stack:
+                entry = work_stack.pop()
+
+                if entry[0] == "BUILD":
+                    # Build an array with the given number of elements
+                    self._emit(OpCode.BUILD_ARRAY, entry[1])
+
+                elif entry[0] == "ARRAY":
+                    array_node, idx = entry[1], entry[2]
+                    elements = array_node.elements
+
+                    if idx >= len(elements):
+                        # All elements compiled, build the array
+                        self._emit(OpCode.BUILD_ARRAY, len(elements))
+                    else:
+                        elem = elements[idx]
+                        # Schedule next element
+                        work_stack.append(("ARRAY", array_node, idx + 1))
+
+                        if isinstance(elem, ArrayExpression):
+                            # Process nested array first
+                            work_stack.append(("ARRAY", elem, 0))
+                        else:
+                            # Compile non-array element directly
+                            self._compile_expression(elem)
 
         elif isinstance(node, ObjectExpression):
             for prop in node.properties:
@@ -1467,13 +1516,27 @@ class Compiler:
                     self._emit(OpCode.POP)
 
         elif isinstance(node, MemberExpression):
-            self._compile_expression(node.object)
-            if node.computed:
-                self._compile_expression(node.property)
-            else:
-                idx = self._add_constant(node.property.name)
-                self._emit(OpCode.LOAD_CONST, idx)
-            self._emit(OpCode.GET_PROP)
+            # Handle chained member access iteratively to avoid deep recursion
+            # e.g., a[0][0][0][0] creates a chain of MemberExpression nodes
+            access_chain = []
+            current = node
+
+            # Collect the chain of member accesses
+            while isinstance(current, MemberExpression):
+                access_chain.append((current.computed, current.property))
+                current = current.object
+
+            # Compile the base object
+            self._compile_expression(current)
+
+            # Apply each member access in order (chain is reversed)
+            for computed, prop in reversed(access_chain):
+                if computed:
+                    self._compile_expression(prop)
+                else:
+                    idx = self._add_constant(prop.name)
+                    self._emit(OpCode.LOAD_CONST, idx)
+                self._emit(OpCode.GET_PROP)
 
         elif isinstance(node, CallExpression):
             if isinstance(node.callee, MemberExpression):

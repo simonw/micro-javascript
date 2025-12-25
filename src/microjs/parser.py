@@ -84,7 +84,11 @@ PRECEDENCE = {
 
 
 class Parser:
-    """Recursive descent parser for JavaScript."""
+    """Recursive descent parser for JavaScript.
+
+    Uses iterative parsing with explicit stacks for deeply nested
+    constructs to avoid Python recursion limits.
+    """
 
     def __init__(self, source: str):
         self.lexer = Lexer(source)
@@ -198,7 +202,7 @@ class Parser:
             return EmptyStatement()
 
         if self._check(TokenType.LBRACE):
-            return self._parse_block_statement()
+            return self._parse_block_statement_iterative()
 
         if self._match(TokenType.VAR):
             return self._parse_variable_declaration()
@@ -258,6 +262,110 @@ class Parser:
                 body.append(stmt)
         self._expect(TokenType.RBRACE, "Expected '}'")
         return BlockStatement(body)
+
+    def _parse_block_statement_iterative(self) -> BlockStatement:
+        """Parse block statements iteratively to handle deep nesting.
+
+        Handles cases like {{{1;}}} without deep recursion.
+        """
+        # Count consecutive opening braces
+        brace_depth = 0
+        while self._check(TokenType.LBRACE):
+            self._advance()
+            brace_depth += 1
+
+        if brace_depth == 0:
+            raise self._error("Expected '{'")
+
+        # Stack to track block bodies at each depth level
+        block_stack: List[List[Node]] = [[] for _ in range(brace_depth)]
+        current_depth = brace_depth - 1
+
+        while current_depth >= 0:
+            if self._check(TokenType.RBRACE):
+                # Close this block
+                self._advance()
+                block = BlockStatement(block_stack[current_depth])
+                current_depth -= 1
+                if current_depth >= 0:
+                    # Add this block as a statement to parent
+                    block_stack[current_depth].append(block)
+                else:
+                    # We're done
+                    return block
+            elif self._check(TokenType.LBRACE):
+                # Nested block - go deeper
+                self._advance()
+                current_depth += 1
+                if current_depth >= len(block_stack):
+                    block_stack.append([])
+                else:
+                    block_stack[current_depth] = []
+            elif self._is_at_end():
+                raise self._error("Unexpected end of input in block")
+            else:
+                # Parse a non-block statement
+                stmt = self._parse_non_block_statement()
+                if stmt is not None:
+                    block_stack[current_depth].append(stmt)
+
+        # Should not reach here
+        raise self._error("Unexpected end of block")
+
+    def _parse_non_block_statement(self) -> Optional[Node]:
+        """Parse a statement that is not a block statement.
+
+        Used by iterative block parsing to avoid recursion on nested blocks.
+        """
+        if self._match(TokenType.SEMICOLON):
+            return EmptyStatement()
+
+        if self._match(TokenType.VAR):
+            return self._parse_variable_declaration()
+
+        if self._match(TokenType.IF):
+            return self._parse_if_statement()
+
+        if self._match(TokenType.WHILE):
+            return self._parse_while_statement()
+
+        if self._match(TokenType.DO):
+            return self._parse_do_while_statement()
+
+        if self._match(TokenType.FOR):
+            return self._parse_for_statement()
+
+        if self._match(TokenType.BREAK):
+            return self._parse_break_statement()
+
+        if self._match(TokenType.CONTINUE):
+            return self._parse_continue_statement()
+
+        if self._match(TokenType.RETURN):
+            return self._parse_return_statement()
+
+        if self._match(TokenType.THROW):
+            return self._parse_throw_statement()
+
+        if self._match(TokenType.TRY):
+            return self._parse_try_statement()
+
+        if self._match(TokenType.SWITCH):
+            return self._parse_switch_statement()
+
+        if self._match(TokenType.FUNCTION):
+            return self._parse_function_declaration()
+
+        # Check for labeled statement: IDENTIFIER COLON statement
+        if self._check(TokenType.IDENTIFIER):
+            if self._peek_next().type == TokenType.COLON:
+                label_token = self._advance()
+                self._advance()
+                body = self._parse_statement()
+                return LabeledStatement(Identifier(label_token.value), body)
+
+        # Expression statement
+        return self._parse_expression_statement()
 
     def _parse_variable_declaration(self) -> VariableDeclaration:
         """Parse variable declaration: var a = 1, b = 2;"""
@@ -619,7 +727,10 @@ class Parser:
     def _parse_arrow_function_params(self) -> ArrowFunctionExpression:
         """Parse arrow function with parenthesized params."""
         self._expect(TokenType.LPAREN, "Expected '('")
+        return self._parse_arrow_function_params_after_lparen()
 
+    def _parse_arrow_function_params_after_lparen(self) -> ArrowFunctionExpression:
+        """Parse arrow function after '(' has been consumed."""
         params: List[Identifier] = []
         if not self._check(TokenType.RPAREN):
             params.append(
@@ -659,6 +770,82 @@ class Parser:
             return ConditionalExpression(expr, consequent, alternate)
 
         return expr
+
+    def _continue_parsing_expression(
+        self, left: Node, exclude_in: bool = False
+    ) -> Node:
+        """Continue parsing an expression after we already have the left-hand side.
+
+        This handles binary operators, conditional, sequence, and assignment
+        starting from an already-parsed left operand.
+        """
+        # First apply binary operators
+        left = self._continue_binary_expression(left, 0, exclude_in)
+
+        # Then conditional
+        if self._match(TokenType.QUESTION):
+            consequent = self._parse_assignment_expression(exclude_in)
+            self._expect(TokenType.COLON, "Expected ':' in conditional expression")
+            alternate = self._parse_assignment_expression(exclude_in)
+            left = ConditionalExpression(left, consequent, alternate)
+
+        # Then assignment
+        if self._check(
+            TokenType.ASSIGN,
+            TokenType.PLUS_ASSIGN,
+            TokenType.MINUS_ASSIGN,
+            TokenType.STAR_ASSIGN,
+            TokenType.SLASH_ASSIGN,
+            TokenType.PERCENT_ASSIGN,
+            TokenType.AND_ASSIGN,
+            TokenType.OR_ASSIGN,
+            TokenType.XOR_ASSIGN,
+            TokenType.LSHIFT_ASSIGN,
+            TokenType.RSHIFT_ASSIGN,
+            TokenType.URSHIFT_ASSIGN,
+        ):
+            op = self._advance().value
+            right = self._parse_assignment_expression(exclude_in)
+            left = AssignmentExpression(op, left, right)
+
+        # Then sequence (comma)
+        if self._check(TokenType.COMMA):
+            expressions = [left]
+            while self._match(TokenType.COMMA):
+                expressions.append(self._parse_assignment_expression(exclude_in))
+            left = SequenceExpression(expressions)
+
+        return left
+
+    def _continue_binary_expression(
+        self, left: Node, min_precedence: int = 0, exclude_in: bool = False
+    ) -> Node:
+        """Continue parsing binary operators with an existing left operand."""
+        while True:
+            op = self._get_binary_operator()
+            if op is None:
+                break
+
+            if exclude_in and op == "in":
+                break
+
+            precedence = PRECEDENCE.get(op, 0)
+            if precedence < min_precedence:
+                break
+
+            self._advance()
+
+            if op == "**":
+                right = self._parse_binary_expression(precedence, exclude_in)
+            else:
+                right = self._parse_binary_expression(precedence + 1, exclude_in)
+
+            if op in ("&&", "||"):
+                left = LogicalExpression(op, left, right)
+            else:
+                left = BinaryExpression(op, left, right)
+
+        return left
 
     def _parse_binary_expression(
         self, min_precedence: int = 0, exclude_in: bool = False
@@ -834,7 +1021,61 @@ class Parser:
         return args
 
     def _parse_primary_expression(self) -> Node:
-        """Parse primary expression (literals, identifiers, grouped)."""
+        """Parse primary expression (literals, identifiers, grouped).
+
+        Uses iterative handling for deeply nested parentheses and arrays
+        to avoid Python recursion limits.
+        """
+        # Handle parenthesized expressions
+        if self._check(TokenType.LPAREN):
+            # Check if this might be an arrow function
+            if self._is_arrow_function_params():
+                self._advance()  # consume (
+                return self._parse_arrow_function_params_after_lparen()
+
+            # For deeply nested pure grouping parens like ((((1)))),
+            # we can handle them iteratively. Count consecutive opening parens,
+            # but stop if we encounter an arrow function.
+            paren_depth = 0
+            while self._check(TokenType.LPAREN):
+                # Before consuming, check if THIS paren is an arrow function
+                if self._is_arrow_function_params():
+                    break
+                self._advance()
+                paren_depth += 1
+
+            if paren_depth == 0:
+                # The first paren was an arrow function, already handled above
+                # This shouldn't happen due to the check at the top
+                raise self._error("Unexpected state in paren parsing")
+
+            # Parse the inner expression
+            expr = self._parse_expression()
+
+            # Close parens one at a time, applying operators between them
+            for i in range(paren_depth):
+                self._expect(TokenType.RPAREN, "Expected ')' after expression")
+
+                # If there are more parens to close and we're not at the last one,
+                # check if there are operators between this ) and the next
+                if i < paren_depth - 1:
+                    # Continue parsing any operators that might be between parens
+                    # like in ((-Infinity) | 0)
+                    expr = self._continue_parsing_expression(expr)
+
+            return expr
+
+        # Handle deeply nested array literals iteratively
+        # Count consecutive opening brackets (for cases like [[[[1]]]])
+        bracket_depth = 0
+        while self._check(TokenType.LBRACKET):
+            self._advance()
+            bracket_depth += 1
+
+        if bracket_depth > 0:
+            # Parse innermost expression(s) and build arrays from inside out
+            return self._parse_nested_arrays(bracket_depth)
+
         # Literals
         if self._match(TokenType.NUMBER):
             return self._loc(NumericLiteral(self.previous.value))
@@ -857,16 +1098,6 @@ class Parser:
         if self._match(TokenType.IDENTIFIER):
             return self._loc(Identifier(self.previous.value))
 
-        # Parenthesized expression
-        if self._match(TokenType.LPAREN):
-            expr = self._parse_expression()
-            self._expect(TokenType.RPAREN, "Expected ')' after expression")
-            return expr
-
-        # Array literal
-        if self._match(TokenType.LBRACKET):
-            return self._parse_array_literal()
-
         # Object literal (need to be careful with block statements)
         if self._match(TokenType.LBRACE):
             return self._parse_object_literal()
@@ -883,6 +1114,68 @@ class Parser:
             return RegexLiteral(pattern, flags)
 
         raise self._error(f"Unexpected token: {self.current.type.name}")
+
+    def _parse_nested_arrays(self, depth: int) -> ArrayExpression:
+        """Parse nested array literals iteratively.
+
+        Handles cases like [[[[1]]]] without deep recursion.
+        """
+        # We've already consumed `depth` opening brackets
+        # Now we need to parse elements and close brackets
+
+        # Stack to track array elements at each depth level
+        # Each element is a list of elements for that level
+        array_stack: List[List[Node]] = [[] for _ in range(depth)]
+
+        # Parse elements for innermost array first
+        current_depth = depth - 1
+
+        while current_depth >= 0:
+            # Check if we're at a closing bracket for current level
+            if self._check(TokenType.RBRACKET):
+                # Close this level
+                self._advance()
+                array_expr = ArrayExpression(array_stack[current_depth])
+
+                # Move up a level
+                current_depth -= 1
+                if current_depth >= 0:
+                    # Add this array as an element to the parent
+                    array_stack[current_depth].append(array_expr)
+                else:
+                    # We're done
+                    return array_expr
+            elif self._match(TokenType.COMMA):
+                # More elements in current array - handled by main loop
+                pass
+            elif self._check(TokenType.LBRACKET):
+                # Nested array - go deeper
+                self._advance()
+                current_depth += 1
+                if current_depth >= len(array_stack):
+                    array_stack.append([])
+                else:
+                    array_stack[current_depth] = []
+            else:
+                # Parse an element expression
+                element = self._parse_assignment_expression()
+                array_stack[current_depth].append(element)
+
+                # Check for comma or closing bracket
+                if not self._check(TokenType.RBRACKET):
+                    if not self._match(TokenType.COMMA):
+                        self._expect(
+                            TokenType.RBRACKET, "Expected ']' after array elements"
+                        )
+                        array_expr = ArrayExpression(array_stack[current_depth])
+                        current_depth -= 1
+                        if current_depth >= 0:
+                            array_stack[current_depth].append(array_expr)
+                        else:
+                            return array_expr
+
+        # Should not reach here
+        raise self._error("Unexpected end of array")
 
     def _parse_array_literal(self) -> ArrayExpression:
         """Parse array literal: [a, b, c]"""

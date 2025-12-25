@@ -6,12 +6,12 @@ These tests verify that microjs correctly implements JavaScript behavior.
 
 import pytest
 
-from microjs import JSContext
+from microjs import Context
 
 
 def run_js(js_code):
     """Run JavaScript code and return the result."""
-    ctx = JSContext()
+    ctx = Context()
     return ctx.eval(js_code)
 
 

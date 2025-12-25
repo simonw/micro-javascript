@@ -178,7 +178,7 @@ Based on mquickjs_opcode.h, the VM uses these opcodes:
 
 ### Phase 4: Virtual Machine
 - [x] Implement VM core (vm.py)
-- [x] Implement JSContext public API (context.py)
+- [x] Implement Context public API (context.py)
 - [ ] Implement memory limits (basic structure exists)
 - [ ] Implement time limits (basic structure exists)
 - [ ] Implement garbage collector
@@ -216,10 +216,10 @@ Based on mquickjs_opcode.h, the VM uses these opcodes:
 The main public API should be simple and Pythonic:
 
 ```python
-from microjs import JSContext
+from microjs import Context
 
 # Create a context with optional limits
-ctx = JSContext(memory_limit=1024*1024, time_limit=5.0)
+ctx = Context(memory_limit=1024*1024, time_limit=5.0)
 
 # Evaluate JavaScript code
 result = ctx.eval("1 + 2")  # Returns Python int 3
@@ -261,7 +261,7 @@ microjs/
   src/
     microjs/
       __init__.py       # Public API exports
-      context.py        # JSContext main class
+      context.py        # Context main class
       values.py         # JavaScript value types
       tokens.py         # Token definitions
       lexer.py          # Tokenizer

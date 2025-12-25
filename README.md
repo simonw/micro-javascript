@@ -29,10 +29,10 @@ pip install micro-javascript
 ## Usage
 
 ```python
-from microjs import JSContext
+from microjs import Context
 
 # Create a context with optional limits
-ctx = JSContext(memory_limit=1024*1024, time_limit=5.0)
+ctx = Context(memory_limit=1024*1024, time_limit=5.0)
 
 # Evaluate JavaScript code
 result = ctx.eval("1 + 2")  # Returns 3
@@ -67,7 +67,7 @@ try {
 Use `set()` and `get()` to pass values between Python and JavaScript:
 
 ```python
-ctx = JSContext()
+ctx = Context()
 
 # Set a Python value as a JavaScript global variable
 ctx.set("x", 42)
@@ -89,7 +89,7 @@ total = ctx.get("total")  # Returns 6
 You can expose Python functions to JavaScript by setting them as global variables:
 
 ```python
-ctx = JSContext()
+ctx = Context()
 
 # Define a Python function
 def add(a, b):
@@ -109,7 +109,7 @@ Arrays and objects are passed as internal JavaScript types (`JSArray`, `JSObject
 ```python
 from microjs.values import JSObject, JSArray
 
-ctx = JSContext()
+ctx = Context()
 
 # Access array elements via ._elements
 def sum_array(arr):

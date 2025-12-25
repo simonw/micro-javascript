@@ -1,7 +1,7 @@
 """Test Function.prototype methods: bind, call, apply."""
 
 import pytest
-from microjs import JSContext
+from microjs import Context
 
 
 class TestFunctionBind:
@@ -9,7 +9,7 @@ class TestFunctionBind:
 
     def test_bind_this(self):
         """Bind this context."""
-        ctx = JSContext()
+        ctx = Context()
         result = ctx.eval(
             """
             var obj = { x: 10 };
@@ -22,7 +22,7 @@ class TestFunctionBind:
 
     def test_bind_partial_args(self):
         """Bind with partial arguments."""
-        ctx = JSContext()
+        ctx = Context()
         result = ctx.eval(
             """
             function add(a, b) { return a + b; }
@@ -34,7 +34,7 @@ class TestFunctionBind:
 
     def test_bind_multiple_args(self):
         """Bind with multiple arguments."""
-        ctx = JSContext()
+        ctx = Context()
         result = ctx.eval(
             """
             function greet(greeting, name) {
@@ -48,7 +48,7 @@ class TestFunctionBind:
 
     def test_bind_preserves_length(self):
         """Bound function has correct length property."""
-        ctx = JSContext()
+        ctx = Context()
         result = ctx.eval(
             """
             function add(a, b, c) { return a + b + c; }
@@ -64,7 +64,7 @@ class TestFunctionCall:
 
     def test_call_with_this(self):
         """Call with specific this value."""
-        ctx = JSContext()
+        ctx = Context()
         result = ctx.eval(
             """
             var obj = { x: 5 };
@@ -76,7 +76,7 @@ class TestFunctionCall:
 
     def test_call_with_args(self):
         """Call with arguments."""
-        ctx = JSContext()
+        ctx = Context()
         result = ctx.eval(
             """
             function add(a, b) { return a + b; }
@@ -87,7 +87,7 @@ class TestFunctionCall:
 
     def test_call_on_method(self):
         """Call method with different this."""
-        ctx = JSContext()
+        ctx = Context()
         result = ctx.eval(
             """
             var obj1 = { name: "obj1" };
@@ -104,7 +104,7 @@ class TestFunctionApply:
 
     def test_apply_with_this(self):
         """Apply with specific this value."""
-        ctx = JSContext()
+        ctx = Context()
         result = ctx.eval(
             """
             var obj = { x: 10 };
@@ -116,7 +116,7 @@ class TestFunctionApply:
 
     def test_apply_with_array_args(self):
         """Apply with array of arguments."""
-        ctx = JSContext()
+        ctx = Context()
         result = ctx.eval(
             """
             function add(a, b, c) { return a + b + c; }
@@ -127,7 +127,7 @@ class TestFunctionApply:
 
     def test_apply_for_max(self):
         """Use apply to spread array to custom function."""
-        ctx = JSContext()
+        ctx = Context()
         result = ctx.eval(
             """
             function findMax(a, b, c, d, e) {
@@ -146,7 +146,7 @@ class TestFunctionApply:
 
     def test_apply_empty_args(self):
         """Apply with no arguments array."""
-        ctx = JSContext()
+        ctx = Context()
         result = ctx.eval(
             """
             function count() { return arguments.length; }

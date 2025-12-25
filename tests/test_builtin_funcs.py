@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from microjs import JSContext
+from microjs import Context
 
 
 def get_test_functions_from_js(js_file_path: Path) -> list[tuple[str, str]]:
@@ -94,7 +94,7 @@ def test_builtin_function(func_name: str):
     if func_name in FAILING_TESTS:
         pytest.xfail(FAILING_TESTS[func_name])
 
-    ctx = JSContext(time_limit=5.0)
+    ctx = Context(time_limit=5.0)
 
     # Load all the function definitions
     ctx.eval(_FUNC_CODE)

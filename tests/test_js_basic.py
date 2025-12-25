@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from microjs import JSContext
+from microjs import Context
 
 
 def get_basic_test_files():
@@ -47,7 +47,7 @@ def get_mquickjs_test_files():
 def test_basic_js(name: str, path: Path):
     """Run a basic JavaScript test file."""
     source = path.read_text(encoding="utf-8")
-    ctx = JSContext()
+    ctx = Context()
     # Execute the script - if it throws, the test fails
     ctx.eval(source)
 
@@ -69,7 +69,7 @@ def test_compat_js(name: str, path: Path):
     source = path.read_text(encoding="utf-8")
     # mandelbrot.js needs more time to render
     time_limit = 30.0 if "mandelbrot" in name else 2.0
-    ctx = JSContext(time_limit=time_limit)
+    ctx = Context(time_limit=time_limit)
     # Execute the script - if it throws, the test fails
     ctx.eval(source)
 
@@ -87,6 +87,6 @@ def test_mquickjs_js(name: str, path: Path):
     Watch for xfail tests that start passing!
     """
     source = path.read_text(encoding="utf-8")
-    ctx = JSContext(time_limit=2.0)  # Timeout to avoid infinite loops
+    ctx = Context(time_limit=2.0)  # Timeout to avoid infinite loops
     # Execute the script - if it throws, the test fails
     ctx.eval(source)

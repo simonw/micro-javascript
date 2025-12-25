@@ -9,12 +9,12 @@ Based on: https://github.com/bellard/mquickjs
 
 __version__ = "0.1.0"
 
-from .context import JSContext
+from .context import Context, JSContext
 from .errors import JSError, JSSyntaxError, MemoryLimitError, TimeLimitError
 from .values import UNDEFINED, NULL
 
 __all__ = [
-    "JSContext",
+    "Context",
     "JSError",
     "JSSyntaxError",
     "MemoryLimitError",

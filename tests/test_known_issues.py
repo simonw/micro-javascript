@@ -16,7 +16,7 @@ Issues are organized by category:
 """
 
 import pytest
-from microjs import JSContext
+from microjs import Context
 
 
 # =============================================================================
@@ -29,27 +29,27 @@ class TestIndirectEval:
 
     def test_indirect_eval_basic(self):
         """Indirect eval can evaluate simple expressions."""
-        ctx = JSContext(time_limit=5.0)
+        ctx = Context(time_limit=5.0)
         result = ctx.eval('(1,eval)("1+1")')
         assert result == 2
 
     def test_indirect_eval_var_declaration(self):
         """Indirect eval can declare new global variables."""
-        ctx = JSContext(time_limit=5.0)
+        ctx = Context(time_limit=5.0)
         ctx.eval("var g_eval = (1,eval);")
         ctx.eval('g_eval("var z = 2")')
         assert ctx.eval("z") == 2
 
     def test_indirect_eval_reads_global(self):
         """Indirect eval can read existing global variables."""
-        ctx = JSContext(time_limit=5.0)
+        ctx = Context(time_limit=5.0)
         ctx.eval("var z = 2;")
         ctx.eval("var g_eval = (1,eval);")
         assert ctx.eval('g_eval("z")') == 2
 
     def test_indirect_eval_writes_global(self):
         """Indirect eval should persist writes to existing global variables."""
-        ctx = JSContext(time_limit=5.0)
+        ctx = Context(time_limit=5.0)
         ctx.eval("var z = 2;")
         ctx.eval("var g_eval = (1,eval);")
         ctx.eval('g_eval("z = 3")')
@@ -57,7 +57,7 @@ class TestIndirectEval:
 
     def test_indirect_eval_if_statement(self):
         """Indirect eval can evaluate if statements."""
-        ctx = JSContext(time_limit=5.0)
+        ctx = Context(time_limit=5.0)
         assert ctx.eval('(1,eval)("if (1) 2; else 3;")') == 2
         assert ctx.eval('(1,eval)("if (0) 2; else 3;")') == 3
 
@@ -72,7 +72,7 @@ class TestRegexCaptureGroups:
 
     def test_capture_group_reset_in_repetition(self):
         """Capture groups in repetitions should reset to undefined."""
-        ctx = JSContext(time_limit=5.0)
+        ctx = Context(time_limit=5.0)
         result = ctx.eval('/(z)((a+)?(b+)?(c))*/.exec("zaacbbbcac")')
         expected = ["zaacbbbcac", "z", "ac", "a", None, "c"]
         assert result == expected
@@ -95,7 +95,7 @@ class TestRegexCaptureGroups:
         should be retained. Per spec, if the outer group is skipped, captures
         inside should be undefined.
         """
-        ctx = JSContext(time_limit=5.0)
+        ctx = Context(time_limit=5.0)
         result = ctx.eval('/(?:(?=(abc)))?a/.exec("abc")')
         # The lookahead succeeds but the optional group as a whole is not required
         # Per ES spec, group 1 should be undefined when the optional path is taken
@@ -110,14 +110,14 @@ class TestRegexCaptureGroups:
         The capture should be undefined since the lookahead group didn't
         participate in the final match.
         """
-        ctx = JSContext(time_limit=5.0)
+        ctx = Context(time_limit=5.0)
         result = ctx.eval('/(?:(?=(abc))){0,2}a/.exec("abc")')
         expected = ["a", None]
         assert result == expected
 
     def test_mandatory_lookahead_preserves_capture(self):
         """Mandatory lookahead correctly preserves its capture."""
-        ctx = JSContext(time_limit=5.0)
+        ctx = Context(time_limit=5.0)
         result = ctx.eval('/(?:(?=(abc)))a/.exec("abc")')
         # Here the non-capturing group is mandatory, so the lookahead runs
         expected = ["a", "abc"]
@@ -134,7 +134,7 @@ class TestRegexAlternation:
 
     def test_empty_alternative_in_repetition(self):
         """Empty alternative in repeated group should work correctly."""
-        ctx = JSContext(time_limit=5.0)
+        ctx = Context(time_limit=5.0)
         result = ctx.eval('/(?:|[\\w])+([0-9])/.exec("123a23")')
         expected = ["123a23", "3"]
         assert result == expected
@@ -150,21 +150,21 @@ class TestRegexCharacterClass:
 
     def test_backspace_in_character_class_with_hex(self):
         """Backspace in character class matches \\x08 (works correctly)."""
-        ctx = JSContext(time_limit=5.0)
+        ctx = Context(time_limit=5.0)
         # \\b in a character class is backspace (0x08)
         result = ctx.eval('/[\\b]/.test("\\x08")')
         assert result is True
 
     def test_backspace_string_literal(self):
         """String literal \\b should be parsed as backspace character."""
-        ctx = JSContext(time_limit=5.0)
+        ctx = Context(time_limit=5.0)
         # Both should be backspace
         result = ctx.eval('/[\\b]/.test("\\b")')
         assert result is True
 
     def test_backspace_outside_class_is_boundary(self):
         """\\b outside character class is word boundary (works correctly)."""
-        ctx = JSContext(time_limit=5.0)
+        ctx = Context(time_limit=5.0)
         assert ctx.eval('/\\bword\\b/.test("a word here")') is True
         assert ctx.eval('/\\bword\\b/.test("awordhere")') is False
 
@@ -179,7 +179,7 @@ class TestRegexUnicode:
 
     def test_lastindex_surrogate_pair(self):
         """lastIndex pointing to second surrogate should reset to 0."""
-        ctx = JSContext(time_limit=5.0)
+        ctx = Context(time_limit=5.0)
         ctx.eval("var a = /(?:)/gu;")
         ctx.eval("a.lastIndex = 1;")  # Point to middle of surrogate pair
         ctx.eval('a.exec("🐱");')  # 🐱 is a surrogate pair
@@ -197,7 +197,7 @@ class TestErrorLineColumn:
 
     def test_thrown_error_has_line_number(self):
         """Thrown errors should have lineNumber property set."""
-        ctx = JSContext(time_limit=5.0)
+        ctx = Context(time_limit=5.0)
         result = ctx.eval(
             """
 var e;
@@ -213,7 +213,7 @@ e.lineNumber
 
     def test_thrown_error_has_column_number(self):
         """Thrown errors should have columnNumber property set."""
-        ctx = JSContext(time_limit=5.0)
+        ctx = Context(time_limit=5.0)
         result = ctx.eval(
             """
 var e;
@@ -229,7 +229,7 @@ e.columnNumber
 
     def test_thrown_error_line_column_multiline(self):
         """Thrown errors track correct location in multiline code."""
-        ctx = JSContext(time_limit=5.0)
+        ctx = Context(time_limit=5.0)
         result = ctx.eval(
             """
 var e;
@@ -253,7 +253,7 @@ try {
         where they were created (not just where thrown). This requires
         tracking the call location during Error construction.
         """
-        ctx = JSContext(time_limit=5.0)
+        ctx = Context(time_limit=5.0)
         result = ctx.eval('var e = new Error("test"); e.lineNumber')
         assert result is not None
         assert isinstance(result, int)
@@ -265,7 +265,7 @@ try {
         Issue: Error objects should have a columnNumber property indicating
         the column where they were created.
         """
-        ctx = JSContext(time_limit=5.0)
+        ctx = Context(time_limit=5.0)
         result = ctx.eval('var e = new Error("test"); e.columnNumber')
         assert result is not None
         assert isinstance(result, int)
@@ -276,7 +276,7 @@ try {
         Issue: When a SyntaxError occurs, the error message should include
         the line and column where the error occurred.
         """
-        ctx = JSContext(time_limit=5.0)
+        ctx = Context(time_limit=5.0)
         try:
             ctx.eval("\n var @ ")  # Invalid syntax at line 2
         except Exception as e:
@@ -295,7 +295,7 @@ class TestDeepNesting:
 
     def test_moderate_nested_parens(self):
         """Moderate nesting of parentheses works correctly."""
-        ctx = JSContext(time_limit=5.0)
+        ctx = Context(time_limit=5.0)
         n = 100
         pattern = "(" * n + "1" + ")" * n
         result = ctx.eval(pattern)
@@ -309,7 +309,7 @@ class TestDeepNesting:
         maximum recursion depth to be exceeded. The parser uses
         recursive descent which doesn't scale to very deep nesting.
         """
-        ctx = JSContext(time_limit=10.0)
+        ctx = Context(time_limit=10.0)
         n = 1000
         pattern = "(" * n + "1" + ")" * n
         result = ctx.eval(pattern)
@@ -317,7 +317,7 @@ class TestDeepNesting:
 
     def test_moderate_nested_braces(self):
         """Moderate nesting of braces works correctly."""
-        ctx = JSContext(time_limit=5.0)
+        ctx = Context(time_limit=5.0)
         n = 100
         pattern = "{" * n + "1;" + "}" * n
         result = ctx.eval(pattern)
@@ -329,7 +329,7 @@ class TestDeepNesting:
 
         Issue: 1000 levels of nested braces causes recursion overflow.
         """
-        ctx = JSContext(time_limit=10.0)
+        ctx = Context(time_limit=10.0)
         n = 1000
         pattern = "{" * n + "1;" + "}" * n
         result = ctx.eval(pattern)
@@ -337,7 +337,7 @@ class TestDeepNesting:
 
     def test_moderate_nested_arrays(self):
         """Moderate nesting of arrays works correctly."""
-        ctx = JSContext(time_limit=5.0)
+        ctx = Context(time_limit=5.0)
         n = 100
         pattern = "[" * n + "1" + "]" * n + "[0]" * n
         result = ctx.eval(pattern)
@@ -349,7 +349,7 @@ class TestDeepNesting:
 
         Issue: 1000 levels of nested arrays causes recursion overflow.
         """
-        ctx = JSContext(time_limit=10.0)
+        ctx = Context(time_limit=10.0)
         n = 1000
         pattern = "[" * n + "1" + "]" * n + "[0]" * n
         result = ctx.eval(pattern)
@@ -361,7 +361,7 @@ class TestDeepNesting:
 
         Issue: 10000 levels of nested (?:) groups causes overflow.
         """
-        ctx = JSContext(time_limit=10.0)
+        ctx = Context(time_limit=10.0)
         n = 10000
         ctx.eval(
             f"""

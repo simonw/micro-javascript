@@ -386,18 +386,50 @@ class RegexCompiler:
         # Find capture groups in body to reset when skipping
         capture_groups = self._find_capture_groups(body)
 
+        # Check if body might match zero-width (e.g., lookaheads)
+        # If so, we need to reset captures if the optional group matches zero-width
+        # because per ECMAScript spec, zero-width optional matches should have
+        # undefined captures (equivalent to skipping the group)
+        need_zero_width_reset = capture_groups and self._needs_advance_check(body)
+
         if greedy:
             # Try match first, skip as backup
             # Reset captures first (they should be undefined if we backtrack to skip)
             self._emit_capture_reset(capture_groups)
+
+            if need_zero_width_reset:
+                # Save position to check if body advanced
+                reg = self._allocate_register()
+                self._emit(Op.SET_POS, reg)
+
             split_idx = self._emit(Op.SPLIT_FIRST, 0)
             self._compile_node(body)
+
+            if need_zero_width_reset:
+                # Reset captures if position didn't advance
+                min_group = min(capture_groups)
+                max_group = max(capture_groups)
+                self._emit(Op.RESET_IF_NO_ADV, reg, min_group, max_group)
+
             self._patch(split_idx, Op.SPLIT_FIRST, self._current_offset())
         else:
             # Try skip first, match as backup
             split_idx = self._emit(Op.SPLIT_NEXT, 0)
+
+            if need_zero_width_reset:
+                # Save position to check if body advanced
+                reg = self._allocate_register()
+                self._emit(Op.SET_POS, reg)
+
             self._emit_capture_reset(capture_groups)
             self._compile_node(body)
+
+            if need_zero_width_reset:
+                # Reset captures if position didn't advance
+                min_group = min(capture_groups)
+                max_group = max(capture_groups)
+                self._emit(Op.RESET_IF_NO_ADV, reg, min_group, max_group)
+
             self._patch(split_idx, Op.SPLIT_NEXT, self._current_offset())
 
     def _compile_star(self, body: Node, greedy: bool, need_advance_check: bool):

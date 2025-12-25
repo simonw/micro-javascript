@@ -582,6 +582,19 @@ class RegexVM:
                     continue
                 pc += 1
 
+            elif opcode == Op.RESET_IF_NO_ADV:
+                reg_idx = instr[1]
+                start_group = instr[2]
+                end_group = instr[3]
+                # Reset captures if position didn't advance (zero-width match)
+                # This implements ECMAScript semantics where optional groups
+                # that match zero-width should have undefined captures
+                if reg_idx < len(registers) and registers[reg_idx] == sp:
+                    for i in range(start_group, end_group + 1):
+                        if i < len(captures):
+                            captures[i] = [-1, -1]
+                pc += 1
+
             elif opcode == Op.MATCH:
                 # Successful match!
                 groups = []

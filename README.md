@@ -1,9 +1,9 @@
-# microjs
+# micro-javascript
 
-[![PyPI](https://img.shields.io/pypi/v/microjs.svg)](https://pypi.org/project/microjs/)
-[![Changelog](https://img.shields.io/github/v/release/simonw/microjs?include_prereleases&label=changelog)](https://github.com/simonw/microjs/releases)
-[![Tests](https://github.com/simonw/microjs/workflows/Test/badge.svg)](https://github.com/simonw/microjs/actions?query=workflow%3ATest)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/simonw/microjs/blob/main/LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/micro-javascript.svg)](https://pypi.org/project/micro-javascript/)
+[![Changelog](https://img.shields.io/github/v/release/simonw/micro-javascript?include_prereleases&label=changelog)](https://github.com/simonw/micro-javascript/releases)
+[![Tests](https://github.com/simonw/micro-javascript/workflows/Test/badge.svg)](https://github.com/simonw/micro-javascript/actions?query=workflow%3ATest)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/simonw/micro-javascript/blob/main/LICENSE)
 
 A pure Python JavaScript engine, inspired by [MicroQuickJS](https://github.com/bellard/mquickjs).
 
@@ -19,6 +19,12 @@ This project provides a JavaScript execution environment with:
 ## How it was built
 
 Most of this library was built using Claude Code for web - [here is the 15+ hour transcript](https://static.simonwillison.net/static/2025/claude-code-microjs/index.html).
+
+## Installation
+
+```bash
+pip install micro-javascript
+```
 
 ## Usage
 

@@ -69,6 +69,7 @@ class RegexOpCode(IntEnum):
     # State management (for ReDoS protection)
     SET_POS = auto()  # Save current position to register
     CHECK_ADVANCE = auto()  # Check that position advanced
+    RESET_IF_NO_ADV = auto()  # Reset captures if position didn't advance
 
     # Terminal
     MATCH = auto()  # Successful match
@@ -138,6 +139,11 @@ OPCODE_INFO = {
         "CHECK_ADVANCE",
         1,
         "Check position advanced (arg: reg_idx)",
+    ),
+    RegexOpCode.RESET_IF_NO_ADV: (
+        "RESET_IF_NO_ADV",
+        3,
+        "Reset captures if position unchanged (args: reg_idx, start_group, end_group)",
     ),
     RegexOpCode.MATCH: ("MATCH", 0, "Successful match"),
 }

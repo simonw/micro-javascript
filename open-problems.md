@@ -55,41 +55,6 @@ The Error constructor is a Python function that doesn't have access to the VM's 
 
 ---
 
-## Optional Lookahead Capture Semantics
-
-**Tests affected:**
-- `test_optional_lookahead_no_match`
-- `test_repeated_optional_lookahead`
-
-**Problem:**
-Pattern `/(?:(?=(abc)))?a/` on string `"abc"` should return `['a', None]` but returns `['a', 'abc']`.
-
-**Explanation:**
-The pattern has an optional non-capturing group containing a lookahead with a capture:
-1. `(?:...)?` - optional group
-2. `(?=(abc))` - lookahead that captures 'abc'
-3. `a` - literal match
-
-The lookahead succeeds (there's 'abc' ahead), captures 'abc', and the match proceeds. But the test expects the capture to be `None`.
-
-**Root cause:**
-This appears to be an edge case in ECMAScript regex semantics where captures inside optional groups that don't "contribute" to advancing the match should be reset. The exact semantics are complex and may require deeper ECMAScript spec analysis.
-
-**Current behavior:**
-- The lookahead runs and captures
-- The capture is preserved because we don't backtrack (the match succeeds)
-
-**Expected behavior (per test):**
-- Even though the lookahead "succeeded", because it's inside an optional group that could have been skipped, the capture should be undefined
-
-**Potential solutions:**
-1. Research ECMAScript spec section 21.2.2 (RegExp semantics) for exact rules
-2. Compare with test262 tests for conformance
-3. May require tracking whether an optional path was "necessary" vs "optional"
-
-**Complexity:** High - requires deep understanding of ECMAScript regex semantics
-
----
 
 ## Regex Test Suite Failures
 
@@ -122,11 +87,10 @@ The comprehensive regex test suites from the original QuickJS contain tests that
 |----------|-------------|------------|
 | Deep nesting/recursion | 5 | High |
 | Error location tracking | 2 | Medium |
-| Lookahead capture semantics | 2 | High |
 | Comprehensive test suites | 4 | Varies |
 
-**Total xfail tests:** 14
+**Total xfail tests:** 11
 
 Most issues fall into two categories:
 1. **Architectural limitations** (recursion, location tracking) - require significant refactoring
-2. **Spec edge cases** (lookahead captures) - require careful ECMAScript spec analysis
+2. **Spec edge cases** - require careful ECMAScript spec analysis

@@ -2,31 +2,39 @@
 
 This document describes the known issues and limitations that remain as xfail tests in the microjs implementation.
 
-## Deep Nesting / Recursion Limits
+## Deep Nesting / Recursion Limits ✅ RESOLVED
 
 **Tests affected:**
-- `test_deep_nested_parens`
-- `test_deep_nested_braces`
-- `test_deep_nested_arrays`
-- `test_deep_nested_regex_groups`
-- `test_large_eval_parse_stack` (from test_builtin.js)
+- `test_deep_nested_parens` ✅ Now passing
+- `test_deep_nested_braces` ✅ Now passing
+- `test_deep_nested_arrays` ✅ Now passing
+- `test_deep_nested_regex_groups` (regex parser, still xfail)
+- `test_large_eval_parse_stack` ✅ Now passing
 
-**Problem:**
-The parser uses recursive descent parsing, which relies on Python's call stack. When parsing deeply nested expressions (1000+ levels of parentheses, braces, or arrays), Python's recursion limit is exceeded.
+**Solution implemented:**
+Converted key parsing paths to use iterative approaches with explicit stacks:
 
-**Root cause:**
-Each level of nesting results in a recursive call to the parser:
-- `(((1)))` → `_parse_expression` → `_parse_primary` → `_parse_expression` → ...
-- `[[[1]]]` → `_parse_array` → `_parse_expression` → `_parse_array` → ...
+1. **Parser changes (`parser.py`):**
+   - Consecutive parentheses `((((1))))` are now handled iteratively
+   - Nested array literals `[[[[1]]]]` use a stack-based approach
+   - Block statements `{{{{1;}}}}` are parsed iteratively
+   - Added `_parse_block_statement_iterative()` and `_parse_nested_arrays()` methods
+   - Added `_continue_parsing_expression()` for handling operators between nested parens
 
-Python's default recursion limit is ~1000, which limits nesting depth.
+2. **Compiler changes (`compiler.py`):**
+   - `MemberExpression` chains are compiled iteratively (for deep `a[0][0][0]...`)
+   - `ArrayExpression` compilation uses a work stack instead of recursion
+   - `BlockStatement` compilation is iterative
+   - `_compile_statement_for_value()` drills through nested blocks iteratively
 
-**Potential solutions:**
-1. **Increase recursion limit:** `sys.setrecursionlimit(10000)` - simple but can cause stack overflow crashes
-2. **Convert to iterative parsing:** Use explicit stacks instead of call stack. The original C QuickJS uses this approach with manual memory management
-3. **Trampoline/CPS transformation:** Convert recursive calls to continuation-passing style with a trampoline loop
+**Inspiration:**
+The approach was inspired by mquickjs's continuation-passing style parser,
+though we use a simpler Python-friendly stack-based approach rather than
+the full CPS transformation.
 
-**Complexity:** High - requires significant parser restructuring
+**Remaining issue:**
+- Regex parser (`regex/parser.py`) still uses recursion for nested groups
+- This affects `test_deep_nested_regex_groups`
 
 ---
 
@@ -118,15 +126,18 @@ The comprehensive regex test suites from the original QuickJS contain tests that
 
 ## Summary
 
-| Category | Issue Count | Complexity |
-|----------|-------------|------------|
-| Deep nesting/recursion | 5 | High |
-| Error location tracking | 2 | Medium |
-| Lookahead capture semantics | 2 | High |
+| Category | Issue Count | Status |
+|----------|-------------|--------|
+| Deep nesting/recursion | 5 → 1 | ✅ Mostly resolved |
+| Error location tracking | 2 | Medium complexity |
+| Lookahead capture semantics | 2 | High complexity |
 | Comprehensive test suites | 4 | Varies |
 
-**Total xfail tests:** 14
+**Total xfail tests:** 10 (down from 14)
 
-Most issues fall into two categories:
-1. **Architectural limitations** (recursion, location tracking) - require significant refactoring
-2. **Spec edge cases** (lookahead captures) - require careful ECMAScript spec analysis
+Most remaining issues fall into two categories:
+1. **Spec edge cases** (lookahead captures) - require careful ECMAScript spec analysis
+2. **Location tracking** - requires threading location info through constructor calls
+
+**Resolved:**
+- Deep nesting for parentheses, arrays, and block statements now works with 1000+ levels

@@ -62,6 +62,73 @@ try {
 """)
 ```
 
+## Setting and Getting Variables
+
+Use `set()` and `get()` to pass values between Python and JavaScript:
+
+```python
+ctx = JSContext()
+
+# Set a Python value as a JavaScript global variable
+ctx.set("x", 42)
+ctx.set("name", "Alice")
+ctx.set("items", [1, 2, 3])
+
+# Use the variable in JavaScript
+result = ctx.eval("x * 2")  # Returns 84
+result = ctx.eval("'Hello, ' + name")  # Returns 'Hello, Alice'
+result = ctx.eval("items.map(n => n * 2)")  # Returns [2, 4, 6]
+
+# Get a JavaScript variable back into Python
+ctx.eval("var total = items.reduce((a, b) => a + b, 0)")
+total = ctx.get("total")  # Returns 6
+```
+
+## Exposing Python Functions to JavaScript
+
+You can expose Python functions to JavaScript by setting them as global variables:
+
+```python
+ctx = JSContext()
+
+# Define a Python function
+def add(a, b):
+    return a + b
+
+# Expose it to JavaScript
+ctx.set("add", add)
+
+# Call it from JavaScript
+result = ctx.eval("add(2, 3)")  # Returns 5
+```
+
+Primitive values (numbers, strings, booleans) are passed directly as Python types, and primitives returned from Python functions work in JavaScript.
+
+Arrays and objects are passed as internal JavaScript types (`JSArray`, `JSObject`). To return objects that JavaScript can use, return `JSObject` instances:
+
+```python
+from microjs.values import JSObject, JSArray
+
+ctx = JSContext()
+
+# Access array elements via ._elements
+def sum_array(arr):
+    return sum(arr._elements)
+
+ctx.set("sumArray", sum_array)
+result = ctx.eval("sumArray([1, 2, 3, 4, 5])")  # Returns 15
+
+# Return a JSObject for JavaScript to use
+def make_point(x, y):
+    obj = JSObject()
+    obj.set("x", x)
+    obj.set("y", y)
+    return obj
+
+ctx.set("makePoint", make_point)
+result = ctx.eval("var p = makePoint(10, 20); p.x + p.y;")  # Returns 30
+```
+
 ## Supported Features
 
 - **Core**: variables, operators, control flow, functions, closures

@@ -143,7 +143,7 @@ result = ctx.eval("var p = makePoint(10, 20); p.x + p.y;")  # Returns 30
 
 ## Known Limitations
 
-See [open-problems.md]([open-problems.md](https://github.com/simonw/micro-javascript/blob/main/open-problems.md)) for details on:
+See [open-problems.md](https://github.com/simonw/micro-javascript/blob/main/open-problems.md) for details on:
 - Deep nesting limits (parser uses recursion)
 - Some regex edge cases with optional lookahead captures
 - Error constructor location tracking

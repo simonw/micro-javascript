@@ -11,6 +11,10 @@ This project provides a JavaScript execution environment with:
 - **Pure Python** - No C extensions or external dependencies
 - **Broad ES5+ support** - Variables, functions, closures, classes, iterators, promises, regex, and more
 
+## How it was built
+
+Most of this library was built using Claude Code for web - [here is the 15+ hour transcript](https://static.simonwillison.net/static/2025/claude-code-microjs/index.html).
+
 ## Usage
 
 ```python

@@ -109,23 +109,6 @@ This appears to be an edge case in ECMAScript regex semantics where captures ins
 
 ---
 
-## Global Eval Scope Issues
-
-**Tests affected:**
-- `test_global_eval` (from test_builtin.js)
-
-**Problem:**
-Some edge cases with indirect eval (`(1,eval)()`) may not correctly resolve scope for variable declarations and lookups.
-
-**Note:** The basic indirect eval write issue was fixed (indirect eval can now modify existing globals). There may be remaining issues with:
-- New variable declarations via indirect eval
-- Strict mode behavior
-- With statement interactions
-
-**Complexity:** Medium
-
----
-
 ## Regex Test Suite Failures
 
 **Tests affected:**
@@ -158,11 +141,10 @@ The comprehensive regex test suites from the original QuickJS contain tests that
 | Deep nesting/recursion | 5 | High |
 | Error location tracking | 3 | Low-Medium |
 | Lookahead capture semantics | 2 | High |
-| Global eval edge cases | 1 | Medium |
 | Comprehensive test suites | 4 | Varies |
 
-**Total xfail tests:** 15
+**Total xfail tests:** 14
 
 Most issues fall into two categories:
 1. **Architectural limitations** (recursion, location tracking) - require significant refactoring
-2. **Spec edge cases** (lookahead captures, eval scope) - require careful ECMAScript spec analysis
+2. **Spec edge cases** (lookahead captures) - require careful ECMAScript spec analysis

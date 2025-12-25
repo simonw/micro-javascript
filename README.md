@@ -1,5 +1,10 @@
 # microjs
 
+[![PyPI](https://img.shields.io/pypi/v/microjs.svg)](https://pypi.org/project/microjs/)
+[![Changelog](https://img.shields.io/github/v/release/simonw/microjs?include_prereleases&label=changelog)](https://github.com/simonw/microjs/releases)
+[![Tests](https://github.com/simonw/microjs/workflows/Test/badge.svg)](https://github.com/simonw/microjs/actions?query=workflow%3ATest)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/simonw/microjs/blob/main/LICENSE)
+
 A pure Python JavaScript engine, inspired by [MicroQuickJS](https://github.com/bellard/mquickjs).
 
 ## Overview

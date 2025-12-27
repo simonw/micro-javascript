@@ -1854,17 +1854,41 @@ class VM:
             if sep is UNDEFINED:
                 parts = [s]
             elif isinstance(sep, JSRegExp):
-                # Split with regex
-                import re
+                # Split with regex using microjs.regex
+                try:
+                    regex_internal = sep._internal
+                    parts = []
+                    last_end = 0
+                    pos = 0
+                    capture_count = regex_internal._capture_count
 
-                flags = 0
-                if "i" in sep._flags:
-                    flags |= re.IGNORECASE
-                if "m" in sep._flags:
-                    flags |= re.MULTILINE
-                pattern = re.compile(sep._pattern, flags)
-                # Python split includes groups, which matches JS behavior
-                parts = pattern.split(s)
+                    while pos <= len(s):
+                        # Create fresh regex VM for each search to avoid lastIndex issues
+                        vm_regex = regex_internal._create_vm()
+                        result = vm_regex.search(s, pos)
+                        if result is None:
+                            break
+
+                        # Add the part before this match
+                        parts.append(s[last_end : result.index])
+
+                        # Add captured groups (JS behavior) - capture_count includes group 0
+                        for i in range(1, capture_count):
+                            group_val = result[i]
+                            parts.append(
+                                group_val if group_val is not None else UNDEFINED
+                            )
+
+                        # Move past the match
+                        match_len = len(result[0]) if result[0] else 0
+                        last_end = result.index + match_len
+                        # Advance position (at least by 1 to avoid infinite loop on zero-width)
+                        pos = last_end if match_len > 0 else result.index + 1
+
+                    # Add remainder after last match
+                    parts.append(s[last_end:])
+                except RegexTimeoutError:
+                    raise TimeLimitError("Regex execution timeout")
             elif to_string(sep) == "":
                 parts = list(s)
             else:
@@ -1923,35 +1947,58 @@ class VM:
             replacement = to_string(args[1]) if len(args) > 1 else "undefined"
 
             if isinstance(pattern, JSRegExp):
-                # Replace with regex
-                import re
+                # Replace with regex using microjs.regex
+                try:
+                    regex_internal = pattern._internal
+                    is_global = "g" in pattern._flags
+                    capture_count = regex_internal._capture_count
 
-                flags = 0
-                if "i" in pattern._flags:
-                    flags |= re.IGNORECASE
-                if "m" in pattern._flags:
-                    flags |= re.MULTILINE
-                regex = re.compile(pattern._pattern, flags)
+                    # Handle special replacement patterns
+                    def handle_replacement(match_result):
+                        result = replacement
+                        # Handle $$ escape first (must be done before other $ patterns)
+                        result = result.replace("$$", "\x00DOLLAR\x00")
+                        # $& - the matched substring
+                        result = result.replace("$&", match_result[0] or "")
+                        # $n - nth captured group
+                        for i in range(1, 10):
+                            if i <= capture_count:
+                                result = result.replace(f"${i}", match_result[i] or "")
+                            else:
+                                result = result.replace(f"${i}", "")
+                        # Restore escaped dollars
+                        result = result.replace("\x00DOLLAR\x00", "$")
+                        return result
 
-                # Handle special replacement patterns
-                def handle_replacement(m):
-                    result = replacement
-                    # $& - the matched substring
-                    result = result.replace("$&", m.group(0))
-                    # $` - portion before match (not commonly used, skip for now)
-                    # $' - portion after match (not commonly used, skip for now)
-                    # $n - nth captured group
-                    for i in range(1, 10):
-                        if m.lastindex and i <= m.lastindex:
-                            result = result.replace(f"${i}", m.group(i) or "")
-                        else:
-                            result = result.replace(f"${i}", "")
-                    return result
+                    result_parts = []
+                    last_end = 0
+                    pos = 0
 
-                if "g" in pattern._flags:
-                    return regex.sub(handle_replacement, s)
-                else:
-                    return regex.sub(handle_replacement, s, count=1)
+                    while pos <= len(s):
+                        # Create fresh regex VM for each search
+                        vm_regex = regex_internal._create_vm()
+                        match_result = vm_regex.search(s, pos)
+                        if match_result is None:
+                            break
+
+                        # Add the part before this match
+                        result_parts.append(s[last_end : match_result.index])
+                        # Add the replacement
+                        result_parts.append(handle_replacement(match_result))
+
+                        # Move past the match
+                        match_len = len(match_result[0]) if match_result[0] else 0
+                        last_end = match_result.index + match_len
+                        pos = last_end if match_len > 0 else match_result.index + 1
+
+                        if not is_global:
+                            break
+
+                    # Add remainder after last match
+                    result_parts.append(s[last_end:])
+                    return "".join(result_parts)
+                except RegexTimeoutError:
+                    raise TimeLimitError("Regex execution timeout")
             else:
                 # String replace - only replace first occurrence
                 search = to_string(pattern)
@@ -2000,63 +2047,93 @@ class VM:
                 arr.set("input", s)
                 return arr
 
-            import re
+            from .regex import RegExp as InternalRegExp
 
             if isinstance(pattern, JSRegExp):
-                flags = 0
-                if "i" in pattern._flags:
-                    flags |= re.IGNORECASE
-                if "m" in pattern._flags:
-                    flags |= re.MULTILINE
-                regex = re.compile(pattern._pattern, flags)
+                regex_internal = pattern._internal
                 is_global = "g" in pattern._flags
             else:
-                # Convert string to regex
-                regex = re.compile(to_string(pattern))
+                # Convert string to regex using microjs.regex
+                # Create a poll_callback if the VM has time limits
+                poll_callback = None
+                if self.time_limit is not None:
+                    poll_callback = (
+                        lambda: time.monotonic() - self.start_time > self.time_limit
+                    )
+                regex_internal = InternalRegExp(to_string(pattern), "", poll_callback)
                 is_global = False
 
-            if is_global:
-                # Global flag: return all matches without groups
-                matches = [m.group(0) for m in regex.finditer(s)]
-                if not matches:
-                    return NULL
-                arr = JSArray()
-                arr._elements = list(matches)
-                return arr
-            else:
-                # Non-global: return first match with groups
-                m = regex.search(s)
-                if m is None:
-                    return NULL
-                arr = JSArray()
-                arr._elements = [m.group(0)]
-                # Add captured groups
-                for i in range(1, len(m.groups()) + 1):
-                    arr._elements.append(m.group(i))
-                arr.set("index", m.start())
-                arr.set("input", s)
-                return arr
+            try:
+                if is_global:
+                    # Global flag: return all matches without groups
+                    matches = []
+                    pos = 0
+                    while pos <= len(s):
+                        # Create fresh regex VM for each search
+                        vm_regex = regex_internal._create_vm()
+                        result = vm_regex.search(s, pos)
+                        if result is None:
+                            break
+                        matches.append(result[0])
+                        # Advance position
+                        match_len = len(result[0]) if result[0] else 0
+                        pos = (
+                            result.index + match_len
+                            if match_len > 0
+                            else result.index + 1
+                        )
+
+                    if not matches:
+                        return NULL
+                    arr = JSArray()
+                    arr._elements = list(matches)
+                    return arr
+                else:
+                    # Non-global: return first match with groups
+                    vm_regex = regex_internal._create_vm()
+                    result = vm_regex.search(s, 0)
+                    if result is None:
+                        return NULL
+                    arr = JSArray()
+                    arr._elements = [result[0]]
+                    # Add captured groups (capture_count includes group 0, so iterate 1 to capture_count-1)
+                    capture_count = regex_internal._capture_count
+                    for i in range(1, capture_count):
+                        group_val = result[i]
+                        if group_val is None:
+                            arr._elements.append(UNDEFINED)
+                        else:
+                            arr._elements.append(group_val)
+                    arr.set("index", result.index)
+                    arr.set("input", s)
+                    return arr
+            except RegexTimeoutError:
+                raise TimeLimitError("Regex execution timeout")
 
         def search(*args):
             pattern = args[0] if args else None
             if pattern is None:
                 return 0  # Match empty string at start
 
-            import re
+            from .regex import RegExp as InternalRegExp
 
             if isinstance(pattern, JSRegExp):
-                flags = 0
-                if "i" in pattern._flags:
-                    flags |= re.IGNORECASE
-                if "m" in pattern._flags:
-                    flags |= re.MULTILINE
-                regex = re.compile(pattern._pattern, flags)
+                regex_internal = pattern._internal
             else:
-                # Convert string to regex
-                regex = re.compile(to_string(pattern))
+                # Convert string to regex using microjs.regex
+                poll_callback = None
+                if self.time_limit is not None:
+                    poll_callback = (
+                        lambda: time.monotonic() - self.start_time > self.time_limit
+                    )
+                regex_internal = InternalRegExp(to_string(pattern), "", poll_callback)
 
-            m = regex.search(s)
-            return m.start() if m else -1
+            try:
+                vm_regex = regex_internal._create_vm()
+                result = vm_regex.search(s, 0)
+                return result.index if result else -1
+            except RegexTimeoutError:
+                raise TimeLimitError("Regex execution timeout")
 
         def toString(*args):
             return s

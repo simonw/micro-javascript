@@ -172,3 +172,34 @@ class TestRegExpPatterns:
         assert result is True
         result = ctx.eval('new RegExp("[0-9]+").test("123")')
         assert result is True
+
+
+class TestRegExpTimeout:
+    """Test regex timeout integration with Context time_limit."""
+
+    @pytest.mark.parametrize(
+        "regex_code",
+        [
+            # Regex literal
+            "var re = /(a+)+b/;",
+            # RegExp constructor
+            'var re = new RegExp("(a+)+b");',
+        ],
+        ids=["literal", "constructor"],
+    )
+    def test_regex_respects_time_limit(self, regex_code):
+        """Test that regex operations respect Context time_limit.
+
+        This uses a pattern known to cause catastrophic backtracking:
+        (a+)+b matching against 'aaa...c' causes exponential backtracking.
+        """
+        from microjs import TimeLimitError
+
+        ctx = Context(time_limit=0.1)
+        with pytest.raises(TimeLimitError):
+            ctx.eval(
+                f"""
+                {regex_code}
+                re.test("aaaaaaaaaaaaaaaaaaaaaaaaaaac");
+            """
+            )

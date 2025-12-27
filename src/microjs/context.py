@@ -42,6 +42,7 @@ class Context:
         self.memory_limit = memory_limit
         self.time_limit = time_limit
         self._globals: Dict[str, JSValue] = {}
+        self._current_vm = None  # Set during eval() for timeout checking
         self._setup_globals()
 
     def _setup_globals(self) -> None:
@@ -912,11 +913,22 @@ class Context:
 
     def _create_regexp_constructor(self) -> JSCallableObject:
         """Create the RegExp constructor."""
+        ctx = self  # Capture self for closure
 
         def regexp_constructor_fn(*args):
             pattern = to_string(args[0]) if args else ""
             flags = to_string(args[1]) if len(args) > 1 else ""
-            return JSRegExp(pattern, flags)
+            # Create timeout callback if we have a current VM with time_limit
+            poll_callback = None
+            if ctx._current_vm and ctx._current_vm.time_limit is not None:
+                vm = ctx._current_vm
+
+                def check_timeout() -> bool:
+                    """Return True if time limit exceeded (to abort regex)."""
+                    return time.monotonic() - vm.start_time > vm.time_limit
+
+                poll_callback = check_timeout
+            return JSRegExp(pattern, flags, poll_callback)
 
         return JSCallableObject(regexp_constructor_fn)
 
@@ -1213,7 +1225,12 @@ class Context:
         # Share globals with VM (don't copy - allows nested eval to modify globals)
         vm.globals = self._globals
 
-        result = vm.run(compiled)
+        # Store current VM for timeout checking in RegExp constructor
+        self._current_vm = vm
+        try:
+            result = vm.run(compiled)
+        finally:
+            self._current_vm = None
 
         return self._to_python(result)
 

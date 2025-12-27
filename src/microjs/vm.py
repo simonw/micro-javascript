@@ -31,6 +31,7 @@ from .errors import (
     MemoryLimitError,
     TimeLimitError,
 )
+from .regex import RegexTimeoutError
 
 
 def js_round(x: float, ndigits: int = 0) -> float:
@@ -130,7 +131,7 @@ class VM:
 
     def run(self, compiled: CompiledFunction) -> JSValue:
         """Run compiled bytecode and return result."""
-        self.start_time = time.time()
+        self.start_time = time.monotonic()
 
         # Create initial call frame
         frame = CallFrame(
@@ -153,7 +154,7 @@ class VM:
 
         # Check time limit every 1000 instructions
         if self.time_limit and self.instruction_count % 1000 == 0:
-            if time.time() - self.start_time > self.time_limit:
+            if time.monotonic() - self.start_time > self.time_limit:
                 raise TimeLimitError("Execution timeout")
 
         # Check memory limit (approximate)
@@ -389,7 +390,16 @@ class VM:
 
         elif op == OpCode.BUILD_REGEX:
             pattern, flags = frame.func.constants[arg]
-            regex = JSRegExp(pattern, flags)
+            # Create a timeout callback for the regex engine
+            poll_callback = None
+            if self.time_limit is not None:
+
+                def check_timeout() -> bool:
+                    """Return True if time limit exceeded (to abort regex)."""
+                    return time.monotonic() - self.start_time > self.time_limit
+
+                poll_callback = check_timeout
+            regex = JSRegExp(pattern, flags, poll_callback)
             self.stack.append(regex)
 
         # Arithmetic
@@ -1561,11 +1571,17 @@ class VM:
 
         def test_fn(*args):
             string = to_string(args[0]) if args else ""
-            return re.test(string)
+            try:
+                return re.test(string)
+            except RegexTimeoutError:
+                raise TimeLimitError("Regex execution timeout")
 
         def exec_fn(*args):
             string = to_string(args[0]) if args else ""
-            return re.exec(string)
+            try:
+                return re.exec(string)
+            except RegexTimeoutError:
+                raise TimeLimitError("Regex execution timeout")
 
         methods = {
             "test": test_fn,

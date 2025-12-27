@@ -1,11 +1,14 @@
 # Regex Engine Python API
 
-The `microjs.regex` module provides a safe, sandboxed regular expression engine with:
+The `microjs.regex` module provides a sandboxed regular expression engine with:
 
 - ReDoS protection (zero-advance detection)
 - Memory limits via backtrack stack size
 - Timeout integration via polling callbacks
 - JavaScript regular expression compatibility
+
+> [!WARNING]
+> The sandbox is **not production ready**. ReDoS attacks may still be possible. See the [sandbox issue label](https://github.com/simonw/micro-javascript/issues?q=label%3A%22sandbox%22) for more.
 
 ## Quick Start
 

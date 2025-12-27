@@ -19,6 +19,12 @@ This project provides a JavaScript execution environment with:
 > [!WARNING]
 > The sandbox is **not production ready**. Malicious code can still exhaust memory and has not been fully audited against escapes that could allow JavaScript to run arbitrary Python. See the [sandbox issue label](https://github.com/simonw/micro-javascript/issues?q=label%3A%22sandbox%22) for more.
 
+## Interactive demos
+
+Try [playground.html](https://simonw.github.io/micro-javascript/playground.html) in your browser to execute JavaScript using this Python library run via [Pyodide](https://pyodide.org/) (so JavaScript in Python in WebAssembly in JavaScript).
+
+Use [parser-playground.html](https://simonw.github.io/micro-javascript/parser-playground.html) to see how the `micro-javascript` tokenizer and parser works with different JavaScript code.
+
 ## How it was built
 
 Most of this library was built using Claude Code for web - [here is the 15+ hour transcript](https://static.simonwillison.net/static/2025/claude-code-microjs/index.html).

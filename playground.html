@@ -824,42 +824,56 @@ await micropip.install('micro-javascript')
                 await pyodide.runPythonAsync(`
 import json
 from microjs import Context
-from microjs.errors import JSSyntaxError, JSRuntimeError, JSTimeoutError, JSMemoryError
+from microjs.errors import JSSyntaxError, JSError, MemoryLimitError, TimeLimitError
+from microjs.values import JSArray, JSObject, UNDEFINED, NULL
 
 def execute_code(source):
     console_output = []
 
-    def capture_print(*args):
-        console_output.append(' '.join(str(arg) for arg in args))
+    def format_value(val):
+        if val is None or val is UNDEFINED:
+            return 'undefined'
+        if val is NULL:
+            return 'null'
+        if isinstance(val, bool):
+            return 'true' if val else 'false'
+        if isinstance(val, JSArray):
+            elements = [format_value(val.get_index(i)) for i in range(val.length)]
+            return '[' + ', '.join(elements) + ']'
+        if isinstance(val, JSObject):
+            props = {}
+            for key in val.keys():
+                props[key] = format_value(val.get(key))
+            return '{' + ', '.join(f'{k}: {v}' for k, v in props.items()) + '}'
+        if isinstance(val, (list, dict)):
+            return json.dumps(val)
+        if isinstance(val, float) and val.is_integer():
+            return str(int(val))
+        return str(val)
 
     try:
         ctx = Context(memory_limit=1024*1024, time_limit=5.0)
 
-        # Override console.log to capture output
-        original_console = ctx.global_object.get('console')
+        # Create console methods
+        def console_log(*args):
+            console_output.append(' '.join(format_value(arg) for arg in args))
 
-        # Create a wrapper that captures console.log calls
-        class ConsoleCapture:
-            def log(self, *args):
-                console_output.append(' '.join(format_value(arg) for arg in args))
-            def warn(self, *args):
-                console_output.append('[WARN] ' + ' '.join(format_value(arg) for arg in args))
-            def error(self, *args):
-                console_output.append('[ERROR] ' + ' '.join(format_value(arg) for arg in args))
-            def info(self, *args):
-                console_output.append('[INFO] ' + ' '.join(format_value(arg) for arg in args))
+        def console_warn(*args):
+            console_output.append('[WARN] ' + ' '.join(format_value(arg) for arg in args))
 
-        def format_value(val):
-            if val is None:
-                return 'undefined'
-            if isinstance(val, bool):
-                return 'true' if val else 'false'
-            if isinstance(val, (list, dict)):
-                return json.dumps(val)
-            return str(val)
+        def console_error(*args):
+            console_output.append('[ERROR] ' + ' '.join(format_value(arg) for arg in args))
 
-        # Inject our console capture
-        ctx.set_global('console', ConsoleCapture())
+        def console_info(*args):
+            console_output.append('[INFO] ' + ' '.join(format_value(arg) for arg in args))
+
+        # Inject console as a dict with methods
+        ctx.set('console', {
+            'log': console_log,
+            'warn': console_warn,
+            'error': console_error,
+            'info': console_info
+        })
 
         result = ctx.eval(source)
 
@@ -874,25 +888,25 @@ def execute_code(source):
     except JSSyntaxError as e:
         return json.dumps({
             'success': False,
-            'error': f'SyntaxError: {e}',
+            'error': str(e),
             'console_output': console_output
         })
-    except JSTimeoutError as e:
+    except TimeLimitError as e:
         return json.dumps({
             'success': False,
-            'error': f'TimeoutError: {e}',
+            'error': str(e),
             'console_output': console_output
         })
-    except JSMemoryError as e:
+    except MemoryLimitError as e:
         return json.dumps({
             'success': False,
-            'error': f'MemoryError: {e}',
+            'error': str(e),
             'console_output': console_output
         })
-    except JSRuntimeError as e:
+    except JSError as e:
         return json.dumps({
             'success': False,
-            'error': f'RuntimeError: {e}',
+            'error': str(e),
             'console_output': console_output
         })
     except Exception as e:

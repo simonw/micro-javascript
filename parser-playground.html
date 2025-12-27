@@ -318,24 +318,41 @@
             font-size: 13px;
         }
 
-        .examples {
-            margin-top: 20px;
+        .examples-section {
+            margin-bottom: 20px;
             background: var(--bg-panel);
             border: 1px solid var(--border-color);
             border-radius: 8px;
-            padding: 16px 20px;
+            padding: 16px;
         }
 
-        .examples h3 {
-            margin: 0 0 12px 0;
-            color: var(--accent-color);
+        .examples-section h3 {
             font-size: 14px;
+            color: var(--accent-color);
+            margin: 0 0 12px 0;
+            font-weight: 600;
         }
 
-        .example-buttons {
+        .examples-list {
             display: flex;
-            gap: 10px;
             flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .example-btn {
+            padding: 6px 14px;
+            font-size: 13px;
+            background: var(--bg-header);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .example-btn:hover {
+            background: var(--hover-bg);
+            border-color: var(--accent-color);
         }
 
         button {
@@ -514,6 +531,22 @@
         </div>
         <p class="subtitle">Explore the lexer and parser internals - see how JavaScript code is tokenized and parsed into an AST</p>
 
+        <div class="examples-section">
+            <h3>Try an example:</h3>
+            <div class="examples-list">
+                <button class="example-btn" onclick="loadExample('hello')">Hello World</button>
+                <button class="example-btn" onclick="loadExample('factorial')">Factorial</button>
+                <button class="example-btn" onclick="loadExample('closure')">Closure</button>
+                <button class="example-btn" onclick="loadExample('class')">Class</button>
+                <button class="example-btn" onclick="loadExample('loops')">Loops</button>
+                <button class="example-btn" onclick="loadExample('array')">Array Methods</button>
+                <button class="example-btn" onclick="loadExample('regex')">Regex</button>
+                <button class="example-btn" onclick="loadExample('arrow')">Arrow Functions</button>
+                <button class="example-btn" onclick="loadExample('ternary')">Ternary & Operators</button>
+                <button class="example-btn" onclick="loadExample('error')">Syntax Error</button>
+            </div>
+        </div>
+
         <div class="main-layout">
             <div class="panel">
                 <div class="panel-header">
@@ -545,22 +578,6 @@ console.log(result);</textarea>
                     </div>
                     <div id="ast-output" class="output-area">Waiting for Pyodide to load...</div>
                 </div>
-            </div>
-        </div>
-
-        <div class="examples">
-            <h3>Demo Scripts</h3>
-            <div class="example-buttons">
-                <button onclick="loadExample('hello')">Hello World</button>
-                <button onclick="loadExample('factorial')">Factorial</button>
-                <button onclick="loadExample('closure')">Closure</button>
-                <button onclick="loadExample('class')">Class</button>
-                <button onclick="loadExample('loops')">Loops</button>
-                <button onclick="loadExample('array')">Array Methods</button>
-                <button onclick="loadExample('regex')">Regex</button>
-                <button onclick="loadExample('arrow')">Arrow Functions</button>
-                <button onclick="loadExample('ternary')">Ternary & Operators</button>
-                <button onclick="loadExample('error')">Syntax Error</button>
             </div>
         </div>
 

@@ -9,24 +9,205 @@
             box-sizing: border-box;
         }
 
+        :root {
+            --bg-primary: #f5f5f5;
+            --bg-secondary: #fff;
+            --bg-panel: #fafafa;
+            --bg-header: #e8e8e8;
+            --bg-input: #fff;
+            --bg-input-focus: #fefefe;
+            --text-primary: #222;
+            --text-secondary: #555;
+            --text-muted: #888;
+            --border-color: #ddd;
+            --accent-color: #c9a800;
+            --accent-bg: rgba(201, 168, 0, 0.1);
+            --token-number-bg: #e3f2fd;
+            --token-number-fg: #1565c0;
+            --token-string-bg: #fff3e0;
+            --token-string-fg: #e65100;
+            --token-identifier-bg: #e8f5e9;
+            --token-identifier-fg: #2e7d32;
+            --token-keyword-bg: #f3e5f5;
+            --token-keyword-fg: #7b1fa2;
+            --token-operator-bg: #eceff1;
+            --token-operator-fg: #455a64;
+            --token-punctuation-bg: #fafafa;
+            --token-punctuation-fg: #757575;
+            --token-regex-bg: #ffebee;
+            --token-regex-fg: #c62828;
+            --ast-type: #00897b;
+            --ast-prop: #1976d2;
+            --ast-value: #d84315;
+            --ast-number: #388e3c;
+            --ast-bool: #1565c0;
+            --ast-null: #757575;
+            --ast-border: #e0e0e0;
+            --hover-bg: rgba(0, 0, 0, 0.05);
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg-primary: #1a1a2e;
+                --bg-secondary: #16213e;
+                --bg-panel: #16213e;
+                --bg-header: #0f3460;
+                --bg-input: #1a1a2e;
+                --bg-input-focus: #1e1e3a;
+                --text-primary: #eee;
+                --text-secondary: #ccc;
+                --text-muted: #888;
+                --border-color: #333;
+                --accent-color: #f7df1e;
+                --accent-bg: rgba(247, 223, 30, 0.1);
+                --token-number-bg: #264f78;
+                --token-number-fg: #b5cea8;
+                --token-string-bg: #4e342e;
+                --token-string-fg: #ce9178;
+                --token-identifier-bg: #1e3a5f;
+                --token-identifier-fg: #9cdcfe;
+                --token-keyword-bg: #4a148c;
+                --token-keyword-fg: #c586c0;
+                --token-operator-bg: #37474f;
+                --token-operator-fg: #d4d4d4;
+                --token-punctuation-bg: #263238;
+                --token-punctuation-fg: #808080;
+                --token-regex-bg: #5d4037;
+                --token-regex-fg: #d16969;
+                --ast-type: #4ec9b0;
+                --ast-prop: #9cdcfe;
+                --ast-value: #ce9178;
+                --ast-number: #b5cea8;
+                --ast-bool: #569cd6;
+                --ast-null: #808080;
+                --ast-border: #333;
+                --hover-bg: rgba(255, 255, 255, 0.1);
+            }
+        }
+
+        :root[data-theme="light"] {
+            --bg-primary: #f5f5f5;
+            --bg-secondary: #fff;
+            --bg-panel: #fafafa;
+            --bg-header: #e8e8e8;
+            --bg-input: #fff;
+            --bg-input-focus: #fefefe;
+            --text-primary: #222;
+            --text-secondary: #555;
+            --text-muted: #888;
+            --border-color: #ddd;
+            --accent-color: #c9a800;
+            --accent-bg: rgba(201, 168, 0, 0.1);
+            --token-number-bg: #e3f2fd;
+            --token-number-fg: #1565c0;
+            --token-string-bg: #fff3e0;
+            --token-string-fg: #e65100;
+            --token-identifier-bg: #e8f5e9;
+            --token-identifier-fg: #2e7d32;
+            --token-keyword-bg: #f3e5f5;
+            --token-keyword-fg: #7b1fa2;
+            --token-operator-bg: #eceff1;
+            --token-operator-fg: #455a64;
+            --token-punctuation-bg: #fafafa;
+            --token-punctuation-fg: #757575;
+            --token-regex-bg: #ffebee;
+            --token-regex-fg: #c62828;
+            --ast-type: #00897b;
+            --ast-prop: #1976d2;
+            --ast-value: #d84315;
+            --ast-number: #388e3c;
+            --ast-bool: #1565c0;
+            --ast-null: #757575;
+            --ast-border: #e0e0e0;
+            --hover-bg: rgba(0, 0, 0, 0.05);
+        }
+
+        :root[data-theme="dark"] {
+            --bg-primary: #1a1a2e;
+            --bg-secondary: #16213e;
+            --bg-panel: #16213e;
+            --bg-header: #0f3460;
+            --bg-input: #1a1a2e;
+            --bg-input-focus: #1e1e3a;
+            --text-primary: #eee;
+            --text-secondary: #ccc;
+            --text-muted: #888;
+            --border-color: #333;
+            --accent-color: #f7df1e;
+            --accent-bg: rgba(247, 223, 30, 0.1);
+            --token-number-bg: #264f78;
+            --token-number-fg: #b5cea8;
+            --token-string-bg: #4e342e;
+            --token-string-fg: #ce9178;
+            --token-identifier-bg: #1e3a5f;
+            --token-identifier-fg: #9cdcfe;
+            --token-keyword-bg: #4a148c;
+            --token-keyword-fg: #c586c0;
+            --token-operator-bg: #37474f;
+            --token-operator-fg: #d4d4d4;
+            --token-punctuation-bg: #263238;
+            --token-punctuation-fg: #808080;
+            --token-regex-bg: #5d4037;
+            --token-regex-fg: #d16969;
+            --ast-type: #4ec9b0;
+            --ast-prop: #9cdcfe;
+            --ast-value: #ce9178;
+            --ast-number: #b5cea8;
+            --ast-bool: #569cd6;
+            --ast-null: #808080;
+            --ast-border: #333;
+            --hover-bg: rgba(255, 255, 255, 0.1);
+        }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
             margin: 0;
             padding: 20px;
-            background: #1a1a2e;
-            color: #eee;
+            background: var(--bg-primary);
+            color: var(--text-primary);
             min-height: 100vh;
+        }
+
+        .header {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            margin-bottom: 5px;
         }
 
         h1 {
             text-align: center;
-            color: #f7df1e;
-            margin-bottom: 5px;
+            color: var(--accent-color);
+            margin: 0;
+        }
+
+        #theme-toggle {
+            position: absolute;
+            right: 0;
+            background: var(--bg-header);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 8px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #theme-toggle:hover {
+            background: var(--hover-bg);
+        }
+
+        #theme-toggle svg {
+            width: 20px;
+            height: 20px;
+            fill: var(--text-primary);
         }
 
         .subtitle {
             text-align: center;
-            color: #888;
+            color: var(--text-muted);
             margin-bottom: 20px;
             font-size: 14px;
         }
@@ -49,7 +230,8 @@
         }
 
         .panel {
-            background: #16213e;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-color);
             border-radius: 8px;
             overflow: hidden;
             display: flex;
@@ -57,7 +239,7 @@
         }
 
         .panel-header {
-            background: #0f3460;
+            background: var(--bg-header);
             padding: 12px 16px;
             font-weight: 600;
             display: flex;
@@ -70,7 +252,7 @@
             font-size: 12px;
             padding: 4px 10px;
             border-radius: 4px;
-            background: #333;
+            background: var(--border-color);
         }
 
         .status.loading {
@@ -91,8 +273,8 @@
         textarea {
             width: 100%;
             min-height: 300px;
-            background: #1a1a2e;
-            color: #eee;
+            background: var(--bg-input);
+            color: var(--text-primary);
             border: none;
             padding: 16px;
             font-family: 'Fira Code', 'Monaco', 'Consolas', monospace;
@@ -104,7 +286,7 @@
         }
 
         textarea:focus {
-            background: #1e1e3a;
+            background: var(--bg-input-focus);
         }
 
         .output-panels {
@@ -117,8 +299,8 @@
             width: 100%;
             min-height: 200px;
             max-height: 400px;
-            background: #1a1a2e;
-            color: #eee;
+            background: var(--bg-input);
+            color: var(--text-primary);
             padding: 16px;
             font-family: 'Fira Code', 'Monaco', 'Consolas', monospace;
             font-size: 13px;
@@ -138,14 +320,15 @@
 
         .examples {
             margin-top: 20px;
-            background: #16213e;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-color);
             border-radius: 8px;
             padding: 16px 20px;
         }
 
         .examples h3 {
             margin: 0 0 12px 0;
-            color: #f7df1e;
+            color: var(--accent-color);
             font-size: 14px;
         }
 
@@ -156,9 +339,9 @@
         }
 
         button {
-            background: #0f3460;
-            color: #fff;
-            border: none;
+            background: var(--bg-header);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
             padding: 8px 16px;
             border-radius: 4px;
             cursor: pointer;
@@ -167,13 +350,12 @@
         }
 
         button:hover {
-            background: #1a5a9a;
+            background: var(--hover-bg);
         }
 
         button:disabled {
-            background: #333;
+            opacity: 0.5;
             cursor: not-allowed;
-            color: #666;
         }
 
         /* Token styling */
@@ -186,25 +368,25 @@
             cursor: default;
         }
 
-        .token-NUMBER { background: #264f78; color: #b5cea8; }
-        .token-STRING { background: #4e342e; color: #ce9178; }
-        .token-IDENTIFIER { background: #1e3a5f; color: #9cdcfe; }
-        .token-keyword { background: #4a148c; color: #c586c0; }
-        .token-operator { background: #37474f; color: #d4d4d4; }
-        .token-punctuation { background: #263238; color: #808080; }
-        .token-REGEX { background: #5d4037; color: #d16969; }
-        .token-EOF { background: #333; color: #666; }
+        .token-NUMBER { background: var(--token-number-bg); color: var(--token-number-fg); }
+        .token-STRING { background: var(--token-string-bg); color: var(--token-string-fg); }
+        .token-IDENTIFIER { background: var(--token-identifier-bg); color: var(--token-identifier-fg); }
+        .token-keyword { background: var(--token-keyword-bg); color: var(--token-keyword-fg); }
+        .token-operator { background: var(--token-operator-bg); color: var(--token-operator-fg); }
+        .token-punctuation { background: var(--token-punctuation-bg); color: var(--token-punctuation-fg); }
+        .token-REGEX { background: var(--token-regex-bg); color: var(--token-regex-fg); }
+        .token-EOF { background: var(--border-color); color: var(--text-muted); }
 
         .token-location {
             font-size: 10px;
-            color: #666;
+            color: var(--text-muted);
             margin-left: 4px;
         }
 
         /* AST Tree styling */
         .ast-node {
             margin-left: 20px;
-            border-left: 1px solid #333;
+            border-left: 1px solid var(--ast-border);
             padding-left: 12px;
         }
 
@@ -224,32 +406,32 @@
         }
 
         .ast-node-header:hover {
-            background: rgba(255, 255, 255, 0.1);
+            background: var(--hover-bg);
         }
 
         .ast-node-type {
-            color: #4ec9b0;
+            color: var(--ast-type);
             font-weight: 600;
         }
 
         .ast-node-prop {
-            color: #9cdcfe;
+            color: var(--ast-prop);
         }
 
         .ast-node-value {
-            color: #ce9178;
+            color: var(--ast-value);
         }
 
         .ast-node-number {
-            color: #b5cea8;
+            color: var(--ast-number);
         }
 
         .ast-node-bool {
-            color: #569cd6;
+            color: var(--ast-bool);
         }
 
         .ast-node-null {
-            color: #808080;
+            color: var(--ast-null);
         }
 
         .ast-children {
@@ -265,21 +447,21 @@
             display: inline-block;
             width: 16px;
             text-align: center;
-            color: #666;
+            color: var(--text-muted);
             font-family: monospace;
         }
 
         .info-box {
             margin-top: 20px;
             padding: 16px;
-            background: rgba(247, 223, 30, 0.1);
-            border-left: 4px solid #f7df1e;
+            background: var(--accent-bg);
+            border-left: 4px solid var(--accent-color);
             border-radius: 0 8px 8px 0;
             font-size: 13px;
         }
 
         .info-box a {
-            color: #f7df1e;
+            color: var(--accent-color);
         }
 
         .token-legend {
@@ -288,7 +470,7 @@
             flex-wrap: wrap;
             margin-bottom: 12px;
             padding-bottom: 12px;
-            border-bottom: 1px solid #333;
+            border-bottom: 1px solid var(--border-color);
         }
 
         .legend-item {
@@ -305,7 +487,7 @@
         }
 
         .stats {
-            color: #888;
+            color: var(--text-muted);
             font-size: 12px;
             margin-left: auto;
         }
@@ -322,7 +504,14 @@
 </head>
 <body>
     <div class="container">
-        <h1>micro-javascript Debugging Playground</h1>
+        <div class="header">
+            <h1>micro-javascript Debugging Playground</h1>
+            <button id="theme-toggle" type="button" aria-label="Toggle theme">
+                <svg id="icon-auto" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm0-2V4a8 8 0 1 0 0 16z"/></svg>
+                <svg id="icon-light" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" style="display:none"><path d="M12 18a6 6 0 1 1 0-12 6 6 0 0 1 0 12zm0-2a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM11 1h2v3h-2V1zm0 19h2v3h-2v-3zM3.515 4.929l1.414-1.414L7.05 5.636 5.636 7.05 3.515 4.93zM16.95 18.364l1.414-1.414 2.121 2.121-1.414 1.414-2.121-2.121zm2.121-14.85l1.414 1.415-2.121 2.121-1.414-1.414 2.121-2.121zM5.636 16.95l1.414 1.414-2.121 2.121-1.414-1.414 2.121-2.121zM23 11v2h-3v-2h3zM4 11v2H1v-2h3z"/></svg>
+                <svg id="icon-dark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" style="display:none"><path d="M10 7a7 7 0 0 0 12 4.9v.1c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2h.1A6.979 6.979 0 0 0 10 7zm-6 5a8 8 0 0 0 15.062 3.762A9 9 0 0 1 8.238 4.938 7.999 7.999 0 0 0 4 12z"/></svg>
+            </button>
+        </div>
         <p class="subtitle">Explore the lexer and parser internals - see how JavaScript code is tokenized and parsed into an AST</p>
 
         <div class="main-layout">
@@ -385,6 +574,56 @@ console.log(result);</textarea>
 
     <script src="https://cdn.jsdelivr.net/pyodide/v0.27.2/full/pyodide.js"></script>
     <script>
+        // Theme toggle
+        (function() {
+            const toggle = document.getElementById('theme-toggle');
+            const iconAuto = document.getElementById('icon-auto');
+            const iconLight = document.getElementById('icon-light');
+            const iconDark = document.getElementById('icon-dark');
+
+            function getTheme() {
+                return localStorage.getItem('theme') || 'auto';
+            }
+
+            function setTheme(theme) {
+                if (theme === 'auto') {
+                    localStorage.removeItem('theme');
+                    document.documentElement.removeAttribute('data-theme');
+                } else {
+                    localStorage.setItem('theme', theme);
+                    document.documentElement.setAttribute('data-theme', theme);
+                }
+                updateIcon(theme);
+            }
+
+            function updateIcon(theme) {
+                iconAuto.style.display = theme === 'auto' ? 'block' : 'none';
+                iconLight.style.display = theme === 'light' ? 'block' : 'none';
+                iconDark.style.display = theme === 'dark' ? 'block' : 'none';
+
+                const labels = {
+                    'auto': 'Theme: Auto (system preference). Click to switch to light.',
+                    'light': 'Theme: Light. Click to switch to dark.',
+                    'dark': 'Theme: Dark. Click to switch to auto.'
+                };
+                toggle.setAttribute('aria-label', labels[theme]);
+            }
+
+            function cycleTheme() {
+                const current = getTheme();
+                const next = current === 'auto' ? 'light' : current === 'light' ? 'dark' : 'auto';
+                setTheme(next);
+            }
+
+            // Initialize
+            const saved = getTheme();
+            if (saved !== 'auto') {
+                document.documentElement.setAttribute('data-theme', saved);
+            }
+            updateIcon(saved);
+            toggle.addEventListener('click', cycleTheme);
+        })();
+
         const examples = {
             hello: `// Simple hello world
 function greet(name) {
@@ -465,9 +704,7 @@ for (var i = 0; i < numbers.length; i++) {
 var obj = {
     name: "test",
     values: [10, 20, 30],
-    nested: {
-        deep: true
-    }
+    nested: { deep: true }
 };
 
 console.log(doubled);
@@ -538,7 +775,6 @@ broken();`
         const tokenStatsEl = document.getElementById('token-stats');
         const astStatsEl = document.getElementById('ast-stats');
 
-        // Token type categories for styling
         const keywordTypes = ['VAR', 'FUNCTION', 'RETURN', 'IF', 'ELSE', 'WHILE', 'DO', 'FOR', 'IN', 'OF',
             'BREAK', 'CONTINUE', 'SWITCH', 'CASE', 'DEFAULT', 'TRY', 'CATCH', 'FINALLY', 'THROW',
             'NEW', 'DELETE', 'TYPEOF', 'INSTANCEOF', 'THIS', 'TRUE', 'FALSE', 'NULL', 'VOID'];
@@ -567,17 +803,16 @@ broken();`
 
         function renderTokens(tokens) {
             if (!tokens || tokens.length === 0) {
-                return '<span style="color: #888;">No tokens</span>';
+                return '<span style="color: var(--text-muted);">No tokens</span>';
             }
 
-            // Add legend
             let html = '<div class="token-legend">';
-            html += '<div class="legend-item"><span class="legend-color" style="background: #4a148c;"></span>Keyword</div>';
-            html += '<div class="legend-item"><span class="legend-color" style="background: #264f78;"></span>Number</div>';
-            html += '<div class="legend-item"><span class="legend-color" style="background: #4e342e;"></span>String</div>';
-            html += '<div class="legend-item"><span class="legend-color" style="background: #1e3a5f;"></span>Identifier</div>';
-            html += '<div class="legend-item"><span class="legend-color" style="background: #37474f;"></span>Operator</div>';
-            html += '<div class="legend-item"><span class="legend-color" style="background: #263238;"></span>Punctuation</div>';
+            html += '<div class="legend-item"><span class="legend-color" style="background: var(--token-keyword-bg);"></span>Keyword</div>';
+            html += '<div class="legend-item"><span class="legend-color" style="background: var(--token-number-bg);"></span>Number</div>';
+            html += '<div class="legend-item"><span class="legend-color" style="background: var(--token-string-bg);"></span>String</div>';
+            html += '<div class="legend-item"><span class="legend-color" style="background: var(--token-identifier-bg);"></span>Identifier</div>';
+            html += '<div class="legend-item"><span class="legend-color" style="background: var(--token-operator-bg);"></span>Operator</div>';
+            html += '<div class="legend-item"><span class="legend-color" style="background: var(--token-punctuation-bg);"></span>Punctuation</div>';
             html += '</div>';
 
             html += '<div style="line-height: 2;">';
@@ -637,7 +872,6 @@ broken();`
                 return html;
             }
 
-            // Object with type property (AST node)
             if (node.type) {
                 const nodeClass = isRoot ? 'ast-node root' : 'ast-node';
                 let html = `<div class="${nodeClass}">`;
@@ -653,7 +887,6 @@ broken();`
                 return html;
             }
 
-            // Regular object
             let html = `<div class="ast-node">`;
             html += `<div class="ast-node-header" onclick="toggleAstNode(this)"><span class="toggle-icon">-</span> {object}</div>`;
             html += `<div class="ast-children">`;
@@ -676,7 +909,6 @@ broken();`
             }
         }
 
-        // Make toggleAstNode globally available
         window.toggleAstNode = toggleAstNode;
 
         function countAstNodes(node) {
@@ -705,7 +937,6 @@ import micropip
 await micropip.install('micro-javascript')
 `);
 
-                // Set up helper functions
                 await pyodide.runPythonAsync(`
 import json
 from microjs.lexer import Lexer
@@ -714,7 +945,6 @@ from microjs.tokens import TokenType
 from microjs.errors import JSSyntaxError
 
 def tokenize_source(source):
-    """Tokenize JavaScript source and return JSON."""
     try:
         lexer = Lexer(source)
         tokens = []
@@ -725,7 +955,6 @@ def tokenize_source(source):
                 'line': token.line,
                 'column': token.column
             }
-            # Handle regex tuple value
             if token.type == TokenType.REGEX and isinstance(token.value, tuple):
                 token_dict['value'] = list(token.value)
             tokens.append(token_dict)
@@ -746,7 +975,6 @@ def tokenize_source(source):
         })
 
 def parse_source(source):
-    """Parse JavaScript source and return AST as JSON."""
     try:
         parser = Parser(source)
         ast = parser.parse()
@@ -770,7 +998,6 @@ def parse_source(source):
                 statusEl.textContent = 'Ready';
                 statusEl.className = 'status ready';
 
-                // Process initial input
                 processCode();
 
             } catch (error) {
@@ -786,7 +1013,6 @@ def parse_source(source):
 
             const source = inputEl.value;
 
-            // Process tokens
             try {
                 const escapedSource = source
                     .replace(/\\/g, '\\\\')
@@ -816,7 +1042,6 @@ def parse_source(source):
                 tokensOutputEl.innerHTML = `<div class="error-message">${escapeHtml(error.message)}</div>`;
             }
 
-            // Process AST
             try {
                 const escapedSource = source
                     .replace(/\\/g, '\\\\')
@@ -854,16 +1079,13 @@ def parse_source(source):
             }
         }
 
-        // Make loadExample globally available
         window.loadExample = loadExample;
 
-        // Debounced input handler
         inputEl.addEventListener('input', () => {
             clearTimeout(debounceTimer);
             debounceTimer = setTimeout(processCode, 250);
         });
 
-        // Initialize on load
         initPyodide();
     </script>
 </body>

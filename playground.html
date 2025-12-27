@@ -1,0 +1,972 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>micro-javascript playground</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #f5f5f5;
+            --bg-secondary: #fff;
+            --bg-panel: #fafafa;
+            --bg-header: #e8e8e8;
+            --bg-input: #fff;
+            --bg-input-focus: #fefefe;
+            --bg-output: #1e1e1e;
+            --text-primary: #222;
+            --text-secondary: #555;
+            --text-muted: #888;
+            --text-output: #d4d4d4;
+            --border-color: #ddd;
+            --accent-color: #c9a800;
+            --accent-bg: rgba(201, 168, 0, 0.1);
+            --btn-primary-bg: #c9a800;
+            --btn-primary-hover: #a88a00;
+            --btn-secondary-bg: #6c757d;
+            --btn-secondary-hover: #545b62;
+            --error-bg: #f8d7da;
+            --error-color: #721c24;
+            --error-border: #f5c6cb;
+            --error-output-bg: #2d1f1f;
+            --error-output-color: #f8d7da;
+            --success-bg: #d4edda;
+            --success-color: #155724;
+            --success-border: #c3e6cb;
+            --info-bg: #d1ecf1;
+            --info-color: #0c5460;
+            --info-border: #bee5eb;
+            --hover-bg: rgba(0, 0, 0, 0.05);
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg-primary: #1a1a2e;
+                --bg-secondary: #16213e;
+                --bg-panel: #16213e;
+                --bg-header: #0f3460;
+                --bg-input: #1a1a2e;
+                --bg-input-focus: #1e1e3a;
+                --bg-output: #0d0d0d;
+                --text-primary: #eee;
+                --text-secondary: #ccc;
+                --text-muted: #888;
+                --text-output: #d4d4d4;
+                --border-color: #333;
+                --accent-color: #f7df1e;
+                --accent-bg: rgba(247, 223, 30, 0.1);
+                --btn-primary-bg: #f7df1e;
+                --btn-primary-hover: #d4c019;
+                --btn-secondary-bg: #4a5568;
+                --btn-secondary-hover: #2d3748;
+                --error-bg: rgba(231, 76, 60, 0.2);
+                --error-color: #f8d7da;
+                --error-border: #c0392b;
+                --error-output-bg: #2d1f1f;
+                --error-output-color: #f8d7da;
+                --success-bg: rgba(39, 174, 96, 0.2);
+                --success-color: #d4edda;
+                --success-border: #27ae60;
+                --info-bg: rgba(52, 152, 219, 0.2);
+                --info-color: #d1ecf1;
+                --info-border: #3498db;
+                --hover-bg: rgba(255, 255, 255, 0.1);
+            }
+        }
+
+        :root[data-theme="light"] {
+            --bg-primary: #f5f5f5;
+            --bg-secondary: #fff;
+            --bg-panel: #fafafa;
+            --bg-header: #e8e8e8;
+            --bg-input: #fff;
+            --bg-input-focus: #fefefe;
+            --bg-output: #1e1e1e;
+            --text-primary: #222;
+            --text-secondary: #555;
+            --text-muted: #888;
+            --text-output: #d4d4d4;
+            --border-color: #ddd;
+            --accent-color: #c9a800;
+            --accent-bg: rgba(201, 168, 0, 0.1);
+            --btn-primary-bg: #c9a800;
+            --btn-primary-hover: #a88a00;
+            --btn-secondary-bg: #6c757d;
+            --btn-secondary-hover: #545b62;
+            --error-bg: #f8d7da;
+            --error-color: #721c24;
+            --error-border: #f5c6cb;
+            --error-output-bg: #2d1f1f;
+            --error-output-color: #f8d7da;
+            --success-bg: #d4edda;
+            --success-color: #155724;
+            --success-border: #c3e6cb;
+            --info-bg: #d1ecf1;
+            --info-color: #0c5460;
+            --info-border: #bee5eb;
+            --hover-bg: rgba(0, 0, 0, 0.05);
+        }
+
+        :root[data-theme="dark"] {
+            --bg-primary: #1a1a2e;
+            --bg-secondary: #16213e;
+            --bg-panel: #16213e;
+            --bg-header: #0f3460;
+            --bg-input: #1a1a2e;
+            --bg-input-focus: #1e1e3a;
+            --bg-output: #0d0d0d;
+            --text-primary: #eee;
+            --text-secondary: #ccc;
+            --text-muted: #888;
+            --text-output: #d4d4d4;
+            --border-color: #333;
+            --accent-color: #f7df1e;
+            --accent-bg: rgba(247, 223, 30, 0.1);
+            --btn-primary-bg: #f7df1e;
+            --btn-primary-hover: #d4c019;
+            --btn-secondary-bg: #4a5568;
+            --btn-secondary-hover: #2d3748;
+            --error-bg: rgba(231, 76, 60, 0.2);
+            --error-color: #f8d7da;
+            --error-border: #c0392b;
+            --error-output-bg: #2d1f1f;
+            --error-output-color: #f8d7da;
+            --success-bg: rgba(39, 174, 96, 0.2);
+            --success-color: #d4edda;
+            --success-border: #27ae60;
+            --info-bg: rgba(52, 152, 219, 0.2);
+            --info-color: #d1ecf1;
+            --info-border: #3498db;
+            --hover-bg: rgba(255, 255, 255, 0.1);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        .header {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            margin-bottom: 5px;
+        }
+
+        h1 {
+            text-align: center;
+            color: var(--accent-color);
+            margin: 0;
+        }
+
+        #theme-toggle {
+            position: absolute;
+            right: 0;
+            background: var(--bg-header);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 8px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #theme-toggle:hover {
+            background: var(--hover-bg);
+        }
+
+        #theme-toggle svg {
+            width: 20px;
+            height: 20px;
+            fill: var(--text-primary);
+        }
+
+        .subtitle {
+            text-align: center;
+            color: var(--text-muted);
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+
+        .examples-section {
+            margin-bottom: 20px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px;
+        }
+
+        .examples-section h3 {
+            font-size: 14px;
+            color: var(--accent-color);
+            margin: 0 0 12px 0;
+            font-weight: 600;
+        }
+
+        .examples-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .example-btn {
+            padding: 6px 14px;
+            font-size: 13px;
+            background: var(--bg-header);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .example-btn:hover {
+            background: var(--hover-bg);
+            border-color: var(--accent-color);
+        }
+
+        .panel {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+
+        .panel-header {
+            background: var(--bg-header);
+            padding: 12px 16px;
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .panel-header .status {
+            font-size: 12px;
+            padding: 4px 10px;
+            border-radius: 4px;
+            background: var(--border-color);
+        }
+
+        .status.loading {
+            background: #f39c12;
+            color: #000;
+        }
+
+        .status.ready {
+            background: #27ae60;
+            color: #fff;
+        }
+
+        .status.error {
+            background: #e74c3c;
+            color: #fff;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 250px;
+            background: var(--bg-input);
+            color: var(--text-primary);
+            border: none;
+            padding: 16px;
+            font-family: 'Fira Code', 'Monaco', 'Consolas', monospace;
+            font-size: 14px;
+            line-height: 1.6;
+            resize: vertical;
+            outline: none;
+            tab-size: 2;
+        }
+
+        textarea:focus {
+            background: var(--bg-input-focus);
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        button {
+            padding: 12px 24px;
+            cursor: pointer;
+            border: none;
+            border-radius: 6px;
+            font-size: 15px;
+            font-weight: 600;
+            transition: background-color 0.2s;
+        }
+
+        button.primary {
+            background-color: var(--btn-primary-bg);
+            color: #000;
+        }
+
+        button.primary:hover:not(:disabled) {
+            background-color: var(--btn-primary-hover);
+        }
+
+        button.primary:disabled {
+            opacity: 0.6;
+            cursor: wait;
+        }
+
+        button.secondary {
+            background-color: var(--btn-secondary-bg);
+            color: #fff;
+        }
+
+        button.secondary:hover:not(:disabled) {
+            background-color: var(--btn-secondary-hover);
+        }
+
+        #status-bar {
+            padding: 12px 16px;
+            margin-bottom: 20px;
+            border-radius: 6px;
+            display: none;
+            font-size: 14px;
+        }
+
+        #status-bar.visible {
+            display: block;
+        }
+
+        #status-bar.info {
+            background-color: var(--info-bg);
+            color: var(--info-color);
+            border: 1px solid var(--info-border);
+        }
+
+        #status-bar.error {
+            background-color: var(--error-bg);
+            color: var(--error-color);
+            border: 1px solid var(--error-border);
+        }
+
+        #status-bar.success {
+            background-color: var(--success-bg);
+            color: var(--success-color);
+            border: 1px solid var(--success-border);
+        }
+
+        #output-section {
+            display: none;
+        }
+
+        #output-section.visible {
+            display: block;
+        }
+
+        .output-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .output-header h2 {
+            margin: 0;
+            font-size: 18px;
+            color: var(--text-primary);
+        }
+
+        #copy-btn {
+            padding: 6px 14px;
+            font-size: 13px;
+        }
+
+        #output {
+            background-color: var(--bg-output);
+            color: var(--text-output);
+            padding: 16px;
+            border-radius: 8px;
+            font-family: 'Fira Code', 'Monaco', 'Consolas', monospace;
+            font-size: 14px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            min-height: 80px;
+            max-height: 400px;
+            overflow-y: auto;
+            line-height: 1.5;
+        }
+
+        #output.error-output {
+            background-color: var(--error-output-bg);
+            color: var(--error-output-color);
+        }
+
+        .execution-info {
+            display: flex;
+            gap: 20px;
+            margin-top: 10px;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .info-box {
+            margin-top: 20px;
+            padding: 16px;
+            background: var(--accent-bg);
+            border-left: 4px solid var(--accent-color);
+            border-radius: 0 8px 8px 0;
+            font-size: 13px;
+        }
+
+        .info-box a {
+            color: var(--accent-color);
+        }
+
+        .keyboard-hint {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-left: auto;
+        }
+
+        kbd {
+            background: var(--bg-header);
+            border: 1px solid var(--border-color);
+            border-radius: 3px;
+            padding: 2px 6px;
+            font-family: inherit;
+            font-size: 11px;
+        }
+
+        @media (max-width: 600px) {
+            body {
+                padding: 10px;
+            }
+            h1 {
+                font-size: 24px;
+            }
+            .button-group {
+                flex-direction: column;
+            }
+            .button-group button {
+                width: 100%;
+            }
+            .keyboard-hint {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>micro-javascript playground</h1>
+            <button id="theme-toggle" type="button" aria-label="Toggle theme">
+                <svg id="icon-auto" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm0-2V4a8 8 0 1 0 0 16z"/></svg>
+                <svg id="icon-light" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" style="display:none"><path d="M12 18a6 6 0 1 1 0-12 6 6 0 0 1 0 12zm0-2a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM11 1h2v3h-2V1zm0 19h2v3h-2v-3zM3.515 4.929l1.414-1.414L7.05 5.636 5.636 7.05 3.515 4.93zM16.95 18.364l1.414-1.414 2.121 2.121-1.414 1.414-2.121-2.121zm2.121-14.85l1.414 1.415-2.121 2.121-1.414-1.414 2.121-2.121zM5.636 16.95l1.414 1.414-2.121 2.121-1.414-1.414 2.121-2.121zM23 11v2h-3v-2h3zM4 11v2H1v-2h3z"/></svg>
+                <svg id="icon-dark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" style="display:none"><path d="M10 7a7 7 0 0 0 12 4.9v.1c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2h.1A6.979 6.979 0 0 0 10 7zm-6 5a8 8 0 0 0 15.062 3.762A9 9 0 0 1 8.238 4.938 7.999 7.999 0 0 0 4 12z"/></svg>
+            </button>
+        </div>
+        <p class="subtitle">Execute JavaScript code in a sandboxed micro-javascript environment powered by Pyodide</p>
+
+        <div class="examples-section">
+            <h3>Try an example:</h3>
+            <div class="examples-list" id="examples-list"></div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-header">
+                <span>JavaScript Code</span>
+                <span id="pyodide-status" class="status loading">Loading Pyodide...</span>
+            </div>
+            <textarea id="code-input" placeholder="// Enter your JavaScript code here, or click an example above"></textarea>
+        </div>
+
+        <div class="button-group">
+            <button id="run-btn" class="primary" disabled>Initializing...</button>
+            <button id="clear-btn" class="secondary">Clear</button>
+            <span class="keyboard-hint"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> to run</span>
+        </div>
+
+        <div id="status-bar"></div>
+
+        <div id="output-section">
+            <div class="output-header">
+                <h2>Output</h2>
+                <button id="copy-btn" class="secondary">Copy</button>
+            </div>
+            <div id="output"></div>
+            <div class="execution-info">
+                <span id="execution-time"></span>
+                <span id="memory-info"></span>
+            </div>
+        </div>
+
+        <div class="info-box">
+            <strong>About:</strong> micro-javascript is a pure Python JavaScript interpreter with configurable memory and time limits.
+            This playground runs entirely in your browser using Pyodide (Python compiled to WebAssembly).
+            <a href="https://github.com/simonw/micro-javascript" target="_blank">View on GitHub</a>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.27.2/full/pyodide.js"></script>
+    <script>
+        // Theme toggle
+        (function() {
+            const toggle = document.getElementById('theme-toggle');
+            const iconAuto = document.getElementById('icon-auto');
+            const iconLight = document.getElementById('icon-light');
+            const iconDark = document.getElementById('icon-dark');
+
+            function getTheme() {
+                return localStorage.getItem('theme') || 'auto';
+            }
+
+            function setTheme(theme) {
+                if (theme === 'auto') {
+                    localStorage.removeItem('theme');
+                    document.documentElement.removeAttribute('data-theme');
+                } else {
+                    localStorage.setItem('theme', theme);
+                    document.documentElement.setAttribute('data-theme', theme);
+                }
+                updateIcon(theme);
+            }
+
+            function updateIcon(theme) {
+                iconAuto.style.display = theme === 'auto' ? 'block' : 'none';
+                iconLight.style.display = theme === 'light' ? 'block' : 'none';
+                iconDark.style.display = theme === 'dark' ? 'block' : 'none';
+
+                const labels = {
+                    'auto': 'Theme: Auto (system preference). Click to switch to light.',
+                    'light': 'Theme: Light. Click to switch to dark.',
+                    'dark': 'Theme: Dark. Click to switch to auto.'
+                };
+                toggle.setAttribute('aria-label', labels[theme]);
+            }
+
+            function cycleTheme() {
+                const current = getTheme();
+                const next = current === 'auto' ? 'light' : current === 'light' ? 'dark' : 'auto';
+                setTheme(next);
+            }
+
+            // Initialize
+            const saved = getTheme();
+            if (saved !== 'auto') {
+                document.documentElement.setAttribute('data-theme', saved);
+            }
+            updateIcon(saved);
+            toggle.addEventListener('click', cycleTheme);
+        })();
+
+        // Example code snippets
+        const examples = [
+            {
+                name: 'Hello World',
+                code: `console.log('Hello, World!');`
+            },
+            {
+                name: 'Factorial',
+                code: `function factorial(n) {
+    if (n <= 1) return 1;
+    return n * factorial(n - 1);
+}
+
+console.log('5! =', factorial(5));
+console.log('10! =', factorial(10));`
+            },
+            {
+                name: 'Fibonacci',
+                code: `function fibonacci(n) {
+    var seq = [0, 1];
+    for (var i = 2; i < n; i++) {
+        seq.push(seq[i-1] + seq[i-2]);
+    }
+    return seq;
+}
+
+console.log('First 15 Fibonacci numbers:');
+console.log(fibonacci(15).join(', '));`
+            },
+            {
+                name: 'Array Methods',
+                code: `var numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+var doubled = numbers.map(n => n * 2);
+console.log('Doubled:', doubled);
+
+var evens = numbers.filter(n => n % 2 === 0);
+console.log('Evens:', evens);
+
+var sum = numbers.reduce((a, b) => a + b, 0);
+console.log('Sum:', sum);`
+            },
+            {
+                name: 'Objects & JSON',
+                code: `var person = {
+    name: 'Alice',
+    age: 30,
+    hobbies: ['reading', 'coding', 'hiking'],
+    address: {
+        city: 'San Francisco',
+        country: 'USA'
+    }
+};
+
+console.log(JSON.stringify(person, null, 2));
+console.log('\\nName:', person.name);
+console.log('First hobby:', person.hobbies[0]);`
+            },
+            {
+                name: 'Closures',
+                code: `function makeCounter() {
+    var count = 0;
+    return function() {
+        count = count + 1;
+        return count;
+    };
+}
+
+var counter = makeCounter();
+console.log('Count:', counter()); // 1
+console.log('Count:', counter()); // 2
+console.log('Count:', counter()); // 3`
+            },
+            {
+                name: 'String Methods',
+                code: `var text = 'JavaScript is awesome!';
+
+console.log('Original:', text);
+console.log('Uppercase:', text.toUpperCase());
+console.log('Lowercase:', text.toLowerCase());
+console.log('Length:', text.length);
+console.log('Split:', text.split(' '));
+console.log('Includes "awesome":', text.includes('awesome'));`
+            },
+            {
+                name: 'FizzBuzz',
+                code: `for (var i = 1; i <= 20; i++) {
+    if (i % 15 === 0) console.log('FizzBuzz');
+    else if (i % 3 === 0) console.log('Fizz');
+    else if (i % 5 === 0) console.log('Buzz');
+    else console.log(i);
+}`
+            },
+            {
+                name: 'Regex',
+                code: `var text = 'Contact: john@example.com or jane@test.org';
+var emailPattern = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/g;
+
+var matches = text.match(emailPattern);
+console.log('Found emails:', matches);
+
+var replaced = text.replace(emailPattern, '[REDACTED]');
+console.log('Redacted:', replaced);`
+            },
+            {
+                name: 'Math Functions',
+                code: `console.log('Math.PI:', Math.PI);
+console.log('Math.E:', Math.E);
+console.log('Math.sqrt(16):', Math.sqrt(16));
+console.log('Math.pow(2, 10):', Math.pow(2, 10));
+console.log('Math.abs(-42):', Math.abs(-42));
+console.log('Math.floor(3.7):', Math.floor(3.7));
+console.log('Math.ceil(3.2):', Math.ceil(3.2));
+console.log('Math.round(3.5):', Math.round(3.5));
+console.log('Math.max(1, 5, 3):', Math.max(1, 5, 3));
+console.log('Math.min(1, 5, 3):', Math.min(1, 5, 3));`
+            }
+        ];
+
+        let pyodide = null;
+
+        const codeInput = document.getElementById('code-input');
+        const runBtn = document.getElementById('run-btn');
+        const clearBtn = document.getElementById('clear-btn');
+        const copyBtn = document.getElementById('copy-btn');
+        const statusBar = document.getElementById('status-bar');
+        const pyodideStatus = document.getElementById('pyodide-status');
+        const outputSection = document.getElementById('output-section');
+        const outputEl = document.getElementById('output');
+        const executionTimeEl = document.getElementById('execution-time');
+        const memoryInfoEl = document.getElementById('memory-info');
+        const examplesList = document.getElementById('examples-list');
+
+        // Populate examples
+        examples.forEach((example) => {
+            const btn = document.createElement('button');
+            btn.className = 'example-btn';
+            btn.textContent = example.name;
+            btn.addEventListener('click', () => {
+                codeInput.value = example.code;
+                codeInput.focus();
+                // Auto-run if Pyodide is ready
+                if (pyodide && !runBtn.disabled) {
+                    executeCode(example.code);
+                }
+            });
+            examplesList.appendChild(btn);
+        });
+
+        // Status helpers
+        function showStatusBar(message, type = 'info') {
+            statusBar.textContent = message;
+            statusBar.className = `visible ${type}`;
+        }
+
+        function hideStatusBar() {
+            statusBar.className = '';
+        }
+
+        function showOutput(text, isError = false) {
+            outputEl.textContent = text || '(no output)';
+            outputEl.className = isError ? 'error-output' : '';
+            outputSection.classList.add('visible');
+        }
+
+        function hideOutput() {
+            outputSection.classList.remove('visible');
+        }
+
+        function escapeForPython(str) {
+            return str
+                .replace(/\\/g, '\\\\')
+                .replace(/"""/g, '\\"\\"\\"')
+                .replace(/\n/g, '\\n')
+                .replace(/\r/g, '\\r')
+                .replace(/\t/g, '\\t');
+        }
+
+        // Execute code using micro-javascript
+        async function executeCode(code) {
+            if (!pyodide) {
+                showStatusBar('Pyodide not initialized', 'error');
+                return;
+            }
+
+            if (!code.trim()) {
+                showStatusBar('Please enter some code to execute', 'error');
+                return;
+            }
+
+            runBtn.disabled = true;
+            runBtn.textContent = 'Running...';
+            hideStatusBar();
+
+            const startTime = performance.now();
+
+            try {
+                const escapedCode = escapeForPython(code);
+                const result = await pyodide.runPythonAsync(`execute_code("""${escapedCode}""")`);
+                const data = JSON.parse(result);
+
+                const endTime = performance.now();
+                const executionTime = (endTime - startTime).toFixed(2);
+
+                if (data.success) {
+                    let output = '';
+                    if (data.console_output && data.console_output.length > 0) {
+                        output = data.console_output.join('\n');
+                    }
+                    if (data.result !== null && data.result !== undefined && data.result !== 'undefined') {
+                        if (output) {
+                            output += '\n\n=> ' + data.result;
+                        } else {
+                            output = '=> ' + data.result;
+                        }
+                    }
+                    showOutput(output || '(no output)');
+                    executionTimeEl.textContent = `Execution time: ${executionTime}ms`;
+                    memoryInfoEl.textContent = data.memory_used ? `Memory: ${data.memory_used}` : '';
+                } else {
+                    showOutput(`Error: ${data.error}`, true);
+                    executionTimeEl.textContent = `Execution time: ${executionTime}ms`;
+                    memoryInfoEl.textContent = '';
+                }
+            } catch (e) {
+                const endTime = performance.now();
+                const executionTime = (endTime - startTime).toFixed(2);
+                showOutput(`Error: ${e.message}`, true);
+                executionTimeEl.textContent = `Execution time: ${executionTime}ms`;
+                memoryInfoEl.textContent = '';
+            } finally {
+                runBtn.disabled = false;
+                runBtn.textContent = 'Run Code';
+            }
+        }
+
+        // Initialize Pyodide and micro-javascript
+        async function initialize() {
+            try {
+                pyodideStatus.textContent = 'Loading Pyodide...';
+                pyodideStatus.className = 'status loading';
+
+                pyodide = await loadPyodide();
+
+                pyodideStatus.textContent = 'Installing micro-javascript...';
+                await pyodide.loadPackage('micropip');
+                await pyodide.runPythonAsync(`
+import micropip
+await micropip.install('micro-javascript')
+`);
+
+                await pyodide.runPythonAsync(`
+import json
+from microjs import Context
+from microjs.errors import JSSyntaxError, JSRuntimeError, JSTimeoutError, JSMemoryError
+
+def execute_code(source):
+    console_output = []
+
+    def capture_print(*args):
+        console_output.append(' '.join(str(arg) for arg in args))
+
+    try:
+        ctx = Context(memory_limit=1024*1024, time_limit=5.0)
+
+        # Override console.log to capture output
+        original_console = ctx.global_object.get('console')
+
+        # Create a wrapper that captures console.log calls
+        class ConsoleCapture:
+            def log(self, *args):
+                console_output.append(' '.join(format_value(arg) for arg in args))
+            def warn(self, *args):
+                console_output.append('[WARN] ' + ' '.join(format_value(arg) for arg in args))
+            def error(self, *args):
+                console_output.append('[ERROR] ' + ' '.join(format_value(arg) for arg in args))
+            def info(self, *args):
+                console_output.append('[INFO] ' + ' '.join(format_value(arg) for arg in args))
+
+        def format_value(val):
+            if val is None:
+                return 'undefined'
+            if isinstance(val, bool):
+                return 'true' if val else 'false'
+            if isinstance(val, (list, dict)):
+                return json.dumps(val)
+            return str(val)
+
+        # Inject our console capture
+        ctx.set_global('console', ConsoleCapture())
+
+        result = ctx.eval(source)
+
+        result_str = format_value(result)
+
+        return json.dumps({
+            'success': True,
+            'result': result_str,
+            'console_output': console_output,
+            'memory_used': None
+        })
+    except JSSyntaxError as e:
+        return json.dumps({
+            'success': False,
+            'error': f'SyntaxError: {e}',
+            'console_output': console_output
+        })
+    except JSTimeoutError as e:
+        return json.dumps({
+            'success': False,
+            'error': f'TimeoutError: {e}',
+            'console_output': console_output
+        })
+    except JSMemoryError as e:
+        return json.dumps({
+            'success': False,
+            'error': f'MemoryError: {e}',
+            'console_output': console_output
+        })
+    except JSRuntimeError as e:
+        return json.dumps({
+            'success': False,
+            'error': f'RuntimeError: {e}',
+            'console_output': console_output
+        })
+    except Exception as e:
+        return json.dumps({
+            'success': False,
+            'error': str(e),
+            'console_output': console_output
+        })
+`);
+
+                pyodideStatus.textContent = 'Ready';
+                pyodideStatus.className = 'status ready';
+                runBtn.textContent = 'Run Code';
+                runBtn.disabled = false;
+
+                showStatusBar('Ready to execute JavaScript!', 'success');
+                setTimeout(hideStatusBar, 2000);
+
+                // Load default example
+                codeInput.value = examples[0].code;
+
+            } catch (error) {
+                pyodideStatus.textContent = 'Error';
+                pyodideStatus.className = 'status error';
+                showStatusBar('Failed to initialize: ' + error.message, 'error');
+                console.error('Initialization error:', error);
+            }
+        }
+
+        // Event listeners
+        runBtn.addEventListener('click', () => {
+            executeCode(codeInput.value);
+        });
+
+        clearBtn.addEventListener('click', () => {
+            codeInput.value = '';
+            hideOutput();
+            hideStatusBar();
+            codeInput.focus();
+        });
+
+        copyBtn.addEventListener('click', async () => {
+            try {
+                await navigator.clipboard.writeText(outputEl.textContent);
+                copyBtn.textContent = 'Copied!';
+                setTimeout(() => {
+                    copyBtn.textContent = 'Copy';
+                }, 1500);
+            } catch (e) {
+                showStatusBar('Failed to copy to clipboard', 'error');
+            }
+        });
+
+        // Keyboard shortcuts
+        codeInput.addEventListener('keydown', (e) => {
+            // Ctrl/Cmd + Enter to run
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                if (!runBtn.disabled) {
+                    executeCode(codeInput.value);
+                }
+            }
+            // Tab for indentation
+            if (e.key === 'Tab') {
+                e.preventDefault();
+                const start = codeInput.selectionStart;
+                const end = codeInput.selectionEnd;
+                codeInput.value = codeInput.value.substring(0, start) + '    ' + codeInput.value.substring(end);
+                codeInput.selectionStart = codeInput.selectionEnd = start + 4;
+            }
+        });
+
+        // Initialize on page load
+        initialize();
+    </script>
+</body>
+</html>

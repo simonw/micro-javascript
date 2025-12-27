@@ -1,0 +1,1092 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>micro-javascript parser playground</title>
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #f5f5f5;
+            --bg-secondary: #fff;
+            --bg-panel: #fafafa;
+            --bg-header: #e8e8e8;
+            --bg-input: #fff;
+            --bg-input-focus: #fefefe;
+            --text-primary: #222;
+            --text-secondary: #555;
+            --text-muted: #888;
+            --border-color: #ddd;
+            --accent-color: #c9a800;
+            --accent-bg: rgba(201, 168, 0, 0.1);
+            --token-number-bg: #e3f2fd;
+            --token-number-fg: #1565c0;
+            --token-string-bg: #fff3e0;
+            --token-string-fg: #e65100;
+            --token-identifier-bg: #e8f5e9;
+            --token-identifier-fg: #2e7d32;
+            --token-keyword-bg: #f3e5f5;
+            --token-keyword-fg: #7b1fa2;
+            --token-operator-bg: #eceff1;
+            --token-operator-fg: #455a64;
+            --token-punctuation-bg: #fafafa;
+            --token-punctuation-fg: #757575;
+            --token-regex-bg: #ffebee;
+            --token-regex-fg: #c62828;
+            --ast-type: #00897b;
+            --ast-prop: #1976d2;
+            --ast-value: #d84315;
+            --ast-number: #388e3c;
+            --ast-bool: #1565c0;
+            --ast-null: #757575;
+            --ast-border: #e0e0e0;
+            --hover-bg: rgba(0, 0, 0, 0.05);
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg-primary: #1a1a2e;
+                --bg-secondary: #16213e;
+                --bg-panel: #16213e;
+                --bg-header: #0f3460;
+                --bg-input: #1a1a2e;
+                --bg-input-focus: #1e1e3a;
+                --text-primary: #eee;
+                --text-secondary: #ccc;
+                --text-muted: #888;
+                --border-color: #333;
+                --accent-color: #f7df1e;
+                --accent-bg: rgba(247, 223, 30, 0.1);
+                --token-number-bg: #264f78;
+                --token-number-fg: #b5cea8;
+                --token-string-bg: #4e342e;
+                --token-string-fg: #ce9178;
+                --token-identifier-bg: #1e3a5f;
+                --token-identifier-fg: #9cdcfe;
+                --token-keyword-bg: #4a148c;
+                --token-keyword-fg: #c586c0;
+                --token-operator-bg: #37474f;
+                --token-operator-fg: #d4d4d4;
+                --token-punctuation-bg: #263238;
+                --token-punctuation-fg: #808080;
+                --token-regex-bg: #5d4037;
+                --token-regex-fg: #d16969;
+                --ast-type: #4ec9b0;
+                --ast-prop: #9cdcfe;
+                --ast-value: #ce9178;
+                --ast-number: #b5cea8;
+                --ast-bool: #569cd6;
+                --ast-null: #808080;
+                --ast-border: #333;
+                --hover-bg: rgba(255, 255, 255, 0.1);
+            }
+        }
+
+        :root[data-theme="light"] {
+            --bg-primary: #f5f5f5;
+            --bg-secondary: #fff;
+            --bg-panel: #fafafa;
+            --bg-header: #e8e8e8;
+            --bg-input: #fff;
+            --bg-input-focus: #fefefe;
+            --text-primary: #222;
+            --text-secondary: #555;
+            --text-muted: #888;
+            --border-color: #ddd;
+            --accent-color: #c9a800;
+            --accent-bg: rgba(201, 168, 0, 0.1);
+            --token-number-bg: #e3f2fd;
+            --token-number-fg: #1565c0;
+            --token-string-bg: #fff3e0;
+            --token-string-fg: #e65100;
+            --token-identifier-bg: #e8f5e9;
+            --token-identifier-fg: #2e7d32;
+            --token-keyword-bg: #f3e5f5;
+            --token-keyword-fg: #7b1fa2;
+            --token-operator-bg: #eceff1;
+            --token-operator-fg: #455a64;
+            --token-punctuation-bg: #fafafa;
+            --token-punctuation-fg: #757575;
+            --token-regex-bg: #ffebee;
+            --token-regex-fg: #c62828;
+            --ast-type: #00897b;
+            --ast-prop: #1976d2;
+            --ast-value: #d84315;
+            --ast-number: #388e3c;
+            --ast-bool: #1565c0;
+            --ast-null: #757575;
+            --ast-border: #e0e0e0;
+            --hover-bg: rgba(0, 0, 0, 0.05);
+        }
+
+        :root[data-theme="dark"] {
+            --bg-primary: #1a1a2e;
+            --bg-secondary: #16213e;
+            --bg-panel: #16213e;
+            --bg-header: #0f3460;
+            --bg-input: #1a1a2e;
+            --bg-input-focus: #1e1e3a;
+            --text-primary: #eee;
+            --text-secondary: #ccc;
+            --text-muted: #888;
+            --border-color: #333;
+            --accent-color: #f7df1e;
+            --accent-bg: rgba(247, 223, 30, 0.1);
+            --token-number-bg: #264f78;
+            --token-number-fg: #b5cea8;
+            --token-string-bg: #4e342e;
+            --token-string-fg: #ce9178;
+            --token-identifier-bg: #1e3a5f;
+            --token-identifier-fg: #9cdcfe;
+            --token-keyword-bg: #4a148c;
+            --token-keyword-fg: #c586c0;
+            --token-operator-bg: #37474f;
+            --token-operator-fg: #d4d4d4;
+            --token-punctuation-bg: #263238;
+            --token-punctuation-fg: #808080;
+            --token-regex-bg: #5d4037;
+            --token-regex-fg: #d16969;
+            --ast-type: #4ec9b0;
+            --ast-prop: #9cdcfe;
+            --ast-value: #ce9178;
+            --ast-number: #b5cea8;
+            --ast-bool: #569cd6;
+            --ast-null: #808080;
+            --ast-border: #333;
+            --hover-bg: rgba(255, 255, 255, 0.1);
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        .header {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            margin-bottom: 5px;
+        }
+
+        h1 {
+            text-align: center;
+            color: var(--accent-color);
+            margin: 0;
+        }
+
+        #theme-toggle {
+            position: absolute;
+            right: 0;
+            background: var(--bg-header);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 8px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        #theme-toggle:hover {
+            background: var(--hover-bg);
+        }
+
+        #theme-toggle svg {
+            width: 20px;
+            height: 20px;
+            fill: var(--text-primary);
+        }
+
+        .subtitle {
+            text-align: center;
+            color: var(--text-muted);
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        .main-layout {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 1200px) {
+            .main-layout {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .panel {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .panel-header {
+            background: var(--bg-header);
+            padding: 12px 16px;
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .panel-header .status {
+            font-size: 12px;
+            padding: 4px 10px;
+            border-radius: 4px;
+            background: var(--border-color);
+        }
+
+        .status.loading {
+            background: #f39c12;
+            color: #000;
+        }
+
+        .status.ready {
+            background: #27ae60;
+            color: #fff;
+        }
+
+        .status.error {
+            background: #e74c3c;
+            color: #fff;
+        }
+
+        textarea {
+            width: 100%;
+            min-height: 300px;
+            background: var(--bg-input);
+            color: var(--text-primary);
+            border: none;
+            padding: 16px;
+            font-family: 'Fira Code', 'Monaco', 'Consolas', monospace;
+            font-size: 14px;
+            line-height: 1.6;
+            resize: vertical;
+            outline: none;
+            flex: 1;
+        }
+
+        textarea:focus {
+            background: var(--bg-input-focus);
+        }
+
+        .output-panels {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .output-area {
+            width: 100%;
+            min-height: 200px;
+            max-height: 400px;
+            background: var(--bg-input);
+            color: var(--text-primary);
+            padding: 16px;
+            font-family: 'Fira Code', 'Monaco', 'Consolas', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            overflow: auto;
+        }
+
+        .error-message {
+            color: #e74c3c;
+            background: rgba(231, 76, 60, 0.15);
+            padding: 12px 16px;
+            border-left: 4px solid #e74c3c;
+            margin: 0;
+            font-family: 'Fira Code', 'Monaco', 'Consolas', monospace;
+            font-size: 13px;
+        }
+
+        .examples {
+            margin-top: 20px;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px 20px;
+        }
+
+        .examples h3 {
+            margin: 0 0 12px 0;
+            color: var(--accent-color);
+            font-size: 14px;
+        }
+
+        .example-buttons {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            background: var(--bg-header);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background: var(--hover-bg);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Token styling */
+        .token {
+            display: inline-block;
+            padding: 2px 6px;
+            margin: 2px;
+            border-radius: 3px;
+            font-size: 12px;
+            cursor: default;
+        }
+
+        .token-NUMBER { background: var(--token-number-bg); color: var(--token-number-fg); }
+        .token-STRING { background: var(--token-string-bg); color: var(--token-string-fg); }
+        .token-IDENTIFIER { background: var(--token-identifier-bg); color: var(--token-identifier-fg); }
+        .token-keyword { background: var(--token-keyword-bg); color: var(--token-keyword-fg); }
+        .token-operator { background: var(--token-operator-bg); color: var(--token-operator-fg); }
+        .token-punctuation { background: var(--token-punctuation-bg); color: var(--token-punctuation-fg); }
+        .token-REGEX { background: var(--token-regex-bg); color: var(--token-regex-fg); }
+        .token-EOF { background: var(--border-color); color: var(--text-muted); }
+
+        .token-location {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-left: 4px;
+        }
+
+        /* AST Tree styling */
+        .ast-node {
+            margin-left: 20px;
+            border-left: 1px solid var(--ast-border);
+            padding-left: 12px;
+        }
+
+        .ast-node.root {
+            margin-left: 0;
+            border-left: none;
+            padding-left: 0;
+        }
+
+        .ast-node-header {
+            cursor: pointer;
+            padding: 4px 8px;
+            margin: 2px 0;
+            border-radius: 4px;
+            display: inline-block;
+            transition: background 0.15s;
+        }
+
+        .ast-node-header:hover {
+            background: var(--hover-bg);
+        }
+
+        .ast-node-type {
+            color: var(--ast-type);
+            font-weight: 600;
+        }
+
+        .ast-node-prop {
+            color: var(--ast-prop);
+        }
+
+        .ast-node-value {
+            color: var(--ast-value);
+        }
+
+        .ast-node-number {
+            color: var(--ast-number);
+        }
+
+        .ast-node-bool {
+            color: var(--ast-bool);
+        }
+
+        .ast-node-null {
+            color: var(--ast-null);
+        }
+
+        .ast-children {
+            overflow: hidden;
+            transition: max-height 0.2s ease-out;
+        }
+
+        .ast-children.collapsed {
+            max-height: 0;
+        }
+
+        .toggle-icon {
+            display: inline-block;
+            width: 16px;
+            text-align: center;
+            color: var(--text-muted);
+            font-family: monospace;
+        }
+
+        .info-box {
+            margin-top: 20px;
+            padding: 16px;
+            background: var(--accent-bg);
+            border-left: 4px solid var(--accent-color);
+            border-radius: 0 8px 8px 0;
+            font-size: 13px;
+        }
+
+        .info-box a {
+            color: var(--accent-color);
+        }
+
+        .token-legend {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 12px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+        }
+
+        .legend-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
+        }
+
+        .stats {
+            color: var(--text-muted);
+            font-size: 12px;
+            margin-left: auto;
+        }
+
+        .line-indicator {
+            background: rgba(231, 76, 60, 0.3);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 11px;
+            color: #e74c3c;
+            margin-left: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>micro-javascript parser playground</h1>
+            <button id="theme-toggle" type="button" aria-label="Toggle theme">
+                <svg id="icon-auto" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 22C6.477 22 2 17.523 2 12S6.477 2 12 2s10 4.477 10 10-4.477 10-10 10zm0-2V4a8 8 0 1 0 0 16z"/></svg>
+                <svg id="icon-light" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" style="display:none"><path d="M12 18a6 6 0 1 1 0-12 6 6 0 0 1 0 12zm0-2a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM11 1h2v3h-2V1zm0 19h2v3h-2v-3zM3.515 4.929l1.414-1.414L7.05 5.636 5.636 7.05 3.515 4.93zM16.95 18.364l1.414-1.414 2.121 2.121-1.414 1.414-2.121-2.121zm2.121-14.85l1.414 1.415-2.121 2.121-1.414-1.414 2.121-2.121zM5.636 16.95l1.414 1.414-2.121 2.121-1.414-1.414 2.121-2.121zM23 11v2h-3v-2h3zM4 11v2H1v-2h3z"/></svg>
+                <svg id="icon-dark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" style="display:none"><path d="M10 7a7 7 0 0 0 12 4.9v.1c0 5.523-4.477 10-10 10S2 17.523 2 12 6.477 2 12 2h.1A6.979 6.979 0 0 0 10 7zm-6 5a8 8 0 0 0 15.062 3.762A9 9 0 0 1 8.238 4.938 7.999 7.999 0 0 0 4 12z"/></svg>
+            </button>
+        </div>
+        <p class="subtitle">Explore the lexer and parser internals - see how JavaScript code is tokenized and parsed into an AST</p>
+
+        <div class="main-layout">
+            <div class="panel">
+                <div class="panel-header">
+                    <span>JavaScript Input</span>
+                    <span id="pyodide-status" class="status loading">Loading Pyodide...</span>
+                </div>
+                <textarea id="input" placeholder="Enter JavaScript code here...">function greet(name) {
+    var message = "Hello, " + name + "!";
+    return message;
+}
+
+var result = greet("world");
+console.log(result);</textarea>
+            </div>
+
+            <div class="output-panels">
+                <div class="panel">
+                    <div class="panel-header">
+                        <span>Tokens (Lexer Output)</span>
+                        <span id="token-stats" class="stats"></span>
+                    </div>
+                    <div id="tokens-output" class="output-area">Waiting for Pyodide to load...</div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-header">
+                        <span>AST (Parser Output)</span>
+                        <span id="ast-stats" class="stats"></span>
+                    </div>
+                    <div id="ast-output" class="output-area">Waiting for Pyodide to load...</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="examples">
+            <h3>Demo Scripts</h3>
+            <div class="example-buttons">
+                <button onclick="loadExample('hello')">Hello World</button>
+                <button onclick="loadExample('factorial')">Factorial</button>
+                <button onclick="loadExample('closure')">Closure</button>
+                <button onclick="loadExample('class')">Class</button>
+                <button onclick="loadExample('loops')">Loops</button>
+                <button onclick="loadExample('array')">Array Methods</button>
+                <button onclick="loadExample('regex')">Regex</button>
+                <button onclick="loadExample('arrow')">Arrow Functions</button>
+                <button onclick="loadExample('ternary')">Ternary & Operators</button>
+                <button onclick="loadExample('error')">Syntax Error</button>
+            </div>
+        </div>
+
+        <div class="info-box">
+            <strong>How it works:</strong> micro-javascript is a pure Python JavaScript sandbox engine.
+            The <strong>Lexer</strong> breaks source code into tokens (identifiers, keywords, operators, literals).
+            The <strong>Parser</strong> builds an Abstract Syntax Tree (AST) representing the code structure.
+            <a href="https://github.com/simonw/micro-javascript" target="_blank">View on GitHub</a>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.27.2/full/pyodide.js"></script>
+    <script>
+        // Theme toggle
+        (function() {
+            const toggle = document.getElementById('theme-toggle');
+            const iconAuto = document.getElementById('icon-auto');
+            const iconLight = document.getElementById('icon-light');
+            const iconDark = document.getElementById('icon-dark');
+
+            function getTheme() {
+                return localStorage.getItem('theme') || 'auto';
+            }
+
+            function setTheme(theme) {
+                if (theme === 'auto') {
+                    localStorage.removeItem('theme');
+                    document.documentElement.removeAttribute('data-theme');
+                } else {
+                    localStorage.setItem('theme', theme);
+                    document.documentElement.setAttribute('data-theme', theme);
+                }
+                updateIcon(theme);
+            }
+
+            function updateIcon(theme) {
+                iconAuto.style.display = theme === 'auto' ? 'block' : 'none';
+                iconLight.style.display = theme === 'light' ? 'block' : 'none';
+                iconDark.style.display = theme === 'dark' ? 'block' : 'none';
+
+                const labels = {
+                    'auto': 'Theme: Auto (system preference). Click to switch to light.',
+                    'light': 'Theme: Light. Click to switch to dark.',
+                    'dark': 'Theme: Dark. Click to switch to auto.'
+                };
+                toggle.setAttribute('aria-label', labels[theme]);
+            }
+
+            function cycleTheme() {
+                const current = getTheme();
+                const next = current === 'auto' ? 'light' : current === 'light' ? 'dark' : 'auto';
+                setTheme(next);
+            }
+
+            // Initialize
+            const saved = getTheme();
+            if (saved !== 'auto') {
+                document.documentElement.setAttribute('data-theme', saved);
+            }
+            updateIcon(saved);
+            toggle.addEventListener('click', cycleTheme);
+        })();
+
+        const examples = {
+            hello: `// Simple hello world
+function greet(name) {
+    var message = "Hello, " + name + "!";
+    return message;
+}
+
+var result = greet("world");
+console.log(result);`,
+
+            factorial: `// Recursive factorial function
+function factorial(n) {
+    if (n <= 1) {
+        return 1;
+    }
+    return n * factorial(n - 1);
+}
+
+var result = factorial(5);
+console.log("5! =", result);`,
+
+            closure: `// Closure example - counter factory
+function makeCounter() {
+    var count = 0;
+    return function() {
+        count = count + 1;
+        return count;
+    };
+}
+
+var counter = makeCounter();
+console.log(counter()); // 1
+console.log(counter()); // 2
+console.log(counter()); // 3`,
+
+            class: `// Simple class with constructor
+function Animal(name) {
+    this.name = name;
+}
+
+Animal.prototype.speak = function() {
+    return this.name + " makes a sound";
+};
+
+var dog = new Animal("Dog");
+console.log(dog.speak());`,
+
+            loops: `// Various loop constructs
+var sum = 0;
+
+// for loop
+for (var i = 0; i < 5; i++) {
+    sum = sum + i;
+}
+
+// while loop
+var j = 0;
+while (j < 3) {
+    sum = sum + j;
+    j++;
+}
+
+// do-while loop
+do {
+    sum = sum + 1;
+} while (sum < 15);
+
+console.log("sum:", sum);`,
+
+            array: `// Array operations
+var numbers = [1, 2, 3, 4, 5];
+var doubled = [];
+
+for (var i = 0; i < numbers.length; i++) {
+    doubled[i] = numbers[i] * 2;
+}
+
+var obj = {
+    name: "test",
+    values: [10, 20, 30],
+    nested: { deep: true }
+};
+
+console.log(doubled);
+console.log(obj.nested.deep);`,
+
+            regex: `// Regular expression example
+var pattern = /hello (\\w+)/gi;
+var text = "Hello World! hello there";
+var match = pattern.exec(text);
+
+if (match) {
+    console.log("Found:", match[0]);
+    console.log("Group:", match[1]);
+}`,
+
+            arrow: `// Arrow functions
+var add = (a, b) => a + b;
+var square = x => x * x;
+
+var greet = (name) => {
+    var msg = "Hello, " + name;
+    return msg;
+};
+
+console.log(add(2, 3));
+console.log(square(4));
+console.log(greet("Arrow"));`,
+
+            ternary: `// Ternary and various operators
+var x = 10;
+var y = 5;
+
+// Ternary operator
+var max = x > y ? x : y;
+
+// Logical operators
+var both = x > 0 && y > 0;
+var either = x > 20 || y > 0;
+var not = !false;
+
+// Bitwise operators
+var bitAnd = x & y;
+var bitOr = x | y;
+var shifted = x << 2;
+
+// Compound assignment
+x += 5;
+y *= 2;
+
+console.log("max:", max);
+console.log("shifted:", shifted);`,
+
+            error: `// This code has a syntax error
+function broken( {
+    return "missing parenthesis";
+}
+
+broken();`
+        };
+
+        let pyodide = null;
+        let debounceTimer = null;
+
+        const inputEl = document.getElementById('input');
+        const tokensOutputEl = document.getElementById('tokens-output');
+        const astOutputEl = document.getElementById('ast-output');
+        const statusEl = document.getElementById('pyodide-status');
+        const tokenStatsEl = document.getElementById('token-stats');
+        const astStatsEl = document.getElementById('ast-stats');
+
+        const keywordTypes = ['VAR', 'FUNCTION', 'RETURN', 'IF', 'ELSE', 'WHILE', 'DO', 'FOR', 'IN', 'OF',
+            'BREAK', 'CONTINUE', 'SWITCH', 'CASE', 'DEFAULT', 'TRY', 'CATCH', 'FINALLY', 'THROW',
+            'NEW', 'DELETE', 'TYPEOF', 'INSTANCEOF', 'THIS', 'TRUE', 'FALSE', 'NULL', 'VOID'];
+
+        const operatorTypes = ['PLUS', 'MINUS', 'STAR', 'SLASH', 'PERCENT', 'STARSTAR', 'PLUSPLUS', 'MINUSMINUS',
+            'LT', 'GT', 'LE', 'GE', 'EQ', 'NE', 'EQEQ', 'NENE', 'AND', 'OR', 'NOT',
+            'AMPERSAND', 'PIPE', 'CARET', 'TILDE', 'LSHIFT', 'RSHIFT', 'URSHIFT',
+            'ASSIGN', 'PLUS_ASSIGN', 'MINUS_ASSIGN', 'STAR_ASSIGN', 'SLASH_ASSIGN',
+            'PERCENT_ASSIGN', 'AND_ASSIGN', 'OR_ASSIGN', 'XOR_ASSIGN', 'ARROW'];
+
+        const punctuationTypes = ['LPAREN', 'RPAREN', 'LBRACE', 'RBRACE', 'LBRACKET', 'RBRACKET',
+            'SEMICOLON', 'COMMA', 'DOT', 'COLON', 'QUESTION'];
+
+        function getTokenClass(type) {
+            if (keywordTypes.includes(type)) return 'token-keyword';
+            if (operatorTypes.includes(type)) return 'token-operator';
+            if (punctuationTypes.includes(type)) return 'token-punctuation';
+            return 'token-' + type;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function renderTokens(tokens) {
+            if (!tokens || tokens.length === 0) {
+                return '<span style="color: var(--text-muted);">No tokens</span>';
+            }
+
+            let html = '<div class="token-legend">';
+            html += '<div class="legend-item"><span class="legend-color" style="background: var(--token-keyword-bg);"></span>Keyword</div>';
+            html += '<div class="legend-item"><span class="legend-color" style="background: var(--token-number-bg);"></span>Number</div>';
+            html += '<div class="legend-item"><span class="legend-color" style="background: var(--token-string-bg);"></span>String</div>';
+            html += '<div class="legend-item"><span class="legend-color" style="background: var(--token-identifier-bg);"></span>Identifier</div>';
+            html += '<div class="legend-item"><span class="legend-color" style="background: var(--token-operator-bg);"></span>Operator</div>';
+            html += '<div class="legend-item"><span class="legend-color" style="background: var(--token-punctuation-bg);"></span>Punctuation</div>';
+            html += '</div>';
+
+            html += '<div style="line-height: 2;">';
+            for (const token of tokens) {
+                const tokenClass = getTokenClass(token.type);
+                let displayValue = token.type;
+
+                if (token.value !== null && token.value !== undefined) {
+                    if (token.type === 'STRING') {
+                        displayValue = `"${escapeHtml(token.value)}"`;
+                    } else if (token.type === 'REGEX') {
+                        displayValue = `/${escapeHtml(token.value[0])}/${token.value[1]}`;
+                    } else if (token.type === 'IDENTIFIER' || token.type === 'NUMBER') {
+                        displayValue = escapeHtml(String(token.value));
+                    } else if (keywordTypes.includes(token.type)) {
+                        displayValue = escapeHtml(String(token.value));
+                    } else if (typeof token.value === 'string') {
+                        displayValue = escapeHtml(token.value);
+                    }
+                }
+
+                html += `<span class="token ${tokenClass}" title="${token.type} at line ${token.line}, col ${token.column}">${displayValue}<span class="token-location">${token.line}:${token.column}</span></span>`;
+            }
+            html += '</div>';
+            return html;
+        }
+
+        function renderAstNode(node, propName = null, isRoot = false) {
+            if (node === null) {
+                return `<span class="ast-node-null">null</span>`;
+            }
+
+            if (typeof node !== 'object') {
+                if (typeof node === 'string') {
+                    return `<span class="ast-node-value">"${escapeHtml(node)}"</span>`;
+                }
+                if (typeof node === 'number') {
+                    return `<span class="ast-node-number">${node}</span>`;
+                }
+                if (typeof node === 'boolean') {
+                    return `<span class="ast-node-bool">${node}</span>`;
+                }
+                return `<span>${escapeHtml(String(node))}</span>`;
+            }
+
+            if (Array.isArray(node)) {
+                if (node.length === 0) {
+                    return `<span class="ast-node-null">[]</span>`;
+                }
+                let html = `<div class="ast-node">`;
+                html += `<div class="ast-node-header" onclick="toggleAstNode(this)"><span class="toggle-icon">-</span> [${node.length} items]</div>`;
+                html += `<div class="ast-children">`;
+                node.forEach((item, i) => {
+                    html += `<div><span class="ast-node-prop">[${i}]</span>: ${renderAstNode(item)}</div>`;
+                });
+                html += `</div></div>`;
+                return html;
+            }
+
+            if (node.type) {
+                const nodeClass = isRoot ? 'ast-node root' : 'ast-node';
+                let html = `<div class="${nodeClass}">`;
+                html += `<div class="ast-node-header" onclick="toggleAstNode(this)"><span class="toggle-icon">-</span> <span class="ast-node-type">${escapeHtml(node.type)}</span></div>`;
+                html += `<div class="ast-children">`;
+
+                for (const [key, value] of Object.entries(node)) {
+                    if (key === 'type') continue;
+                    html += `<div><span class="ast-node-prop">${escapeHtml(key)}</span>: ${renderAstNode(value)}</div>`;
+                }
+
+                html += `</div></div>`;
+                return html;
+            }
+
+            let html = `<div class="ast-node">`;
+            html += `<div class="ast-node-header" onclick="toggleAstNode(this)"><span class="toggle-icon">-</span> {object}</div>`;
+            html += `<div class="ast-children">`;
+            for (const [key, value] of Object.entries(node)) {
+                html += `<div><span class="ast-node-prop">${escapeHtml(key)}</span>: ${renderAstNode(value)}</div>`;
+            }
+            html += `</div></div>`;
+            return html;
+        }
+
+        function toggleAstNode(header) {
+            const children = header.nextElementSibling;
+            const icon = header.querySelector('.toggle-icon');
+            if (children.classList.contains('collapsed')) {
+                children.classList.remove('collapsed');
+                icon.textContent = '-';
+            } else {
+                children.classList.add('collapsed');
+                icon.textContent = '+';
+            }
+        }
+
+        window.toggleAstNode = toggleAstNode;
+
+        function countAstNodes(node) {
+            if (node === null || typeof node !== 'object') return 0;
+            if (Array.isArray(node)) {
+                return node.reduce((sum, item) => sum + countAstNodes(item), 0);
+            }
+            let count = node.type ? 1 : 0;
+            for (const value of Object.values(node)) {
+                count += countAstNodes(value);
+            }
+            return count;
+        }
+
+        async function initPyodide() {
+            try {
+                statusEl.textContent = 'Loading Pyodide...';
+                statusEl.className = 'status loading';
+
+                pyodide = await loadPyodide();
+
+                statusEl.textContent = 'Installing micro-javascript...';
+                await pyodide.loadPackage('micropip');
+                await pyodide.runPythonAsync(`
+import micropip
+await micropip.install('micro-javascript')
+`);
+
+                await pyodide.runPythonAsync(`
+import json
+from microjs.lexer import Lexer
+from microjs.parser import Parser
+from microjs.tokens import TokenType
+from microjs.errors import JSSyntaxError
+
+def tokenize_source(source):
+    try:
+        lexer = Lexer(source)
+        tokens = []
+        for token in lexer.tokenize():
+            token_dict = {
+                'type': token.type.name,
+                'value': token.value,
+                'line': token.line,
+                'column': token.column
+            }
+            if token.type == TokenType.REGEX and isinstance(token.value, tuple):
+                token_dict['value'] = list(token.value)
+            tokens.append(token_dict)
+        return json.dumps({'success': True, 'tokens': tokens})
+    except JSSyntaxError as e:
+        return json.dumps({
+            'success': False,
+            'error': str(e),
+            'line': e.line,
+            'column': e.column
+        })
+    except Exception as e:
+        return json.dumps({
+            'success': False,
+            'error': str(e),
+            'line': 0,
+            'column': 0
+        })
+
+def parse_source(source):
+    try:
+        parser = Parser(source)
+        ast = parser.parse()
+        return json.dumps({'success': True, 'ast': ast.to_dict()})
+    except JSSyntaxError as e:
+        return json.dumps({
+            'success': False,
+            'error': str(e),
+            'line': e.line,
+            'column': e.column
+        })
+    except Exception as e:
+        return json.dumps({
+            'success': False,
+            'error': str(e),
+            'line': 0,
+            'column': 0
+        })
+`);
+
+                statusEl.textContent = 'Ready';
+                statusEl.className = 'status ready';
+
+                processCode();
+
+            } catch (error) {
+                statusEl.textContent = 'Error loading';
+                statusEl.className = 'status error';
+                tokensOutputEl.innerHTML = `<div class="error-message">Failed to initialize: ${escapeHtml(error.message)}</div>`;
+                astOutputEl.innerHTML = `<div class="error-message">Failed to initialize: ${escapeHtml(error.message)}</div>`;
+            }
+        }
+
+        async function processCode() {
+            if (!pyodide) return;
+
+            const source = inputEl.value;
+
+            try {
+                const escapedSource = source
+                    .replace(/\\/g, '\\\\')
+                    .replace(/"""/g, '\\"\\"\\"')
+                    .replace(/\n/g, '\\n')
+                    .replace(/\r/g, '\\r')
+                    .replace(/\t/g, '\\t');
+
+                const tokensResult = await pyodide.runPythonAsync(`tokenize_source("""${escapedSource}""")`);
+                const tokensData = JSON.parse(tokensResult);
+
+                if (tokensData.success) {
+                    const tokens = tokensData.tokens.filter(t => t.type !== 'EOF');
+                    tokenStatsEl.textContent = `${tokens.length} tokens`;
+                    tokensOutputEl.innerHTML = renderTokens(tokens);
+                } else {
+                    tokenStatsEl.textContent = 'Error';
+                    let errorHtml = `<div class="error-message">${escapeHtml(tokensData.error)}`;
+                    if (tokensData.line > 0) {
+                        errorHtml += `<span class="line-indicator">Line ${tokensData.line}:${tokensData.column}</span>`;
+                    }
+                    errorHtml += `</div>`;
+                    tokensOutputEl.innerHTML = errorHtml;
+                }
+            } catch (error) {
+                tokenStatsEl.textContent = 'Error';
+                tokensOutputEl.innerHTML = `<div class="error-message">${escapeHtml(error.message)}</div>`;
+            }
+
+            try {
+                const escapedSource = source
+                    .replace(/\\/g, '\\\\')
+                    .replace(/"""/g, '\\"\\"\\"')
+                    .replace(/\n/g, '\\n')
+                    .replace(/\r/g, '\\r')
+                    .replace(/\t/g, '\\t');
+
+                const astResult = await pyodide.runPythonAsync(`parse_source("""${escapedSource}""")`);
+                const astData = JSON.parse(astResult);
+
+                if (astData.success) {
+                    const nodeCount = countAstNodes(astData.ast);
+                    astStatsEl.textContent = `${nodeCount} nodes`;
+                    astOutputEl.innerHTML = renderAstNode(astData.ast, null, true);
+                } else {
+                    astStatsEl.textContent = 'Error';
+                    let errorHtml = `<div class="error-message">${escapeHtml(astData.error)}`;
+                    if (astData.line > 0) {
+                        errorHtml += `<span class="line-indicator">Line ${astData.line}:${astData.column}</span>`;
+                    }
+                    errorHtml += `</div>`;
+                    astOutputEl.innerHTML = errorHtml;
+                }
+            } catch (error) {
+                astStatsEl.textContent = 'Error';
+                astOutputEl.innerHTML = `<div class="error-message">${escapeHtml(error.message)}</div>`;
+            }
+        }
+
+        function loadExample(name) {
+            if (examples[name]) {
+                inputEl.value = examples[name];
+                processCode();
+            }
+        }
+
+        window.loadExample = loadExample;
+
+        inputEl.addEventListener('input', () => {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(processCode, 250);
+        });
+
+        initPyodide();
+    </script>
+</body>
+</html>

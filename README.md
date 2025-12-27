@@ -16,6 +16,9 @@ This project provides a JavaScript execution environment with:
 - **Pure Python** - No C extensions or external dependencies
 - **Broad ES5+ support** - Variables, functions, closures, classes, iterators, promises, regex, and more
 
+> [!WARNING]
+> The sandbox is **not production ready**. Malicious code can still exhaust memory and has not been fully audited against escapes that could allow JavaScript to run arbitrary Python. See the [sandbox issue label](https://github.com/simonw/micro-javascript/issues?q=label%3A%22sandbox%22) for more.
+
 ## How it was built
 
 Most of this library was built using Claude Code for web - [here is the 15+ hour transcript](https://static.simonwillison.net/static/2025/claude-code-microjs/index.html).

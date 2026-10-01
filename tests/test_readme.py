@@ -136,3 +136,37 @@ no_comment = ctx.eval("y")
                         f"{var_name} = {actual!r}, expected {expected!r}\n"
                         f"Line: {lines[comment_line_idx]}"
                     )
+
+
+def extract_javascript_blocks(readme_content: str) -> list[str]:
+    """Extract all JavaScript code blocks from markdown content."""
+    return re.findall(r"```javascript\n(.*?)```", readme_content, re.DOTALL)
+
+
+def test_readme_javascript_examples():
+    """Every ```javascript block in the README runs, and '// => X' lines hold.
+
+    Code accumulates line by line; when a line ends in '// => <expected>' the
+    accumulated chunk is evaluated and its completion value compared with
+    <expected> (itself evaluated as JavaScript).
+    """
+    from microjs import Context
+
+    readme = (Path(__file__).parent.parent / "README.md").read_text()
+    blocks = extract_javascript_blocks(readme)
+    assert blocks, "README should contain ```javascript feature examples"
+    for block in blocks:
+        ctx = Context(time_limit=5.0)
+        pending = []
+        for line in block.split("\n"):
+            code, sep, expected = line.partition("// =>")
+            pending.append(code)
+            if not sep:
+                continue
+            chunk = "\n".join(pending)
+            pending = []
+            actual = ctx.eval(chunk)
+            wanted = Context().eval(f"({expected.strip()})")
+            assert compare_values(actual, wanted), f"{code.strip()}: {actual!r}"
+        if any(line.strip() for line in pending):
+            ctx.eval("\n".join(pending))

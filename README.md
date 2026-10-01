@@ -14,7 +14,7 @@ This project provides a JavaScript execution environment with:
 - **Memory limits** - Configurable maximum memory usage
 - **Time limits** - Configurable execution timeout
 - **Pure Python** - No C extensions or external dependencies
-- **Broad ES5+ support** - Variables, functions, closures, classes, iterators, promises, regex, and more
+- **An ES5 subset of JavaScript** - the language supported by MicroQuickJS, plus arrow functions and `for...of` (see [Supported features](#supported-features))
 
 > [!WARNING]
 > The sandbox is **not production ready**. Malicious code can still exhaust memory and has not been fully audited against escapes that could allow JavaScript to run arbitrary Python. See the [sandbox issue label](https://github.com/simonw/micro-javascript/issues?q=label%3A%22sandbox%22) for more.
@@ -138,24 +138,69 @@ ctx.set("makePoint", make_point)
 result = ctx.eval("var p = makePoint(10, 20); p.x + p.y;")  # Returns 30
 ```
 
-## Supported Features
+## Supported features
 
-- **Core**: variables, operators, control flow, functions, closures
-- **Objects**: object literals, prototypes, getters/setters, JSON
-- **Arrays**: literals, methods (map, filter, reduce, etc.), typed arrays
-- **Functions**: arrow functions, rest/spread, default parameters
-- **Classes**: class syntax, inheritance, static methods
-- **Iteration**: for-of, iterators, generators
-- **Async**: Promises, async/await
-- **Regex**: Full regex support with capture groups, lookahead/lookbehind
-- **Error handling**: try/catch/finally with stack traces
+micro-javascript implements roughly the subset of JavaScript supported by MicroQuickJS: ES5, plus arrow functions, `for...of` and regex lookbehind. The test suite runs every line of this example and checks each `// =>` result:
 
-## Known Limitations
+```javascript
+// Functions, closures and arrow functions
+function makeCounter() {
+    var count = 0;
+    return function () { return ++count; };
+}
+var counter = makeCounter();
+counter(); counter();  // => 2
+[1, 2, 3].map(x => x * 2).filter(x => x > 2).join(",");  // => "4,6"
 
-See [open-problems.md](https://github.com/simonw/micro-javascript/blob/main/open-problems.md) for details on:
-- Deep nesting limits (parser uses recursion)
-- Some regex edge cases with optional lookahead captures
-- Error constructor location tracking
+// Constructors, prototypes, getters and setters
+function Point(x, y) { this.x = x; this.y = y; }
+Point.prototype.sum = function () { return this.x + this.y; };
+new Point(1, 2).sum();  // => 3
+var temp = { c: 20, get f() { return this.c * 9 / 5 + 32; } };
+temp.f;  // => 68
+
+// Labelled break, for...in and for...of
+var found = null;
+outer: for (var i = 0; i < 3; i++) {
+    for (var j = 0; j < 3; j++) {
+        if (i * j === 2) { found = [i, j]; break outer; }
+    }
+}
+found;  // => [1, 2]
+var keys = []; for (var k in { a: 1, b: 2 }) keys.push(k);
+keys;  // => ["a", "b"]
+
+// Exceptions
+var caught;
+try { null.x; } catch (e) { caught = e.name; } finally { caught += "!"; }
+caught;  // => "TypeError!"
+
+// Regular expressions, including lookbehind
+/(\d+)-(\d+)/.exec("10-20");  // => ["10-20", "10", "20"]
+"2026-10-01".replace(/-/g, "/");  // => "2026/10/01"
+/(?<=\$)\d+/.exec("cost: $42")[0];  // => "42"
+
+// JSON, Math and typed arrays
+JSON.stringify({ a: [1, { b: true }] });  // => '{"a":[1,{"b":true}]}'
+Math.max(3, 7, 5);  // => 7
+var bytes = new Uint8Array(2); bytes[0] = 300;
+bytes[0];  // => 44
+
+// Indirect (global) eval
+(1, eval)("6 * 7");  // => 42
+```
+
+## Not supported
+
+These raise a `SyntaxError` or are undefined:
+
+- `let`, `const`, `class`, generators, `async`/`await` and `Promise`
+- Template literals, destructuring, spread, and rest or default parameters
+- Optional chaining (`?.`) and nullish coalescing (`??`)
+- `Symbol`, `Map`, `Set`, `WeakMap`, `Proxy`, `Reflect` and `BigInt`
+- `Date` beyond `Date.now()`, and `Error.prototype.stack` (always empty)
+
+See [open-problems.md](https://github.com/simonw/micro-javascript/blob/main/open-problems.md) for known bugs that are tracked as expected-failure tests.
 
 ## Development
 

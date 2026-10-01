@@ -3,7 +3,7 @@
 import math
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .opcodes import OpCode
 from .compiler import CompiledFunction
@@ -73,6 +73,8 @@ class CallFrame:
     )
     is_constructor_call: bool = False  # True if this frame is from a "new" call
     new_target: JSValue = None  # The new object for constructor calls
+    # Active try handlers in this frame: (catch_ip, stack_depth at TRY_START)
+    handlers: List[Tuple[int, int]] = field(default_factory=list)
 
 
 class ForInIterator:
@@ -124,10 +126,6 @@ class VM:
 
         self.start_time: Optional[float] = None
         self.instruction_count = 0
-
-        # Exception handling
-        self.exception: Optional[JSValue] = None
-        self.exception_handlers: List[Tuple[int, int]] = []  # (frame_idx, catch_ip)
 
     def run(self, compiled: CompiledFunction) -> JSValue:
         """Run compiled bytecode and return result."""
@@ -646,20 +644,10 @@ class VM:
 
         elif op == OpCode.RETURN:
             result = self.stack.pop() if self.stack else UNDEFINED
-            popped_frame = self.call_stack.pop()
-            # For constructor calls, return the new object unless result is an object
-            if popped_frame.is_constructor_call:
-                if not isinstance(result, JSObject):
-                    result = popped_frame.new_target
-            self.stack.append(result)
+            self._return(result)
 
         elif op == OpCode.RETURN_UNDEFINED:
-            popped_frame = self.call_stack.pop()
-            # For constructor calls, return the new object
-            if popped_frame.is_constructor_call:
-                self.stack.append(popped_frame.new_target)
-            else:
-                self.stack.append(UNDEFINED)
+            self._return(UNDEFINED)
 
         # Object operations
         elif op == OpCode.NEW:
@@ -675,11 +663,10 @@ class VM:
 
         elif op == OpCode.TRY_START:
             # arg is the catch handler offset
-            self.exception_handlers.append((len(self.call_stack) - 1, arg))
+            frame.handlers.append((arg, len(self.stack)))
 
         elif op == OpCode.TRY_END:
-            if self.exception_handlers:
-                self.exception_handlers.pop()
+            frame.handlers.pop()
 
         elif op == OpCode.CATCH:
             # Exception is on stack
@@ -798,6 +785,15 @@ class VM:
 
         else:
             raise NotImplementedError(f"Opcode not implemented: {op.name}")
+
+    def _return(self, result: JSValue) -> None:
+        """Pop the current frame, discard its stack values and push result."""
+        frame = self.call_stack.pop()
+        del self.stack[frame.bp :]
+        # For constructor calls, return the new object unless result is an object
+        if frame.is_constructor_call and not isinstance(result, JSObject):
+            result = frame.new_target
+        self.stack.append(result)
 
     def _get_name(self, frame: CallFrame, index: int) -> str:
         """Get a name from the name table."""
@@ -2476,28 +2472,25 @@ class VM:
             if column is not None:
                 exc.set("columnNumber", column)
 
-        if self.exception_handlers:
-            frame_idx, catch_ip = self.exception_handlers.pop()
-
-            # Unwind call stack
-            while len(self.call_stack) > frame_idx + 1:
-                self.call_stack.pop()
-
-            # Jump to catch handler
+        # Unwind to the innermost frame with an active handler
+        while self.call_stack:
             frame = self.call_stack[-1]
-            frame.ip = catch_ip
-
-            # Push exception value
-            self.stack.append(exc)
+            if frame.handlers:
+                catch_ip, stack_depth = frame.handlers.pop()
+                del self.stack[stack_depth:]
+                self.stack.append(exc)
+                frame.ip = catch_ip
+                return
+            self.call_stack.pop()
+            del self.stack[frame.bp :]
+        # Uncaught exception
+        if isinstance(exc, str):
+            raise JSError(exc)
+        elif isinstance(exc, JSObject):
+            msg = exc.get("message")
+            raise JSError(to_string(msg) if msg else "Error")
         else:
-            # Uncaught exception
-            if isinstance(exc, str):
-                raise JSError(exc)
-            elif isinstance(exc, JSObject):
-                msg = exc.get("message")
-                raise JSError(to_string(msg) if msg else "Error")
-            else:
-                raise JSError(to_string(exc))
+            raise JSError(to_string(exc))
 
     def _handle_python_exception(self, error_type: str, message: str) -> None:
         """Convert a Python exception to a JavaScript exception and throw it."""

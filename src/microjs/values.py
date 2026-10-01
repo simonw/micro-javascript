@@ -23,6 +23,12 @@ MAX_STRING_LENGTH = 2**29 - 24
 MAX_ARRAY_LENGTH = 2**32 - 1
 
 
+def intrinsic(name: str) -> Optional["JSObject"]:
+    """The running VM's built-in object called name ("ArrayPrototype", ...)."""
+    vm = CURRENT_VM.get()
+    return vm.intrinsics.get(name) if vm is not None else None
+
+
 def charge_memory(nbytes: int) -> None:
     """Account for allocating about nbytes against the memory limit.
 
@@ -234,6 +240,9 @@ def to_string(value: JSValue) -> str:
 class JSObject:
     """JavaScript object."""
 
+    # Keys of non-enumerable properties (built-in methods, constructor, ...)
+    _hidden: frozenset = frozenset()
+
     def __init__(self, prototype: Optional["JSObject"] = None):
         self._properties: Dict[str, JSValue] = {}
         self._getters: Dict[str, Any] = {}  # property name -> getter function
@@ -276,6 +285,12 @@ class JSObject:
         """Set a property value."""
         self._properties[key] = value
 
+    def set_hidden(self, key: str, value: JSValue) -> None:
+        """Set a property that for-in and Object.keys() do not list."""
+        self._properties[key] = value
+        if key not in self._hidden:
+            self._hidden = self._hidden | {key}
+
     def has(self, key: str) -> bool:
         """Check if object has own property."""
         return key in self._properties
@@ -289,6 +304,8 @@ class JSObject:
 
     def keys(self) -> List[str]:
         """Get own enumerable property keys."""
+        if self._hidden:
+            return [k for k in self._properties if k not in self._hidden]
         return list(self._properties.keys())
 
     def __repr__(self) -> str:
@@ -323,7 +340,7 @@ class JSArray(JSObject):
     """JavaScript array."""
 
     def __init__(self, length: int = 0):
-        super().__init__()
+        super().__init__(intrinsic("ArrayPrototype"))
         self._elements: List[JSValue] = []
         if length:
             grow_array(self._elements, length)
@@ -369,8 +386,13 @@ class JSArray(JSObject):
         return f"JSArray({self._elements})"
 
 
-class JSFunction:
-    """JavaScript function (closure)."""
+class JSFunction(JSObject):
+    """JavaScript function (closure).
+
+    Functions are objects: they can have properties, and their prototype
+    (the [[Prototype]], _prototype) is Function.prototype. The object that
+    instances created with 'new' inherit from is their "prototype" property.
+    """
 
     def __init__(
         self,
@@ -379,6 +401,7 @@ class JSFunction:
         bytecode: Sequence[int],
         closure_vars: Optional[Dict[str, JSValue]] = None,
     ):
+        super().__init__()
         self.name = name
         self.params = params
         self.bytecode = bytecode
@@ -392,7 +415,7 @@ class JSRegExp(JSObject):
     """JavaScript RegExp object."""
 
     def __init__(self, pattern: str, flags: str = "", poll_callback=None):
-        super().__init__()
+        super().__init__(intrinsic("RegExpPrototype"))
         from .regex import RegExp as InternalRegExp, MatchResult
 
         self._internal = InternalRegExp(pattern, flags, poll_callback)
@@ -455,10 +478,11 @@ class JSRegExp(JSObject):
 
 
 class JSBoundMethod:
-    """A method that expects 'this' as the first argument when called."""
+    """A native method that expects 'this' as the first argument when called."""
 
-    def __init__(self, fn):
+    def __init__(self, fn, name: str = ""):
         self._fn = fn
+        self.name = name
 
     def __call__(self, this_val, *args):
         return self._fn(this_val, *args)

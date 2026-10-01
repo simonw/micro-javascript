@@ -20,6 +20,7 @@ from .values import (
     JSRegExp,
     JSTypedArray,
     JSArrayBuffer,
+    JSBoundMethod,
     to_boolean,
     to_number,
     to_string,
@@ -128,6 +129,66 @@ class ForOfIterator:
 # Deepest JavaScript call stack before a RangeError
 MAX_CALL_DEPTH = 10000
 
+# Built-in methods installed on the prototypes, implemented by the VM's
+# _make_*_method factories
+ARRAY_METHODS = (
+    "push",
+    "pop",
+    "shift",
+    "unshift",
+    "toString",
+    "join",
+    "map",
+    "filter",
+    "reduce",
+    "reduceRight",
+    "forEach",
+    "indexOf",
+    "lastIndexOf",
+    "find",
+    "findIndex",
+    "some",
+    "every",
+    "concat",
+    "slice",
+    "splice",
+    "reverse",
+    "includes",
+    "sort",
+)
+# Array methods that modify the array (written back to array-like objects)
+ARRAY_MUTATORS = frozenset(
+    ["push", "pop", "shift", "unshift", "splice", "reverse", "sort"]
+)
+STRING_METHODS = (
+    "charAt",
+    "charCodeAt",
+    "indexOf",
+    "lastIndexOf",
+    "substring",
+    "slice",
+    "split",
+    "toLowerCase",
+    "toUpperCase",
+    "trim",
+    "trimStart",
+    "trimEnd",
+    "concat",
+    "repeat",
+    "startsWith",
+    "endsWith",
+    "includes",
+    "replace",
+    "replaceAll",
+    "padStart",
+    "padEnd",
+    "match",
+    "search",
+    "toString",
+    "valueOf",
+)
+NUMBER_METHODS = ("toFixed", "toString", "toExponential", "toPrecision", "valueOf")
+
 
 def heap_size(roots: List[Any]) -> int:
     """Estimate the bytes used by every JS value reachable from roots."""
@@ -149,6 +210,13 @@ def heap_size(roots: List[Any]) -> int:
         if id(value) in seen:
             continue
         seen.add(id(value))
+        if isinstance(value, JSFunction):
+            total += 192
+            for cell in getattr(value, "_closure_cells", None) or ():
+                pending.append(cell.value)
+            for attr in ("_bound_this", "_original_func"):
+                pending.append(getattr(value, attr, None))
+            pending.extend(getattr(value, "_bound_args", None) or ())
         if isinstance(value, JSObject):
             total += 64
             if isinstance(value, JSArray):
@@ -165,13 +233,6 @@ def heap_size(roots: List[Any]) -> int:
                     pending.extend(props.values())
             if value._prototype is not None:
                 pending.append(value._prototype)
-        elif isinstance(value, JSFunction):
-            total += 256
-            for cell in getattr(value, "_closure_cells", None) or ():
-                pending.append(cell.value)
-            for attr in ("_prototype", "_bound_this", "_original_func"):
-                pending.append(getattr(value, attr, None))
-            pending.extend(getattr(value, "_bound_args", None) or ())
         elif isinstance(value, ForInIterator):
             total += 64 + 8 * len(value.keys)
             pending.extend(value.keys)
@@ -207,6 +268,9 @@ class VM:
         self._allocation_budget = memory_limit or 0
         # Size of the environment (built-ins) not counted against the limit
         self.baseline_bytes = 0
+        # The original built-in prototypes ("ObjectPrototype", ...), which
+        # literals and functions use even if a script replaces the globals
+        self.intrinsics: Dict[str, JSObject] = {}
 
     def run(self, compiled: CompiledFunction) -> JSValue:
         """Run compiled bytecode and return result."""
@@ -505,19 +569,11 @@ class VM:
                 elements.insert(0, self.stack.pop())
             arr = JSArray()
             arr._elements = elements
-            # Set prototype from Array constructor
-            array_constructor = self.globals.get("Array")
-            if array_constructor and hasattr(array_constructor, "_prototype"):
-                arr._prototype = array_constructor._prototype
             self.stack.append(arr)
 
         elif op == OpCode.BUILD_OBJECT:
             self.charge(64 + 64 * arg)
-            obj = JSObject()
-            # Set prototype from Object constructor
-            object_constructor = self.globals.get("Object")
-            if object_constructor and hasattr(object_constructor, "_prototype"):
-                obj._prototype = object_constructor._prototype
+            obj = JSObject(self.intrinsics.get("ObjectPrototype"))
             props = []
             for _ in range(arg):
                 value = self.stack.pop()
@@ -741,17 +797,11 @@ class VM:
                 # Get constructor's prototype property
                 # For JSFunction, check _prototype attribute (if set and not None)
                 # For JSCallableObject and other constructors, use get("prototype")
-                proto = None
-                if (
-                    isinstance(constructor, JSFunction)
-                    and getattr(constructor, "_prototype", None) is not None
-                ):
-                    proto = constructor._prototype
-                elif isinstance(constructor, JSObject):
-                    # Try get("prototype") first for callable objects, fall back to _prototype
-                    proto = constructor.get("prototype")
-                    if proto is None or proto is UNDEFINED:
-                        proto = getattr(constructor, "_prototype", None)
+                # A bound function tests against its target's prototype
+                target = getattr(constructor, "_original_func", constructor)
+                proto = target.get("prototype")
+                if not isinstance(proto, JSObject):
+                    raise JSTypeError("Function has non-object prototype in instanceof")
 
                 # Walk the prototype chain
                 result = False
@@ -903,12 +953,12 @@ class VM:
                     bytecode=compiled_func.bytecode,
                 )
                 js_func._compiled = compiled_func
+                js_func._prototype = self.intrinsics.get("FunctionPrototype")
 
-                # Create prototype object for the function
-                # In JavaScript, every function has a prototype property
-                prototype = JSObject()
-                prototype.set("constructor", js_func)
-                js_func._prototype = prototype
+                # Every function has a prototype property, for 'new'
+                prototype = JSObject(self.intrinsics.get("ObjectPrototype"))
+                prototype.set_hidden("constructor", js_func)
+                js_func.set_hidden("prototype", prototype)
 
                 # Capture closure cells for free variables
                 if compiled_func.free_vars:
@@ -1083,188 +1133,180 @@ class VM:
         return False
 
     def _get_property(self, obj: JSValue, key: JSValue) -> JSValue:
-        """Get property from object."""
+        """Get a property: own properties, then the prototype chain.
+
+        Primitives look up their built-in prototype (String.prototype, ...).
+        """
         if obj is UNDEFINED or obj is NULL:
             raise JSTypeError(f"Cannot read property of {obj}")
 
         key_str = to_string(key) if not isinstance(key, str) else key
 
-        if isinstance(obj, JSArrayBuffer):
-            if key_str == "byteLength":
-                return obj.byteLength
-            return obj.get(key_str)
-
-        if isinstance(obj, JSTypedArray):
-            # Typed array index access
-            try:
-                idx = int(key_str)
-                if idx >= 0:
-                    return obj.get_index(idx)
-            except ValueError:
-                pass
-            if key_str == "length":
-                return obj.length
-            if key_str == "BYTES_PER_ELEMENT":
-                return obj._element_size
-            if key_str == "buffer":
-                # Return the underlying buffer if it exists
-                return getattr(obj, "_buffer", UNDEFINED)
-            # Built-in typed array methods
-            typed_array_methods = ["toString", "join", "subarray", "set"]
-            if key_str in typed_array_methods:
-                return self._make_typed_array_method(obj, key_str)
-            return obj.get(key_str)
-
-        if isinstance(obj, JSArray):
-            # Array index access
-            try:
-                idx = int(key_str)
-                if idx >= 0:
-                    return obj.get_index(idx)
-            except ValueError:
-                pass
-            if key_str == "length":
-                return obj.length
-            # Built-in array methods
-            array_methods = [
-                "push",
-                "pop",
-                "shift",
-                "unshift",
-                "toString",
-                "join",
-                "map",
-                "filter",
-                "reduce",
-                "reduceRight",
-                "forEach",
-                "indexOf",
-                "lastIndexOf",
-                "find",
-                "findIndex",
-                "some",
-                "every",
-                "concat",
-                "slice",
-                "splice",
-                "reverse",
-                "includes",
-                "sort",
-            ]
-            if key_str in array_methods:
-                return self._make_array_method(obj, key_str)
-            return obj.get(key_str)
-
-        if isinstance(obj, JSRegExp):
-            # RegExp methods and properties
-            if key_str in ("test", "exec"):
-                return self._make_regexp_method(obj, key_str)
-            # RegExp properties
-            if key_str in (
-                "source",
-                "flags",
-                "global",
-                "ignoreCase",
-                "multiline",
-                "dotAll",
-                "unicode",
-                "sticky",
-                "lastIndex",
-            ):
-                return obj.get(key_str)
-            return UNDEFINED
-
-        if isinstance(obj, JSFunction):
-            # Function methods
-            if key_str in ("bind", "call", "apply", "toString"):
-                return self._make_function_method(obj, key_str)
-            if key_str == "length":
-                return len(obj.params)
-            if key_str == "name":
-                return obj.name
-            if key_str == "prototype":
-                return getattr(obj, "_prototype", UNDEFINED) or UNDEFINED
-            return UNDEFINED
-
         if isinstance(obj, JSObject):
-            # Check for getter first
-            getter = obj.get_getter(key_str)
-            if getter is not None:
-                return self._invoke_getter(getter, obj)
-            # Check own property
-            if obj.has(key_str):
-                return obj.get(key_str)
-            # Check prototype chain
-            proto = getattr(obj, "_prototype", None)
-            while proto is not None:
-                if isinstance(proto, JSObject) and proto.has(key_str):
-                    return proto.get(key_str)
-                proto = getattr(proto, "_prototype", None)
-            # Built-in Object methods as fallback
-            if key_str in ("toString", "hasOwnProperty"):
-                return self._make_object_method(obj, key_str)
-            return UNDEFINED
+            if isinstance(obj, JSArray):
+                if key_str.isdigit():
+                    return obj.get_index(int(key_str))
+                if key_str == "length":
+                    return obj.length
+            elif isinstance(obj, JSTypedArray):
+                special = self._typed_array_property(obj, key_str)
+                if special is not None:
+                    return special
+            elif isinstance(obj, JSArrayBuffer):
+                if key_str == "byteLength":
+                    return obj.byteLength
+            elif isinstance(obj, JSFunction) and not obj.has(key_str):
+                if key_str == "length":
+                    return len(obj.params)
+                if key_str == "name":
+                    return obj.name
+            return self._lookup(obj, key_str)
 
         if isinstance(obj, str):
-            # String character access
-            try:
+            if key_str.isdigit():
                 idx = int(key_str)
-                if 0 <= idx < len(obj):
-                    return obj[idx]
-            except ValueError:
-                pass
+                return obj[idx] if idx < len(obj) else UNDEFINED
             if key_str == "length":
                 return len(obj)
-            # String methods
-            string_methods = [
-                "charAt",
-                "charCodeAt",
-                "indexOf",
-                "lastIndexOf",
-                "substring",
-                "slice",
-                "split",
-                "toLowerCase",
-                "toUpperCase",
-                "trim",
-                "trimStart",
-                "trimEnd",
-                "concat",
-                "repeat",
-                "startsWith",
-                "endsWith",
-                "includes",
-                "replace",
-                "replaceAll",
-                "padStart",
-                "padEnd",
-                "match",
-                "search",
-                "toString",
-            ]
-            if key_str in string_methods:
-                return self._make_string_method(obj, key_str)
+            prototype = self.intrinsics.get("StringPrototype")
+        elif isinstance(obj, bool):
+            prototype = self.intrinsics.get("BooleanPrototype")
+        elif isinstance(obj, (int, float)):
+            prototype = self.intrinsics.get("NumberPrototype")
+        elif callable(obj):
+            # Native functions
+            if key_str == "name":
+                return getattr(obj, "name", "") or getattr(obj, "__name__", "")
+            prototype = self.intrinsics.get("FunctionPrototype")
+        else:
             return UNDEFINED
-
-        if isinstance(obj, (int, float)):
-            # Number methods
-            if key_str in (
-                "toFixed",
-                "toString",
-                "toExponential",
-                "toPrecision",
-                "valueOf",
-            ):
-                return self._make_number_method(obj, key_str)
+        if prototype is None:
             return UNDEFINED
+        return self._lookup(prototype, key_str, receiver=obj)
 
-        # Python callable (including JSBoundMethod)
-        if callable(obj):
-            if key_str in ("call", "apply", "bind"):
-                return self._make_callable_method(obj, key_str)
-            return UNDEFINED
+    def _typed_array_property(self, obj: JSTypedArray, key: str) -> Any:
+        """Indexes and built-ins of a typed array, or None for anything else."""
+        if key.isdigit():
+            return obj.get_index(int(key))
+        if key == "length":
+            return obj.length
+        if key == "BYTES_PER_ELEMENT":
+            return obj._element_size
+        if key == "buffer":
+            return getattr(obj, "_buffer", UNDEFINED)
+        if key in ("toString", "join", "subarray", "set"):
+            return self._make_typed_array_method(obj, key)
+        return None
 
+    def call_builtin(self, kind: str, name: str, this: JSValue, args) -> JSValue:
+        """Run built-in method name of a prototype (kind) on this."""
+        if kind == "array":
+            arr, source = self._array_receiver(this)
+            result = self._make_array_method(arr, name)(*args)
+            if source is not None:
+                if name in ARRAY_MUTATORS:
+                    self._write_back(source, arr)
+                if result is arr:
+                    result = source
+            return result
+        if kind == "string":
+            if this is UNDEFINED or this is NULL:
+                raise JSTypeError(f"String.prototype.{name} called on {this}")
+            s = this if isinstance(this, str) else to_string(this)
+            if name == "valueOf":
+                return s
+            return self._make_string_method(s, name)(*args)
+        if kind == "number":
+            if isinstance(this, bool) or not isinstance(this, (int, float)):
+                raise JSTypeError(f"Number.prototype.{name} requires a number")
+            return self._make_number_method(this, name)(*args)
+        if kind == "boolean":
+            if not isinstance(this, bool):
+                raise JSTypeError(f"Boolean.prototype.{name} requires a boolean")
+            return this if name == "valueOf" else to_string(this)
+        if kind == "function":
+            if isinstance(this, JSFunction):
+                return self._make_function_method(this, name)(*args)
+            if callable(this):
+                return self._make_callable_method(this, name)(*args)
+            raise JSTypeError(f"Function.prototype.{name} called on a non-function")
+        if kind == "regexp":
+            if not isinstance(this, JSRegExp):
+                raise JSTypeError(f"RegExp.prototype.{name} requires a RegExp")
+            if name == "toString":
+                return f"/{this._pattern}/{this._flags}"
+            return self._make_regexp_method(this, name)(*args)
+        if kind == "error":
+            # Error.prototype.toString
+            if not isinstance(this, JSObject):
+                raise JSTypeError("Error.prototype.toString requires an object")
+            name_value = self._get_property(this, "name")
+            message = self._get_property(this, "message")
+            name_str = "Error" if name_value is UNDEFINED else to_string(name_value)
+            message_str = "" if message is UNDEFINED else to_string(message)
+            if not name_str:
+                return message_str
+            if not message_str:
+                return name_str
+            return f"{name_str}: {message_str}"
+        raise JSTypeError(f"Unknown built-in {kind}.{name}")
+
+    def _array_receiver(self, this: JSValue):
+        """The array an Array.prototype method works on, and the array-like
+        object to copy changes back to (None if this is an array)."""
+        if isinstance(this, JSArray):
+            return this, None
+        if this is UNDEFINED or this is NULL:
+            raise JSTypeError(f"Array.prototype method called on {this}")
+        arr = JSArray()
+        if isinstance(this, str):
+            arr._elements = list(this)
+            return arr, None
+        if not isinstance(this, JSObject):
+            return arr, None
+        length = to_number(self._get_property(this, "length"))
+        length = 0 if length != length or length < 0 else int(min(length, 2**32 - 1))
+        self.charge(8 * length)
+        for i in range(length):
+            arr._elements.append(self._get_property(this, str(i)))
+            if not i & 4095:
+                self.check_deadline()
+        return arr, this
+
+    def _write_back(self, target: JSObject, arr: JSArray) -> None:
+        """Copy a mutated temporary array back onto an array-like object."""
+        old_length = to_number(self._get_property(target, "length"))
+        old_length = 0 if old_length != old_length else int(old_length)
+        for i, value in enumerate(arr._elements):
+            self._set_property(target, str(i), value)
+        for i in range(len(arr._elements), old_length):
+            target.delete(str(i))
+        self._set_property(target, "length", len(arr._elements))
+
+    def _lookup(self, obj: JSObject, key: str, receiver: JSValue = None) -> JSValue:
+        """Find key on obj or its prototype chain, calling getters on receiver."""
+        if receiver is None:
+            receiver = obj
+        current = obj
+        while current is not None:
+            getter = current._getters.get(key)
+            if getter is not None:
+                return self._invoke_getter(getter, receiver)
+            if key in current._properties:
+                return current._properties[key]
+            if key in current._setters:
+                return UNDEFINED  # Accessor without a getter
+            current = current._prototype
         return UNDEFINED
+
+    @staticmethod
+    def _has_property(obj: JSObject, key: str) -> bool:
+        current = obj
+        while current is not None:
+            if key in current._properties or key in current._getters:
+                return True
+            current = current._prototype
+        return False
 
     def _make_array_method(self, arr: JSArray, method: str) -> Any:
         """Create a bound array method."""
@@ -1579,22 +1621,6 @@ class VM:
         }
         return methods.get(method, lambda *args: UNDEFINED)
 
-    def _make_object_method(self, obj: JSObject, method: str) -> Any:
-        """Create a bound object method."""
-
-        def toString_fn(*args):
-            return "[object Object]"
-
-        def hasOwnProperty_fn(*args):
-            key = to_string(args[0]) if args else ""
-            return obj.has(key)
-
-        methods = {
-            "toString": toString_fn,
-            "hasOwnProperty": hasOwnProperty_fn,
-        }
-        return methods.get(method, lambda *args: UNDEFINED)
-
     def _make_function_method(self, func: JSFunction, method: str) -> Any:
         """Create a bound function method (bind, call, apply)."""
         vm = self  # Reference for closures
@@ -1622,6 +1648,8 @@ class VM:
             bound_func._bound_this = bound_this
             bound_func._bound_args = bound_args
             bound_func._original_func = func
+            bound_func._prototype = func._prototype
+            bound_func.name = f"bound {func.name}"
             return bound_func
 
         def call_fn(*args):
@@ -1709,10 +1737,15 @@ class VM:
 
             return bound
 
+        def toString_fn(*args):
+            name = getattr(fn, "name", "") or getattr(fn, "__name__", "")
+            return f"function {name}() {{ [native code] }}"
+
         methods = {
             "call": call_fn,
             "apply": apply_fn,
             "bind": bind_fn,
+            "toString": toString_fn,
         }
         return methods.get(method, lambda *args: UNDEFINED)
 
@@ -2418,6 +2451,10 @@ class VM:
 
         if isinstance(callee, JSFunction):
             self._invoke_js_function(callee, args, this_val or UNDEFINED)
+        elif isinstance(callee, JSBoundMethod):
+            result = callee(UNDEFINED, *args)
+            self._charge_result(result)
+            self.stack.append(result if result is not None else UNDEFINED)
         elif callable(callee):
             # Native function
             result = callee(*args)
@@ -2549,11 +2586,12 @@ class VM:
         constructor = self.stack.pop()
 
         if isinstance(constructor, JSFunction):
-            # Create new object
-            obj = JSObject()
-            # Set prototype from constructor's prototype property
-            if hasattr(constructor, "_prototype"):
-                obj._prototype = constructor._prototype
+            # The new object inherits from the constructor's prototype property
+            target = getattr(constructor, "_original_func", constructor)
+            proto = target.get("prototype")
+            if not isinstance(proto, JSObject):
+                proto = self.intrinsics.get("ObjectPrototype")
+            obj = JSObject(proto)
             # Call constructor with new object as 'this'
             # Mark this as a constructor call so RETURN knows to return the object
             self._invoke_js_function(

@@ -9,7 +9,14 @@ from typing import Any, Dict, Optional
 
 from .parser import Parser
 from .compiler import Compiler
-from .vm import VM, JSThrow, heap_size
+from .vm import (
+    ARRAY_METHODS,
+    NUMBER_METHODS,
+    STRING_METHODS,
+    VM,
+    JSThrow,
+    heap_size,
+)
 from .values import (
     UNDEFINED,
     NULL,
@@ -23,6 +30,7 @@ from .values import (
     to_string,
     to_number,
     to_array_length,
+    CURRENT_VM,
 )
 from .ast_nodes import ExpressionStatement, FunctionExpression
 from .errors import (
@@ -64,6 +72,8 @@ class Context:
         self.time_limit = time_limit
         self._globals: Dict[str, JSValue] = {}
         self._current_vm = None  # Set during eval() for timeout checking
+        # The original built-in prototypes, shared with every VM
+        self.intrinsics: Dict[str, JSObject] = {}
         self._setup_globals()
         # Memory used by the built-ins, which does not count against the limit
         self._baseline_bytes = (
@@ -154,6 +164,91 @@ class Context:
         # eval function
         self._globals["eval"] = self._create_eval_function()
 
+        self._install_prototypes()
+
+    def _install_prototypes(self) -> None:
+        """Link constructors with their prototypes and add built-in methods."""
+        intrinsics = self.intrinsics
+        object_prototype = intrinsics["ObjectPrototype"]
+        function_prototype = intrinsics["FunctionPrototype"]
+        globals_ = self._globals
+
+        def link(constructor, prototype):
+            constructor._prototype = function_prototype
+            constructor.set_hidden("prototype", prototype)
+            prototype.set_hidden("constructor", constructor)
+
+        def native(kind, name):
+            def call(this, *args):
+                vm = CURRENT_VM.get()
+                if vm is None:
+                    raise JSTypeError(f"{name}() called outside a running script")
+                return vm.call_builtin(kind, name, this, args)
+
+            return JSBoundMethod(call, name)
+
+        def install(prototype, kind, names):
+            for name in names:
+                prototype.set_hidden(name, native(kind, name))
+
+        def new_prototype(name):
+            prototype = JSObject(object_prototype)
+            intrinsics[name] = prototype
+            return prototype
+
+        link(globals_["Object"], object_prototype)
+        for name in ("toString", "hasOwnProperty", "valueOf", "isPrototypeOf"):
+            object_prototype.set_hidden(name, object_prototype.get(name))
+
+        link(globals_["Function"], function_prototype)
+        install(function_prototype, "function", ("call", "apply", "bind", "toString"))
+
+        intrinsics["ArrayPrototype"] = self._array_prototype
+        link(globals_["Array"], self._array_prototype)
+        install(self._array_prototype, "array", ARRAY_METHODS)
+
+        string_prototype = new_prototype("StringPrototype")
+        link(globals_["String"], string_prototype)
+        install(string_prototype, "string", STRING_METHODS)
+
+        number_prototype = new_prototype("NumberPrototype")
+        link(globals_["Number"], number_prototype)
+        install(number_prototype, "number", NUMBER_METHODS)
+
+        boolean_prototype = new_prototype("BooleanPrototype")
+        link(globals_["Boolean"], boolean_prototype)
+        install(boolean_prototype, "boolean", ("toString", "valueOf"))
+
+        regexp_prototype = new_prototype("RegExpPrototype")
+        link(globals_["RegExp"], regexp_prototype)
+        install(regexp_prototype, "regexp", ("test", "exec", "toString"))
+
+        # Error types inherit from Error
+        error = globals_["Error"]
+        error_prototype = error.get("prototype")
+        error_prototype._prototype = object_prototype
+        intrinsics["ErrorPrototype"] = error_prototype
+        link(error, error_prototype)
+        install(error_prototype, "error", ("toString",))
+        for name in (
+            "TypeError",
+            "SyntaxError",
+            "ReferenceError",
+            "RangeError",
+            "URIError",
+            "EvalError",
+        ):
+            constructor = globals_[name]
+            prototype = constructor.get("prototype")
+            prototype._prototype = error_prototype
+            link(constructor, prototype)
+            constructor._prototype = error
+
+        # Remaining constructors are functions too
+        for name, value in globals_.items():
+            if isinstance(value, JSCallableObject) and value._prototype is None:
+                value._prototype = function_prototype
+
     def _console_log(self, *args: JSValue) -> None:
         """Console.log implementation."""
         print(" ".join(to_string(arg) for arg in args))
@@ -189,7 +284,17 @@ class Context:
                 return "[object String]"
             if isinstance(this_val, JSArray):
                 return "[object Array]"
-            if callable(this_val) or isinstance(this_val, JSCallableObject):
+            if isinstance(this_val, JSRegExp):
+                return "[object RegExp]"
+            error_prototype = self.intrinsics.get("ErrorPrototype")
+            proto = getattr(this_val, "_prototype", None)
+            while proto is not None:
+                if proto is error_prototype:
+                    return "[object Error]"
+                proto = proto._prototype
+            if callable(this_val) or isinstance(
+                this_val, (JSCallableObject, JSFunction)
+            ):
                 return "[object Function]"
             return "[object Object]"
 
@@ -240,6 +345,12 @@ class Context:
 
         # Store for other constructors to use
         self._object_prototype = object_prototype
+        self.intrinsics["ObjectPrototype"] = object_prototype
+
+        # Function.prototype is itself a function, which returns undefined
+        function_prototype = JSCallableObject(lambda *args: UNDEFINED, object_prototype)
+        self.intrinsics["FunctionPrototype"] = function_prototype
+        obj_constructor._prototype = function_prototype
 
         def keys_fn(*args):
             obj = args[0] if args else UNDEFINED
@@ -373,7 +484,7 @@ class Context:
             ):
                 return UNDEFINED
 
-            descriptor = JSObject()
+            descriptor = JSObject(object_prototype)
 
             getter = obj._getters.get(prop_name)
             setter = obj._setters.get(prop_name)
@@ -421,54 +532,9 @@ class Context:
             return arr
 
         arr_constructor = JSCallableObject(array_constructor)
-        arr_constructor._prototype = array_prototype
-        array_prototype.set("constructor", arr_constructor)
 
         # Store for other uses
         self._array_prototype = array_prototype
-
-        # Array.prototype.sort() - sort in-place
-        def array_sort(this, *args):
-            if not isinstance(this, JSArray):
-                return this
-            comparator = args[0] if args else None
-
-            # Default string comparison
-            def default_compare(a, b):
-                # undefined values sort to the end
-                if a is UNDEFINED and b is UNDEFINED:
-                    return 0
-                if a is UNDEFINED:
-                    return 1
-                if b is UNDEFINED:
-                    return -1
-                # Convert to strings and compare
-                str_a = to_string(a)
-                str_b = to_string(b)
-                if str_a < str_b:
-                    return -1
-                if str_a > str_b:
-                    return 1
-                return 0
-
-            def compare_fn(a, b):
-                if comparator and callable(comparator):
-                    if isinstance(comparator, JSFunction):
-                        result = self._call_function(comparator, [a, b])
-                    else:
-                        result = comparator(a, b)
-                    # Convert to integer for cmp_to_key
-                    num = to_number(result) if result is not UNDEFINED else 0
-                    return int(num) if isinstance(num, (int, float)) else 0
-                return default_compare(a, b)
-
-            # Sort using Python's sort with custom key
-            from functools import cmp_to_key
-
-            this._elements.sort(key=cmp_to_key(compare_fn))
-            return this
-
-        array_prototype.set("sort", JSBoundMethod(array_sort))
 
         # Array.isArray()
         def is_array(*args):
@@ -576,6 +642,10 @@ class Context:
             in_progress = set()  # ids of the arrays and objects being serialized
 
             def to_json_value(v):
+                if isinstance(v, JSFunction) or (
+                    callable(v) and not isinstance(v, JSObject)
+                ):
+                    return UNDEFINED
                 if isinstance(v, JSObject):
                     if id(v) in in_progress:
                         raise JSTypeError("Converting circular structure to JSON")
@@ -588,7 +658,7 @@ class Context:
 
             def scalar_to_json(v):
                 if v is UNDEFINED:
-                    return None  # Will be filtered out for object properties
+                    return UNDEFINED  # Skipped in objects, null in arrays
                 if v is NULL:
                     return None
                 if isinstance(v, bool):
@@ -601,17 +671,16 @@ class Context:
 
             def container_to_json(v):
                 if isinstance(v, JSArray):
-                    # For arrays, undefined becomes null
-                    return [
-                        None if elem is UNDEFINED else to_json_value(elem)
-                        for elem in v._elements
-                    ]
+                    # For arrays, undefined and functions become null
+                    items = [to_json_value(elem) for elem in v._elements]
+                    return [None if item is UNDEFINED else item for item in items]
                 if isinstance(v, JSObject):
-                    # For objects, skip undefined values
+                    # For objects, skip undefined values and functions
                     result = {}
-                    for k, val in v._properties.items():
-                        if val is not UNDEFINED:
-                            result[k] = to_json_value(val)
+                    for k in v.keys():
+                        item = to_json_value(v._properties[k])
+                        if item is not UNDEFINED:
+                            result[k] = item
                     return result
                 return None
 
@@ -634,7 +703,7 @@ class Context:
                 return json.dumps(v, ensure_ascii=False)
 
             py_value = to_json_value(value)
-            if value is UNDEFINED:
+            if py_value is UNDEFINED:
                 return UNDEFINED
             return dump(py_value)
 
@@ -805,13 +874,10 @@ class Context:
             return self._new_vm().run(bytecode_module)
 
         fn_constructor = JSCallableObject(function_constructor_fn)
-
-        # Function.prototype - add basic methods
-        fn_prototype = JSObject()
-
-        # These are implemented in VM's _get_property for JSFunction
-        # but we still set them here for completeness
+        fn_prototype = self.intrinsics["FunctionPrototype"]
+        fn_prototype.set_hidden("constructor", fn_constructor)
         fn_constructor.set("prototype", fn_prototype)
+        fn_constructor._prototype = fn_prototype
 
         return fn_constructor
 
@@ -1000,6 +1066,7 @@ class Context:
         # Share globals with the VM (not a copy, so eval can modify them)
         vm.globals = self._globals
         vm.baseline_bytes = self._baseline_bytes
+        vm.intrinsics = self.intrinsics
         return vm
 
     def _call_function(self, func: JSFunction, args: list) -> Any:
@@ -1045,7 +1112,7 @@ class Context:
         Arrays become lists and objects dicts. Shared and cyclic references
         are preserved, and nesting depth is not limited by Python's stack.
         """
-        if not isinstance(value, JSObject):
+        if not isinstance(value, JSObject) or isinstance(value, JSFunction):
             return self._primitive_to_python(value)
         converted: Dict[int, Any] = {}
         root = self._empty_python_container(value, converted)
@@ -1058,10 +1125,9 @@ class Context:
                 target.extend([None] * len(items))
                 slots = enumerate(items)
             else:
-                items = js_value._properties
-                slots = items.items()
+                slots = ((k, js_value._properties[k]) for k in js_value.keys())
             for key, item in slots:
-                if not isinstance(item, JSObject):
+                if not isinstance(item, JSObject) or isinstance(item, JSFunction):
                     target[key] = self._primitive_to_python(item)
                 elif id(item) in converted:
                     target[key] = converted[id(item)]

@@ -783,22 +783,23 @@ class VM:
     def _op_LT(self, arg: Optional[int], frame: CallFrame) -> None:
         b = self.stack.pop()
         a = self.stack.pop()
-        self.stack.append(self._compare(a, b) < 0)
+        self.stack.append(self._less_than(a, b) is True)
 
     def _op_LE(self, arg: Optional[int], frame: CallFrame) -> None:
         b = self.stack.pop()
         a = self.stack.pop()
-        self.stack.append(self._compare(a, b) <= 0)
+        # a <= b is "not (b < a)", unless either is NaN
+        self.stack.append(self._less_than(b, a, left_first=False) is False)
 
     def _op_GT(self, arg: Optional[int], frame: CallFrame) -> None:
         b = self.stack.pop()
         a = self.stack.pop()
-        self.stack.append(self._compare(a, b) > 0)
+        self.stack.append(self._less_than(b, a, left_first=False) is True)
 
     def _op_GE(self, arg: Optional[int], frame: CallFrame) -> None:
         b = self.stack.pop()
         a = self.stack.pop()
-        self.stack.append(self._compare(a, b) >= 0)
+        self.stack.append(self._less_than(a, b) is False)
 
     def _op_EQ(self, arg: Optional[int], frame: CallFrame) -> None:
         b = self.stack.pop()
@@ -1112,27 +1113,32 @@ class VM:
         """Convert to 32-bit unsigned integer."""
         return to_uint32(to_number(value))
 
-    def _compare(self, a: JSValue, b: JSValue) -> int:
-        """Compare two values. Returns -1, 0, or 1."""
-        # Both strings: compare as strings
-        if isinstance(a, str) and isinstance(b, str):
-            if a < b:
-                return -1
-            if a > b:
-                return 1
-            return 0
+    def _less_than(
+        self, a: JSValue, b: JSValue, left_first: bool = True
+    ) -> Optional[bool]:
+        """Abstract relational comparison: is a < b?
 
-        # Convert to numbers for numeric comparison
+        Returns None when either side is NaN, so that every comparison
+        involving NaN is false. Objects are converted to primitives first
+        (left to right in source order) and two strings compare as strings.
+        """
+        if left_first:
+            if isinstance(a, JSObject):
+                a = self._to_primitive(a, "number")
+            if isinstance(b, JSObject):
+                b = self._to_primitive(b, "number")
+        else:
+            if isinstance(b, JSObject):
+                b = self._to_primitive(b, "number")
+            if isinstance(a, JSObject):
+                a = self._to_primitive(a, "number")
+        if isinstance(a, str) and isinstance(b, str):
+            return a < b
         a_num = to_number(a)
         b_num = to_number(b)
-        # Handle NaN - any comparison with NaN returns false, we return 1
-        if math.isnan(a_num) or math.isnan(b_num):
-            return 1  # NaN comparisons are always false
-        if a_num < b_num:
-            return -1
-        if a_num > b_num:
-            return 1
-        return 0
+        if a_num != a_num or b_num != b_num:
+            return None
+        return a_num < b_num
 
     def _strict_equals(self, a: JSValue, b: JSValue) -> bool:
         """JavaScript === operator."""

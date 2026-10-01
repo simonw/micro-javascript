@@ -394,15 +394,6 @@ class VM:
             del self.stack[stack_len:]
             raise
 
-    def _check_limits(self) -> None:
-        """Check the time limit every 1024 instructions.
-
-        Memory is checked when it is allocated, by charge().
-        """
-        self.instruction_count += 1
-        if not self.instruction_count & 1023:
-            self.check_deadline()
-
     def check_deadline(self) -> None:
         """Raise TimeLimitError if the time limit has passed."""
         if self.time_limit is not None:
@@ -465,27 +456,32 @@ class VM:
         nested in.
         """
         call_stack = self.call_stack
+        handlers = self._HANDLERS
+        has_arg = _HAS_ARG
         while len(call_stack) > floor:
-            self._check_limits()
+            # Check the time limit every 1024 instructions
+            self.instruction_count += 1
+            if not self.instruction_count & 1023:
+                self.check_deadline()
 
             frame = call_stack[-1]
             bytecode = frame.func.bytecode
+            ip = frame.ip
 
-            if frame.ip >= len(bytecode):
+            if ip >= len(bytecode):
                 self._return(UNDEFINED)
                 continue
 
-            op = OpCode(bytecode[frame.ip])
-            frame.ip += 1
-
-            # Decode operand, if any
-            arg = None
-            if op in OPCODES_WITH_ARG:
-                arg = bytecode[frame.ip]
-                frame.ip += 1
+            op = bytecode[ip]
+            if has_arg[op]:
+                arg = bytecode[ip + 1]
+                frame.ip = ip + 2
+            else:
+                arg = None
+                frame.ip = ip + 1
 
             try:
-                self._execute_opcode(op, arg, frame)
+                handlers[op](self, arg, frame)
             except JSThrow as e:
                 self._throw(e.value, floor)
             except (TimeLimitError, MemoryLimitError):
@@ -514,553 +510,534 @@ class VM:
 
         return self.stack.pop()
 
-    def _execute_opcode(self, op: OpCode, arg: Optional[int], frame: CallFrame) -> None:
+    def _execute_opcode(self, op: int, arg: Optional[int], frame: CallFrame) -> None:
         """Execute a single opcode."""
+        self._HANDLERS[op](self, arg, frame)
 
-        # Stack operations
-        if op == OpCode.POP:
-            if self.stack:
-                self.stack.pop()
+    def _op_unknown(self, arg: Optional[int], frame: CallFrame) -> None:
+        raise NotImplementedError("Unknown opcode")
 
-        elif op == OpCode.DUP:
-            self.stack.append(self.stack[-1])
+    def _op_POP(self, arg: Optional[int], frame: CallFrame) -> None:
+        if self.stack:
+            self.stack.pop()
 
-        elif op == OpCode.DUP2:
-            # Duplicate top two items: a, b -> a, b, a, b
-            self.stack.append(self.stack[-2])
-            self.stack.append(self.stack[-2])
+    def _op_DUP(self, arg: Optional[int], frame: CallFrame) -> None:
+        self.stack.append(self.stack[-1])
 
-        elif op == OpCode.SWAP:
-            self.stack[-1], self.stack[-2] = self.stack[-2], self.stack[-1]
+    def _op_DUP2(self, arg: Optional[int], frame: CallFrame) -> None:
+        # Duplicate top two items: a, b -> a, b, a, b
+        self.stack.append(self.stack[-2])
+        self.stack.append(self.stack[-2])
 
-        elif op == OpCode.ROT3:
-            # Rotate 3 items: a, b, c -> b, c, a
-            a = self.stack[-3]
-            b = self.stack[-2]
-            c = self.stack[-1]
-            self.stack[-3] = b
-            self.stack[-2] = c
-            self.stack[-1] = a
+    def _op_SWAP(self, arg: Optional[int], frame: CallFrame) -> None:
+        self.stack[-1], self.stack[-2] = self.stack[-2], self.stack[-1]
 
-        elif op == OpCode.ROT4:
-            # Rotate 4 items: a, b, c, d -> b, c, d, a
-            a = self.stack[-4]
-            b = self.stack[-3]
-            c = self.stack[-2]
-            d = self.stack[-1]
-            self.stack[-4] = b
-            self.stack[-3] = c
-            self.stack[-2] = d
-            self.stack[-1] = a
+    def _op_ROT3(self, arg: Optional[int], frame: CallFrame) -> None:
+        # Rotate 3 items: a, b, c -> b, c, a
+        a = self.stack[-3]
+        b = self.stack[-2]
+        c = self.stack[-1]
+        self.stack[-3] = b
+        self.stack[-2] = c
+        self.stack[-1] = a
 
-        # Constants
-        elif op == OpCode.LOAD_CONST:
-            self.stack.append(frame.func.constants[arg])
+    def _op_ROT4(self, arg: Optional[int], frame: CallFrame) -> None:
+        # Rotate 4 items: a, b, c, d -> b, c, d, a
+        a = self.stack[-4]
+        b = self.stack[-3]
+        c = self.stack[-2]
+        d = self.stack[-1]
+        self.stack[-4] = b
+        self.stack[-3] = c
+        self.stack[-2] = d
+        self.stack[-1] = a
 
-        elif op == OpCode.LOAD_UNDEFINED:
-            self.stack.append(UNDEFINED)
+    def _op_LOAD_CONST(self, arg: Optional[int], frame: CallFrame) -> None:
+        self.stack.append(frame.func.constants[arg])
 
-        elif op == OpCode.LOAD_NULL:
-            self.stack.append(NULL)
+    def _op_LOAD_UNDEFINED(self, arg: Optional[int], frame: CallFrame) -> None:
+        self.stack.append(UNDEFINED)
 
-        elif op == OpCode.LOAD_TRUE:
-            self.stack.append(True)
+    def _op_LOAD_NULL(self, arg: Optional[int], frame: CallFrame) -> None:
+        self.stack.append(NULL)
 
-        elif op == OpCode.LOAD_FALSE:
-            self.stack.append(False)
+    def _op_LOAD_TRUE(self, arg: Optional[int], frame: CallFrame) -> None:
+        self.stack.append(True)
 
-        # Variables
-        elif op == OpCode.LOAD_LOCAL:
-            self.stack.append(frame.locals[arg])
+    def _op_LOAD_FALSE(self, arg: Optional[int], frame: CallFrame) -> None:
+        self.stack.append(False)
 
-        elif op == OpCode.STORE_LOCAL:
-            frame.locals[arg] = self.stack[-1]
+    def _op_LOAD_LOCAL(self, arg: Optional[int], frame: CallFrame) -> None:
+        self.stack.append(frame.locals[arg])
 
-        elif op == OpCode.LOAD_NAME:
-            name = frame.func.constants[arg]
-            if name in self.globals:
-                self.stack.append(self.globals[name])
-            else:
-                raise JSReferenceError(f"{name} is not defined")
+    def _op_STORE_LOCAL(self, arg: Optional[int], frame: CallFrame) -> None:
+        frame.locals[arg] = self.stack[-1]
 
-        elif op == OpCode.STORE_NAME:
-            name = frame.func.constants[arg]
-            self.globals[name] = self.stack[-1]
+    def _op_LOAD_NAME(self, arg: Optional[int], frame: CallFrame) -> None:
+        name = frame.func.constants[arg]
+        if name in self.globals:
+            self.stack.append(self.globals[name])
+        else:
+            raise JSReferenceError(f"{name} is not defined")
 
-        elif op == OpCode.LOAD_CLOSURE:
-            if frame.closure_cells and arg < len(frame.closure_cells):
-                self.stack.append(frame.closure_cells[arg].value)
-            else:
-                raise JSReferenceError("Closure variable not found")
+    def _op_STORE_NAME(self, arg: Optional[int], frame: CallFrame) -> None:
+        name = frame.func.constants[arg]
+        self.globals[name] = self.stack[-1]
 
-        elif op == OpCode.STORE_CLOSURE:
-            if frame.closure_cells and arg < len(frame.closure_cells):
-                frame.closure_cells[arg].value = self.stack[-1]
-            else:
-                raise JSReferenceError("Closure variable not found")
+    def _op_LOAD_CLOSURE(self, arg: Optional[int], frame: CallFrame) -> None:
+        if frame.closure_cells and arg < len(frame.closure_cells):
+            self.stack.append(frame.closure_cells[arg].value)
+        else:
+            raise JSReferenceError("Closure variable not found")
 
-        elif op == OpCode.LOAD_CELL:
-            if frame.cell_storage and arg < len(frame.cell_storage):
-                self.stack.append(frame.cell_storage[arg].value)
-            else:
-                raise JSReferenceError("Cell variable not found")
+    def _op_STORE_CLOSURE(self, arg: Optional[int], frame: CallFrame) -> None:
+        if frame.closure_cells and arg < len(frame.closure_cells):
+            frame.closure_cells[arg].value = self.stack[-1]
+        else:
+            raise JSReferenceError("Closure variable not found")
 
-        elif op == OpCode.STORE_CELL:
-            if frame.cell_storage and arg < len(frame.cell_storage):
-                frame.cell_storage[arg].value = self.stack[-1]
-            else:
-                raise JSReferenceError("Cell variable not found")
+    def _op_LOAD_CELL(self, arg: Optional[int], frame: CallFrame) -> None:
+        if frame.cell_storage and arg < len(frame.cell_storage):
+            self.stack.append(frame.cell_storage[arg].value)
+        else:
+            raise JSReferenceError("Cell variable not found")
 
-        # Properties
-        elif op == OpCode.GET_PROP:
-            key = self.stack.pop()
-            obj = self.stack.pop()
-            self.stack.append(self._get_property(obj, key))
+    def _op_STORE_CELL(self, arg: Optional[int], frame: CallFrame) -> None:
+        if frame.cell_storage and arg < len(frame.cell_storage):
+            frame.cell_storage[arg].value = self.stack[-1]
+        else:
+            raise JSReferenceError("Cell variable not found")
 
-        elif op == OpCode.SET_PROP:
+    def _op_GET_PROP(self, arg: Optional[int], frame: CallFrame) -> None:
+        key = self.stack.pop()
+        obj = self.stack.pop()
+        self.stack.append(self._get_property(obj, key))
+
+    def _op_SET_PROP(self, arg: Optional[int], frame: CallFrame) -> None:
+        value = self.stack.pop()
+        key = self.stack.pop()
+        obj = self.stack.pop()
+        self._set_property(obj, key, value)
+        self.stack.append(value)
+
+    def _op_DELETE_PROP(self, arg: Optional[int], frame: CallFrame) -> None:
+        key = self.stack.pop()
+        obj = self.stack.pop()
+        result = self._delete_property(obj, key)
+        self.stack.append(result)
+
+    def _op_BUILD_ARRAY(self, arg: Optional[int], frame: CallFrame) -> None:
+        self.charge(64 + 8 * arg)
+        elements = []
+        for _ in range(arg):
+            elements.insert(0, self.stack.pop())
+        arr = JSArray()
+        arr._elements = elements
+        self.stack.append(arr)
+
+    def _op_BUILD_OBJECT(self, arg: Optional[int], frame: CallFrame) -> None:
+        self.charge(64 + 64 * arg)
+        obj = JSObject(self.intrinsics.get("ObjectPrototype"))
+        props = []
+        for _ in range(arg):
             value = self.stack.pop()
+            kind = self.stack.pop()
             key = self.stack.pop()
-            obj = self.stack.pop()
-            self._set_property(obj, key, value)
-            self.stack.append(value)
+            props.insert(0, (key, kind, value))
+        for key, kind, value in props:
+            key_str = to_string(key) if not isinstance(key, str) else key
+            if kind == "get":
+                obj.define_getter(key_str, value)
+            elif kind == "set":
+                obj.define_setter(key_str, value)
+            elif key_str == "__proto__" and kind == "init":
+                # __proto__ in object literal sets the prototype
+                if value is NULL or value is None:
+                    obj._prototype = None
+                elif isinstance(value, JSObject):
+                    obj._prototype = value
+            else:
+                obj.set(key_str, value)
+        self.stack.append(obj)
 
-        elif op == OpCode.DELETE_PROP:
-            key = self.stack.pop()
-            obj = self.stack.pop()
-            result = self._delete_property(obj, key)
+    def _op_BUILD_REGEX(self, arg: Optional[int], frame: CallFrame) -> None:
+        pattern, flags = frame.func.constants[arg]
+        # Create a timeout callback for the regex engine
+        poll_callback = None
+        if self.time_limit is not None:
+
+            def check_timeout() -> bool:
+                """Return True if time limit exceeded (to abort regex)."""
+                return time.monotonic() - self.start_time > self.time_limit
+
+            poll_callback = check_timeout
+        regex = JSRegExp(pattern, flags, poll_callback)
+        self.stack.append(regex)
+
+    def _op_ADD(self, arg: Optional[int], frame: CallFrame) -> None:
+        b = self.stack.pop()
+        a = self.stack.pop()
+        self.stack.append(self._add(a, b))
+
+    def _op_SUB(self, arg: Optional[int], frame: CallFrame) -> None:
+        b = self.stack.pop()
+        a = self.stack.pop()
+        self.stack.append(js_number(to_number(a) - to_number(b)))
+
+    def _op_MUL(self, arg: Optional[int], frame: CallFrame) -> None:
+        b = self.stack.pop()
+        a = self.stack.pop()
+        a_num = to_number(a)
+        b_num = to_number(b)
+        if a_num == 0 or b_num == 0:
+            # Floats keep the sign of zero: 0 * -1 is -0
+            self.stack.append(float(a_num) * float(b_num))
+        else:
+            self.stack.append(js_number(a_num * b_num))
+
+    def _op_DIV(self, arg: Optional[int], frame: CallFrame) -> None:
+        b = self.stack.pop()
+        a = self.stack.pop()
+        b_num = to_number(b)
+        a_num = to_number(a)
+        if b_num == 0:
+            # Check sign of zero using copysign
+            b_sign = math.copysign(1, b_num)
+            if a_num == 0:
+                self.stack.append(float("nan"))
+            elif (a_num > 0) == (b_sign > 0):  # Same sign
+                self.stack.append(float("inf"))
+            else:  # Different signs
+                self.stack.append(float("-inf"))
+        else:
+            self.stack.append(a_num / b_num)
+
+    def _op_MOD(self, arg: Optional[int], frame: CallFrame) -> None:
+        b = self.stack.pop()
+        a = self.stack.pop()
+        a_num = to_number(a)
+        self.stack.append(js_remainder(a_num, to_number(b)))
+
+    def _op_POW(self, arg: Optional[int], frame: CallFrame) -> None:
+        b = self.stack.pop()
+        a = self.stack.pop()
+        a_num = to_number(a)
+        self.stack.append(js_pow(a_num, to_number(b)))
+
+    def _op_NEG(self, arg: Optional[int], frame: CallFrame) -> None:
+        a = self.stack.pop()
+        n = to_number(a)
+        # Ensure -0 produces -0.0 (float)
+        if n == 0:
+            self.stack.append(-0.0 if math.copysign(1, n) > 0 else 0.0)
+        else:
+            self.stack.append(-n)
+
+    def _op_POS(self, arg: Optional[int], frame: CallFrame) -> None:
+        a = self.stack.pop()
+        self.stack.append(to_number(a))
+
+    def _op_BAND(self, arg: Optional[int], frame: CallFrame) -> None:
+        b = self.stack.pop()
+        a = self.stack.pop()
+        self.stack.append(self._to_int32(a) & self._to_int32(b))
+
+    def _op_BOR(self, arg: Optional[int], frame: CallFrame) -> None:
+        b = self.stack.pop()
+        a = self.stack.pop()
+        self.stack.append(self._to_int32(a) | self._to_int32(b))
+
+    def _op_BXOR(self, arg: Optional[int], frame: CallFrame) -> None:
+        b = self.stack.pop()
+        a = self.stack.pop()
+        self.stack.append(self._to_int32(a) ^ self._to_int32(b))
+
+    def _op_BNOT(self, arg: Optional[int], frame: CallFrame) -> None:
+        a = self.stack.pop()
+        self.stack.append(~self._to_int32(a))
+
+    def _op_SHL(self, arg: Optional[int], frame: CallFrame) -> None:
+        b = self.stack.pop()
+        a = self.stack.pop()
+        shift = self._to_uint32(b) & 0x1F
+        result = self._to_int32(a) << shift
+        # Convert result back to signed 32-bit
+        result = result & 0xFFFFFFFF
+        if result >= 0x80000000:
+            result -= 0x100000000
+        self.stack.append(result)
+
+    def _op_SHR(self, arg: Optional[int], frame: CallFrame) -> None:
+        b = self.stack.pop()
+        a = self.stack.pop()
+        shift = self._to_uint32(b) & 0x1F
+        self.stack.append(self._to_int32(a) >> shift)
+
+    def _op_USHR(self, arg: Optional[int], frame: CallFrame) -> None:
+        b = self.stack.pop()
+        a = self.stack.pop()
+        shift = self._to_uint32(b) & 0x1F
+        result = self._to_uint32(a) >> shift
+        self.stack.append(result)
+
+    def _op_LT(self, arg: Optional[int], frame: CallFrame) -> None:
+        b = self.stack.pop()
+        a = self.stack.pop()
+        self.stack.append(self._compare(a, b) < 0)
+
+    def _op_LE(self, arg: Optional[int], frame: CallFrame) -> None:
+        b = self.stack.pop()
+        a = self.stack.pop()
+        self.stack.append(self._compare(a, b) <= 0)
+
+    def _op_GT(self, arg: Optional[int], frame: CallFrame) -> None:
+        b = self.stack.pop()
+        a = self.stack.pop()
+        self.stack.append(self._compare(a, b) > 0)
+
+    def _op_GE(self, arg: Optional[int], frame: CallFrame) -> None:
+        b = self.stack.pop()
+        a = self.stack.pop()
+        self.stack.append(self._compare(a, b) >= 0)
+
+    def _op_EQ(self, arg: Optional[int], frame: CallFrame) -> None:
+        b = self.stack.pop()
+        a = self.stack.pop()
+        self.stack.append(self._abstract_equals(a, b))
+
+    def _op_NE(self, arg: Optional[int], frame: CallFrame) -> None:
+        b = self.stack.pop()
+        a = self.stack.pop()
+        self.stack.append(not self._abstract_equals(a, b))
+
+    def _op_SEQ(self, arg: Optional[int], frame: CallFrame) -> None:
+        b = self.stack.pop()
+        a = self.stack.pop()
+        self.stack.append(self._strict_equals(a, b))
+
+    def _op_SNE(self, arg: Optional[int], frame: CallFrame) -> None:
+        b = self.stack.pop()
+        a = self.stack.pop()
+        self.stack.append(not self._strict_equals(a, b))
+
+    def _op_NOT(self, arg: Optional[int], frame: CallFrame) -> None:
+        a = self.stack.pop()
+        self.stack.append(not to_boolean(a))
+
+    def _op_TYPEOF(self, arg: Optional[int], frame: CallFrame) -> None:
+        a = self.stack.pop()
+        self.stack.append(js_typeof(a))
+
+    def _op_TYPEOF_NAME(self, arg: Optional[int], frame: CallFrame) -> None:
+        # Special typeof that returns "undefined" for undeclared variables
+        name = frame.func.constants[arg]
+        if name in self.globals:
+            self.stack.append(js_typeof(self.globals[name]))
+        else:
+            self.stack.append("undefined")
+
+    def _op_INSTANCEOF(self, arg: Optional[int], frame: CallFrame) -> None:
+        constructor = self.stack.pop()
+        obj = self.stack.pop()
+        # Check if constructor is callable
+        if not (
+            isinstance(constructor, JSFunction)
+            or (isinstance(constructor, JSObject) and hasattr(constructor, "_call_fn"))
+        ):
+            raise JSTypeError("Right-hand side of instanceof is not callable")
+
+        # Check prototype chain
+        if not isinstance(obj, JSObject):
+            self.stack.append(False)
+        else:
+            # Get constructor's prototype property
+            # For JSFunction, check _prototype attribute (if set and not None)
+            # For JSCallableObject and other constructors, use get("prototype")
+            # A bound function tests against its target's prototype
+            target = getattr(constructor, "_original_func", constructor)
+            proto = target.get("prototype")
+            if not isinstance(proto, JSObject):
+                raise JSTypeError("Function has non-object prototype in instanceof")
+
+            # Walk the prototype chain
+            result = False
+            current = getattr(obj, "_prototype", None)
+            while current is not None:
+                if current is proto:
+                    result = True
+                    break
+                current = getattr(current, "_prototype", None)
             self.stack.append(result)
 
-        # Arrays/Objects
-        elif op == OpCode.BUILD_ARRAY:
-            self.charge(64 + 8 * arg)
-            elements = []
-            for _ in range(arg):
-                elements.insert(0, self.stack.pop())
-            arr = JSArray()
-            arr._elements = elements
-            self.stack.append(arr)
+    def _op_IN(self, arg: Optional[int], frame: CallFrame) -> None:
+        obj = self.stack.pop()
+        key = self.stack.pop()
+        if not isinstance(obj, JSObject):
+            raise JSTypeError("Cannot use 'in' operator on non-object")
+        key_str = to_string(key)
+        self.stack.append(obj.has(key_str))
 
-        elif op == OpCode.BUILD_OBJECT:
-            self.charge(64 + 64 * arg)
-            obj = JSObject(self.intrinsics.get("ObjectPrototype"))
-            props = []
-            for _ in range(arg):
-                value = self.stack.pop()
-                kind = self.stack.pop()
-                key = self.stack.pop()
-                props.insert(0, (key, kind, value))
-            for key, kind, value in props:
-                key_str = to_string(key) if not isinstance(key, str) else key
-                if kind == "get":
-                    obj.define_getter(key_str, value)
-                elif kind == "set":
-                    obj.define_setter(key_str, value)
-                elif key_str == "__proto__" and kind == "init":
-                    # __proto__ in object literal sets the prototype
-                    if value is NULL or value is None:
-                        obj._prototype = None
-                    elif isinstance(value, JSObject):
-                        obj._prototype = value
-                else:
-                    obj.set(key_str, value)
-            self.stack.append(obj)
+    def _op_JUMP(self, arg: Optional[int], frame: CallFrame) -> None:
+        frame.ip = arg
 
-        elif op == OpCode.BUILD_REGEX:
-            pattern, flags = frame.func.constants[arg]
-            # Create a timeout callback for the regex engine
-            poll_callback = None
-            if self.time_limit is not None:
-
-                def check_timeout() -> bool:
-                    """Return True if time limit exceeded (to abort regex)."""
-                    return time.monotonic() - self.start_time > self.time_limit
-
-                poll_callback = check_timeout
-            regex = JSRegExp(pattern, flags, poll_callback)
-            self.stack.append(regex)
-
-        # Arithmetic
-        elif op == OpCode.ADD:
-            b = self.stack.pop()
-            a = self.stack.pop()
-            self.stack.append(self._add(a, b))
-
-        elif op == OpCode.SUB:
-            b = self.stack.pop()
-            a = self.stack.pop()
-            self.stack.append(js_number(to_number(a) - to_number(b)))
-
-        elif op == OpCode.MUL:
-            b = self.stack.pop()
-            a = self.stack.pop()
-            a_num = to_number(a)
-            b_num = to_number(b)
-            if a_num == 0 or b_num == 0:
-                # Floats keep the sign of zero: 0 * -1 is -0
-                self.stack.append(float(a_num) * float(b_num))
-            else:
-                self.stack.append(js_number(a_num * b_num))
-
-        elif op == OpCode.DIV:
-            b = self.stack.pop()
-            a = self.stack.pop()
-            b_num = to_number(b)
-            a_num = to_number(a)
-            if b_num == 0:
-                # Check sign of zero using copysign
-                b_sign = math.copysign(1, b_num)
-                if a_num == 0:
-                    self.stack.append(float("nan"))
-                elif (a_num > 0) == (b_sign > 0):  # Same sign
-                    self.stack.append(float("inf"))
-                else:  # Different signs
-                    self.stack.append(float("-inf"))
-            else:
-                self.stack.append(a_num / b_num)
-
-        elif op == OpCode.MOD:
-            b = self.stack.pop()
-            a = self.stack.pop()
-            a_num = to_number(a)
-            self.stack.append(js_remainder(a_num, to_number(b)))
-
-        elif op == OpCode.POW:
-            b = self.stack.pop()
-            a = self.stack.pop()
-            a_num = to_number(a)
-            self.stack.append(js_pow(a_num, to_number(b)))
-
-        elif op == OpCode.NEG:
-            a = self.stack.pop()
-            n = to_number(a)
-            # Ensure -0 produces -0.0 (float)
-            if n == 0:
-                self.stack.append(-0.0 if math.copysign(1, n) > 0 else 0.0)
-            else:
-                self.stack.append(-n)
-
-        elif op == OpCode.POS:
-            a = self.stack.pop()
-            self.stack.append(to_number(a))
-
-        # Bitwise
-        elif op == OpCode.BAND:
-            b = self.stack.pop()
-            a = self.stack.pop()
-            self.stack.append(self._to_int32(a) & self._to_int32(b))
-
-        elif op == OpCode.BOR:
-            b = self.stack.pop()
-            a = self.stack.pop()
-            self.stack.append(self._to_int32(a) | self._to_int32(b))
-
-        elif op == OpCode.BXOR:
-            b = self.stack.pop()
-            a = self.stack.pop()
-            self.stack.append(self._to_int32(a) ^ self._to_int32(b))
-
-        elif op == OpCode.BNOT:
-            a = self.stack.pop()
-            self.stack.append(~self._to_int32(a))
-
-        elif op == OpCode.SHL:
-            b = self.stack.pop()
-            a = self.stack.pop()
-            shift = self._to_uint32(b) & 0x1F
-            result = self._to_int32(a) << shift
-            # Convert result back to signed 32-bit
-            result = result & 0xFFFFFFFF
-            if result >= 0x80000000:
-                result -= 0x100000000
-            self.stack.append(result)
-
-        elif op == OpCode.SHR:
-            b = self.stack.pop()
-            a = self.stack.pop()
-            shift = self._to_uint32(b) & 0x1F
-            self.stack.append(self._to_int32(a) >> shift)
-
-        elif op == OpCode.USHR:
-            b = self.stack.pop()
-            a = self.stack.pop()
-            shift = self._to_uint32(b) & 0x1F
-            result = self._to_uint32(a) >> shift
-            self.stack.append(result)
-
-        # Comparison
-        elif op == OpCode.LT:
-            b = self.stack.pop()
-            a = self.stack.pop()
-            self.stack.append(self._compare(a, b) < 0)
-
-        elif op == OpCode.LE:
-            b = self.stack.pop()
-            a = self.stack.pop()
-            self.stack.append(self._compare(a, b) <= 0)
-
-        elif op == OpCode.GT:
-            b = self.stack.pop()
-            a = self.stack.pop()
-            self.stack.append(self._compare(a, b) > 0)
-
-        elif op == OpCode.GE:
-            b = self.stack.pop()
-            a = self.stack.pop()
-            self.stack.append(self._compare(a, b) >= 0)
-
-        elif op == OpCode.EQ:
-            b = self.stack.pop()
-            a = self.stack.pop()
-            self.stack.append(self._abstract_equals(a, b))
-
-        elif op == OpCode.NE:
-            b = self.stack.pop()
-            a = self.stack.pop()
-            self.stack.append(not self._abstract_equals(a, b))
-
-        elif op == OpCode.SEQ:
-            b = self.stack.pop()
-            a = self.stack.pop()
-            self.stack.append(self._strict_equals(a, b))
-
-        elif op == OpCode.SNE:
-            b = self.stack.pop()
-            a = self.stack.pop()
-            self.stack.append(not self._strict_equals(a, b))
-
-        # Logical
-        elif op == OpCode.NOT:
-            a = self.stack.pop()
-            self.stack.append(not to_boolean(a))
-
-        # Type operations
-        elif op == OpCode.TYPEOF:
-            a = self.stack.pop()
-            self.stack.append(js_typeof(a))
-
-        elif op == OpCode.TYPEOF_NAME:
-            # Special typeof that returns "undefined" for undeclared variables
-            name = frame.func.constants[arg]
-            if name in self.globals:
-                self.stack.append(js_typeof(self.globals[name]))
-            else:
-                self.stack.append("undefined")
-
-        elif op == OpCode.INSTANCEOF:
-            constructor = self.stack.pop()
-            obj = self.stack.pop()
-            # Check if constructor is callable
-            if not (
-                isinstance(constructor, JSFunction)
-                or (
-                    isinstance(constructor, JSObject)
-                    and hasattr(constructor, "_call_fn")
-                )
-            ):
-                raise JSTypeError("Right-hand side of instanceof is not callable")
-
-            # Check prototype chain
-            if not isinstance(obj, JSObject):
-                self.stack.append(False)
-            else:
-                # Get constructor's prototype property
-                # For JSFunction, check _prototype attribute (if set and not None)
-                # For JSCallableObject and other constructors, use get("prototype")
-                # A bound function tests against its target's prototype
-                target = getattr(constructor, "_original_func", constructor)
-                proto = target.get("prototype")
-                if not isinstance(proto, JSObject):
-                    raise JSTypeError("Function has non-object prototype in instanceof")
-
-                # Walk the prototype chain
-                result = False
-                current = getattr(obj, "_prototype", None)
-                while current is not None:
-                    if current is proto:
-                        result = True
-                        break
-                    current = getattr(current, "_prototype", None)
-                self.stack.append(result)
-
-        elif op == OpCode.IN:
-            obj = self.stack.pop()
-            key = self.stack.pop()
-            if not isinstance(obj, JSObject):
-                raise JSTypeError("Cannot use 'in' operator on non-object")
-            key_str = to_string(key)
-            self.stack.append(obj.has(key_str))
-
-        # Control flow
-        elif op == OpCode.JUMP:
+    def _op_JUMP_IF_FALSE(self, arg: Optional[int], frame: CallFrame) -> None:
+        if not to_boolean(self.stack.pop()):
             frame.ip = arg
 
-        elif op == OpCode.JUMP_IF_FALSE:
-            if not to_boolean(self.stack.pop()):
-                frame.ip = arg
+    def _op_JUMP_IF_TRUE(self, arg: Optional[int], frame: CallFrame) -> None:
+        if to_boolean(self.stack.pop()):
+            frame.ip = arg
 
-        elif op == OpCode.JUMP_IF_TRUE:
-            if to_boolean(self.stack.pop()):
-                frame.ip = arg
+    def _op_CALL(self, arg: Optional[int], frame: CallFrame) -> None:
+        self._call_function(arg, None)
 
-        # Function operations
-        elif op == OpCode.CALL:
-            self._call_function(arg, None)
+    def _op_CALL_METHOD(self, arg: Optional[int], frame: CallFrame) -> None:
+        # Stack: this, method, arg1, arg2, ...
+        # Rearrange: this is before method
+        args = []
+        for _ in range(arg):
+            args.insert(0, self.stack.pop())
+        method = self.stack.pop()
+        this_val = self.stack.pop()
+        self._call_method(method, this_val, args)
 
-        elif op == OpCode.CALL_METHOD:
-            # Stack: this, method, arg1, arg2, ...
-            # Rearrange: this is before method
-            args = []
-            for _ in range(arg):
-                args.insert(0, self.stack.pop())
-            method = self.stack.pop()
-            this_val = self.stack.pop()
-            self._call_method(method, this_val, args)
+    def _op_RETURN(self, arg: Optional[int], frame: CallFrame) -> None:
+        result = self.stack.pop() if self.stack else UNDEFINED
+        self._return(result)
 
-        elif op == OpCode.RETURN:
-            result = self.stack.pop() if self.stack else UNDEFINED
-            self._return(result)
+    def _op_RETURN_UNDEFINED(self, arg: Optional[int], frame: CallFrame) -> None:
+        self._return(UNDEFINED)
 
-        elif op == OpCode.RETURN_UNDEFINED:
-            self._return(UNDEFINED)
+    def _op_NEW(self, arg: Optional[int], frame: CallFrame) -> None:
+        self._new_object(arg)
 
-        # Object operations
-        elif op == OpCode.NEW:
-            self._new_object(arg)
+    def _op_THIS(self, arg: Optional[int], frame: CallFrame) -> None:
+        self.stack.append(frame.this_value)
 
-        elif op == OpCode.THIS:
-            self.stack.append(frame.this_value)
+    def _op_THROW(self, arg: Optional[int], frame: CallFrame) -> None:
+        exc = self.stack.pop()
+        self._set_error_location(exc)
+        raise JSThrow(exc)
 
-        # Exception handling
-        elif op == OpCode.THROW:
-            exc = self.stack.pop()
-            self._set_error_location(exc)
-            raise JSThrow(exc)
+    def _op_TRY_START(self, arg: Optional[int], frame: CallFrame) -> None:
+        # arg is the catch handler offset
+        frame.handlers.append((arg, len(self.stack)))
 
-        elif op == OpCode.TRY_START:
-            # arg is the catch handler offset
-            frame.handlers.append((arg, len(self.stack)))
+    def _op_TRY_END(self, arg: Optional[int], frame: CallFrame) -> None:
+        frame.handlers.pop()
 
-        elif op == OpCode.TRY_END:
-            frame.handlers.pop()
+    def _op_CATCH(self, arg: Optional[int], frame: CallFrame) -> None:
+        # Exception is on stack
+        pass
 
-        elif op == OpCode.CATCH:
-            # Exception is on stack
-            pass
-
-        # Iteration
-        elif op == OpCode.FOR_IN_INIT:
-            obj = self.stack.pop()
-            if obj is UNDEFINED or obj is NULL:
-                keys = []
-            elif isinstance(obj, JSArray):
-                # For arrays, iterate over numeric indices as strings
-                keys = [str(i) for i in range(len(obj._elements))]
-                # Also include any non-numeric properties
-                keys.extend(obj.keys())
-            elif isinstance(obj, JSObject):
-                keys = obj.keys()
-            else:
-                keys = []
-            self.stack.append(ForInIterator(keys))
-
-        elif op == OpCode.FOR_IN_NEXT:
-            iterator = self.stack[-1]
-            if isinstance(iterator, ForInIterator):
-                key, done = iterator.next()
-                if done:
-                    self.stack.append(True)
-                else:
-                    self.stack.append(key)
-                    self.stack.append(False)
-            else:
-                self.stack.append(True)
-
-        elif op == OpCode.FOR_OF_INIT:
-            iterable = self.stack.pop()
-            if iterable is UNDEFINED or iterable is NULL:
-                values = []
-            elif isinstance(iterable, JSArray):
-                values = list(iterable._elements)
-            elif isinstance(iterable, str):
-                # Strings iterate over characters
-                values = list(iterable)
-            elif isinstance(iterable, list):
-                values = list(iterable)
-            else:
-                values = []
-            self.stack.append(ForOfIterator(values))
-
-        elif op == OpCode.FOR_OF_NEXT:
-            iterator = self.stack[-1]
-            if isinstance(iterator, ForOfIterator):
-                value, done = iterator.next()
-                if done:
-                    self.stack.append(True)
-                else:
-                    self.stack.append(value)
-                    self.stack.append(False)
-            else:
-                self.stack.append(True)
-
-        # Increment/Decrement
-        elif op == OpCode.INC:
-            a = self.stack.pop()
-            self.stack.append(js_number(to_number(a) + 1))
-
-        elif op == OpCode.DEC:
-            a = self.stack.pop()
-            self.stack.append(js_number(to_number(a) - 1))
-
-        # Closures
-        elif op == OpCode.MAKE_CLOSURE:
-            self.charge(512)  # Function, prototype object and cells
-            compiled_func = self.stack.pop()
-            if isinstance(compiled_func, CompiledFunction):
-                js_func = JSFunction(
-                    name=compiled_func.name,
-                    params=compiled_func.params,
-                    bytecode=compiled_func.bytecode,
-                )
-                js_func._compiled = compiled_func
-                js_func._prototype = self.intrinsics.get("FunctionPrototype")
-
-                # Every function has a prototype property, for 'new'
-                prototype = JSObject(self.intrinsics.get("ObjectPrototype"))
-                prototype.set_hidden("constructor", js_func)
-                js_func.set_hidden("prototype", prototype)
-
-                # Capture closure cells for free variables
-                if compiled_func.free_vars:
-                    closure_cells = []
-                    for var_name in compiled_func.free_vars:
-                        # First check if it's in our cell_storage (cell var)
-                        if frame.cell_storage and var_name in getattr(
-                            frame.func, "cell_vars", []
-                        ):
-                            idx = frame.func.cell_vars.index(var_name)
-                            # Share the same cell!
-                            closure_cells.append(frame.cell_storage[idx])
-                        elif frame.closure_cells and var_name in getattr(
-                            frame.func, "free_vars", []
-                        ):
-                            # Variable is in our own closure
-                            idx = frame.func.free_vars.index(var_name)
-                            closure_cells.append(frame.closure_cells[idx])
-                        elif var_name in frame.func.locals:
-                            # Regular local - shouldn't happen if cell_vars is working
-                            slot = frame.func.locals.index(var_name)
-                            cell = ClosureCell(frame.locals[slot])
-                            closure_cells.append(cell)
-                        else:
-                            closure_cells.append(ClosureCell(UNDEFINED))
-                    js_func._closure_cells = closure_cells
-
-                self.stack.append(js_func)
-            else:
-                self.stack.append(compiled_func)
-
+    def _op_FOR_IN_INIT(self, arg: Optional[int], frame: CallFrame) -> None:
+        obj = self.stack.pop()
+        if obj is UNDEFINED or obj is NULL:
+            keys = []
+        elif isinstance(obj, JSArray):
+            # For arrays, iterate over numeric indices as strings
+            keys = [str(i) for i in range(len(obj._elements))]
+            # Also include any non-numeric properties
+            keys.extend(obj.keys())
+        elif isinstance(obj, JSObject):
+            keys = obj.keys()
         else:
-            raise NotImplementedError(f"Opcode not implemented: {op.name}")
+            keys = []
+        self.stack.append(ForInIterator(keys))
+
+    def _op_FOR_IN_NEXT(self, arg: Optional[int], frame: CallFrame) -> None:
+        iterator = self.stack[-1]
+        if isinstance(iterator, ForInIterator):
+            key, done = iterator.next()
+            if done:
+                self.stack.append(True)
+            else:
+                self.stack.append(key)
+                self.stack.append(False)
+        else:
+            self.stack.append(True)
+
+    def _op_FOR_OF_INIT(self, arg: Optional[int], frame: CallFrame) -> None:
+        iterable = self.stack.pop()
+        if iterable is UNDEFINED or iterable is NULL:
+            values = []
+        elif isinstance(iterable, JSArray):
+            values = list(iterable._elements)
+        elif isinstance(iterable, str):
+            # Strings iterate over characters
+            values = list(iterable)
+        elif isinstance(iterable, list):
+            values = list(iterable)
+        else:
+            values = []
+        self.stack.append(ForOfIterator(values))
+
+    def _op_FOR_OF_NEXT(self, arg: Optional[int], frame: CallFrame) -> None:
+        iterator = self.stack[-1]
+        if isinstance(iterator, ForOfIterator):
+            value, done = iterator.next()
+            if done:
+                self.stack.append(True)
+            else:
+                self.stack.append(value)
+                self.stack.append(False)
+        else:
+            self.stack.append(True)
+
+    def _op_INC(self, arg: Optional[int], frame: CallFrame) -> None:
+        a = self.stack.pop()
+        self.stack.append(js_number(to_number(a) + 1))
+
+    def _op_DEC(self, arg: Optional[int], frame: CallFrame) -> None:
+        a = self.stack.pop()
+        self.stack.append(js_number(to_number(a) - 1))
+
+    def _op_MAKE_CLOSURE(self, arg: Optional[int], frame: CallFrame) -> None:
+        self.charge(512)  # Function, prototype object and cells
+        compiled_func = self.stack.pop()
+        if isinstance(compiled_func, CompiledFunction):
+            js_func = JSFunction(
+                name=compiled_func.name,
+                params=compiled_func.params,
+                bytecode=compiled_func.bytecode,
+            )
+            js_func._compiled = compiled_func
+            js_func._prototype = self.intrinsics.get("FunctionPrototype")
+
+            # Every function has a prototype property, for 'new'
+            prototype = JSObject(self.intrinsics.get("ObjectPrototype"))
+            prototype.set_hidden("constructor", js_func)
+            js_func.set_hidden("prototype", prototype)
+
+            # Capture closure cells for free variables
+            if compiled_func.free_vars:
+                closure_cells = []
+                for var_name in compiled_func.free_vars:
+                    # First check if it's in our cell_storage (cell var)
+                    if frame.cell_storage and var_name in getattr(
+                        frame.func, "cell_vars", []
+                    ):
+                        idx = frame.func.cell_vars.index(var_name)
+                        # Share the same cell!
+                        closure_cells.append(frame.cell_storage[idx])
+                    elif frame.closure_cells and var_name in getattr(
+                        frame.func, "free_vars", []
+                    ):
+                        # Variable is in our own closure
+                        idx = frame.func.free_vars.index(var_name)
+                        closure_cells.append(frame.closure_cells[idx])
+                    elif var_name in frame.func.locals:
+                        # Regular local - shouldn't happen if cell_vars is working
+                        slot = frame.func.locals.index(var_name)
+                        cell = ClosureCell(frame.locals[slot])
+                        closure_cells.append(cell)
+                    else:
+                        closure_cells.append(ClosureCell(UNDEFINED))
+                js_func._closure_cells = closure_cells
+
+            self.stack.append(js_func)
+        else:
+            self.stack.append(compiled_func)
 
     def _return(self, result: JSValue) -> None:
         """Pop the current frame, discard its stack values and push result."""
@@ -2934,3 +2911,18 @@ class VM:
         error.value = exc
         error.__cause__ = getattr(exc, "_python_exception", None)
         return error
+
+
+# Opcode handlers indexed by opcode number, and whether each takes an operand
+VM._HANDLERS = tuple(
+    (
+        getattr(VM, f"_op_{OpCode(i).name}", VM._op_unknown)
+        if i in OpCode._value2member_map_
+        else VM._op_unknown
+    )
+    for i in range(max(OpCode) + 1)
+)
+_HAS_ARG = tuple(
+    i in OpCode._value2member_map_ and OpCode(i) in OPCODES_WITH_ARG
+    for i in range(max(OpCode) + 1)
+)

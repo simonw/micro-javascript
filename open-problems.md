@@ -9,7 +9,7 @@ This document describes the known issues and limitations that remain as xfail te
 - `test_deep_nested_braces` ✅ Now passing
 - `test_deep_nested_arrays` ✅ Now passing
 - `test_deep_nested_regex_groups` (regex parser, still xfail)
-- `test_large_eval_parse_stack` ✅ Now passing
+- `test_large_eval_parse_stack` ✅ Now passing (in `test_builtin_funcs.py`)
 
 **Solution implemented:**
 Converted key parsing paths to use iterative approaches with explicit stacks:
@@ -91,18 +91,21 @@ The comprehensive regex test suites from the original QuickJS contain tests that
 
 ## Summary
 
-| Category | Issue Count | Status |
-|----------|-------------|--------|
-| Deep nesting/recursion | 5 → 1 | ✅ Mostly resolved |
-| Error location tracking | 2 | Medium complexity |
-| Lookahead capture semantics | 2 | High complexity |
-| Comprehensive test suites | 4 | Varies |
+Remaining xfail tests (pytest runs with `xfail_strict = true`, so any of these
+starting to pass will fail the suite until the marker is removed):
 
-**Total xfail tests:** 10 (down from 14)
+| Test | Category |
+|------|----------|
+| `test_known_issues.py::TestDeepNesting::test_deep_nested_regex_groups` | Regex parser recursion |
+| `test_known_issues.py::TestErrorLineColumn::test_error_constructor_has_line_number` | Error location tracking |
+| `test_known_issues.py::TestErrorLineColumn::test_error_constructor_has_column_number` | Error location tracking |
+| `test_builtin_funcs.py::test_builtin_function[test_regexp]` | Regex edge cases |
+| `test_builtin_funcs.py::test_builtin_function[test_line_column_numbers]` | Error location tracking |
+| `test_js_basic.py::test_mquickjs_js[test_builtin.js]` | Full upstream suite |
+| `test_js_basic.py::test_mquickjs_js[microbench.js]` | Full upstream suite |
 
-Most remaining issues fall into two categories:
-1. **Spec edge cases** (lookahead captures) - require careful ECMAScript spec analysis
-2. **Location tracking** - requires threading location info through constructor calls
+**Total xfail tests:** 7
 
 **Resolved:**
 - Deep nesting for parentheses, arrays, and block statements now works with 1000+ levels
+- `test_large_eval_parse_stack` from `test_builtin.js` now passes

@@ -287,14 +287,8 @@ class TestDeepNesting:
         result = ctx.eval(pattern)
         assert result == 1
 
-    @pytest.mark.xfail(reason="Deep nesting causes recursion overflow")
     def test_deep_nested_parens(self):
-        """Very deep nesting of parentheses should work.
-
-        Issue: 1000 levels of nested parentheses causes Python's
-        maximum recursion depth to be exceeded. The parser uses
-        recursive descent which doesn't scale to very deep nesting.
-        """
+        """Very deep nesting of parentheses should work."""
         ctx = Context(time_limit=10.0)
         n = 1000
         pattern = "(" * n + "1" + ")" * n
@@ -309,12 +303,8 @@ class TestDeepNesting:
         result = ctx.eval(pattern)
         assert result == 1
 
-    @pytest.mark.xfail(reason="Deep nesting causes recursion overflow")
     def test_deep_nested_braces(self):
-        """Very deep nesting of braces should work.
-
-        Issue: 1000 levels of nested braces causes recursion overflow.
-        """
+        """Very deep nesting of braces should work."""
         ctx = Context(time_limit=10.0)
         n = 1000
         pattern = "{" * n + "1;" + "}" * n
@@ -329,12 +319,8 @@ class TestDeepNesting:
         result = ctx.eval(pattern)
         assert result == 1
 
-    @pytest.mark.xfail(reason="Deep nesting causes recursion overflow")
     def test_deep_nested_arrays(self):
-        """Very deep nesting of arrays with access should work.
-
-        Issue: 1000 levels of nested arrays causes recursion overflow.
-        """
+        """Very deep nesting of arrays with access should work."""
         ctx = Context(time_limit=10.0)
         n = 1000
         pattern = "[" * n + "1" + "]" * n + "[0]" * n

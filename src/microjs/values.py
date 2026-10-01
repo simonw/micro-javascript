@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Sequence, Union, TYPE_CHECKING
 import contextvars
 import math
 
-from .errors import JSRangeError
+from .errors import JSRangeError, JSTypeError
 from .numbers import number_to_string, string_to_number
 
 if TYPE_CHECKING:
@@ -242,6 +242,10 @@ class JSObject:
 
     # Keys of non-enumerable properties (built-in methods, constructor, ...)
     _hidden: frozenset = frozenset()
+    # Object.preventExtensions / seal / freeze state
+    _extensible: bool = True
+    _sealed: bool = False
+    _frozen: bool = False
 
     def __init__(self, prototype: Optional["JSObject"] = None):
         self._properties: Dict[str, JSValue] = {}
@@ -281,12 +285,23 @@ class JSObject:
         """Define a setter for a property."""
         self._setters[key] = setter
 
+    def check_writable(self, key: str) -> None:
+        """Throw TypeError if key cannot be assigned (frozen or not extensible)."""
+        if self._frozen:
+            raise JSTypeError(f"Cannot assign to read only property '{key}' of object")
+        if not self._extensible and key not in self._properties:
+            raise JSTypeError(f"Cannot add property {key}, object is not extensible")
+
     def set(self, key: str, value: JSValue) -> None:
         """Set a property value."""
+        if not self._extensible:
+            self.check_writable(key)
         self._properties[key] = value
 
     def set_hidden(self, key: str, value: JSValue) -> None:
         """Set a property that for-in and Object.keys() do not list."""
+        if not self._extensible:
+            self.check_writable(key)
         self._properties[key] = value
         if key not in self._hidden:
             self._hidden = self._hidden | {key}
@@ -298,6 +313,8 @@ class JSObject:
     def delete(self, key: str) -> bool:
         """Delete a property."""
         if key in self._properties:
+            if self._sealed:
+                raise JSTypeError(f"Cannot delete property '{key}' of object")
             del self._properties[key]
             return True
         return False

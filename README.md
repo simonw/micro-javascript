@@ -224,6 +224,13 @@ caught;  // => "TypeError!"
 "a1b2".replace(/\d/g, d => d * 2);  // => "a2b4"
 /(?<=\$)\d+/.exec("cost: $42")[0];  // => "42"
 
+// Built-ins live on prototypes that scripts can use and extend
+Array.prototype.slice.call({ length: 2, 0: "a", 1: "b" }).join("+");  // => "a+b"
+Array.from("abc", c => c.toUpperCase()).join("");  // => "ABC"
+[1, [2, [3, [4]]]].flat(Infinity).length;  // => 4
+var frozen = Object.freeze({ x: 1 });
+Object.isFrozen(frozen);  // => true
+
 // JSON, Math and typed arrays
 JSON.stringify({ a: [1, { b: true }] });  // => '{"a":[1,{"b":true}]}'
 Math.max(3, 7, 5);  // => 7
@@ -242,7 +249,10 @@ These raise a `SyntaxError` or are undefined:
 - Template literals, destructuring, spread, and rest or default parameters
 - Optional chaining (`?.`) and nullish coalescing (`??`)
 - `Symbol`, `Map`, `Set`, `WeakMap`, `Proxy`, `Reflect` and `BigInt`
+- Iterators and the methods that return them (`Array.prototype.keys`, `String.prototype.matchAll`, ...), `globalThis` and `String.raw`
 - `Date` beyond `Date.now()`, and `Error.prototype.stack` (always empty)
+
+Strings are sequences of Unicode code points rather than UTF-16 code units, so a character outside the Basic Multilingual Plane such as `"😀"` has a `length` of 1, not 2.
 
 See [open-problems.md](https://github.com/simonw/micro-javascript/blob/main/open-problems.md) for known bugs that are tracked as expected-failure tests.
 

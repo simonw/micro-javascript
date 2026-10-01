@@ -3,6 +3,7 @@
 import math
 import sys
 import time
+import unicodedata
 from typing import Any, Dict, List, Optional, Tuple, Union
 from dataclasses import dataclass, field
 
@@ -129,6 +130,30 @@ class ForOfIterator:
 # Deepest JavaScript call stack before a RangeError
 MAX_CALL_DEPTH = 10000
 
+
+def int_arg(args, index: int, default: int) -> int:
+    """Integer argument (ToIntegerOrInfinity), or default if absent/undefined.
+
+    NaN counts as 0 and infinities as +/- 2**53, which slices clamp.
+    """
+    if len(args) <= index or args[index] is UNDEFINED:
+        return default
+    n = to_number(args[index])
+    if n != n:
+        return 0
+    if n in (float("inf"), float("-inf")):
+        return 2**53 if n > 0 else -(2**53)
+    return int(n)
+
+
+def relative_index(args, index: int, length: int, default: int) -> int:
+    """A start/end argument: negative counts from the end, clamped to 0..length."""
+    n = int_arg(args, index, default)
+    if n < 0:
+        return max(0, length + n)
+    return min(n, length)
+
+
 # Built-in methods installed on the prototypes, implemented by the VM's
 # _make_*_method factories
 ARRAY_METHODS = (
@@ -155,11 +180,35 @@ ARRAY_METHODS = (
     "reverse",
     "includes",
     "sort",
+    "at",
+    "flat",
+    "flatMap",
+    "findLast",
+    "findLastIndex",
+    "fill",
+    "copyWithin",
+    "toReversed",
+    "toSorted",
+    "toSpliced",
+    "with",
+    "toLocaleString",
 )
 # Array methods that modify the array (written back to array-like objects)
 ARRAY_MUTATORS = frozenset(
-    ["push", "pop", "shift", "unshift", "splice", "reverse", "sort"]
+    [
+        "push",
+        "pop",
+        "shift",
+        "unshift",
+        "splice",
+        "reverse",
+        "sort",
+        "fill",
+        "copyWithin",
+    ]
 )
+# Mutators that change the length, which a sealed array does not allow
+ARRAY_RESIZERS = frozenset(["push", "pop", "shift", "unshift", "splice"])
 STRING_METHODS = (
     "charAt",
     "charCodeAt",
@@ -186,8 +235,28 @@ STRING_METHODS = (
     "search",
     "toString",
     "valueOf",
+    "at",
+    "codePointAt",
+    "localeCompare",
+    "normalize",
+    "trimLeft",
+    "trimRight",
+    "substr",
+    "toLocaleLowerCase",
+    "toLocaleUpperCase",
 )
 NUMBER_METHODS = ("toFixed", "toString", "toExponential", "toPrecision", "valueOf")
+
+
+def collation_key(s: str) -> tuple:
+    """Approximate the default locale collation for localeCompare.
+
+    Compares letters first ignoring accents and case, then accents, then
+    case (lowercase before uppercase).
+    """
+    folded = unicodedata.normalize("NFD", s.casefold())
+    base = "".join(c for c in folded if not unicodedata.combining(c))
+    return (base, folded, tuple(c.isupper() for c in s))
 
 
 def heap_size(roots: List[Any]) -> int:
@@ -1202,6 +1271,14 @@ class VM:
         """Run built-in method name of a prototype (kind) on this."""
         if kind == "array":
             arr, source = self._array_receiver(this)
+            if name in ARRAY_MUTATORS:
+                target = source if source is not None else arr
+                if target._frozen or (name in ARRAY_RESIZERS and target._sealed):
+                    raise JSTypeError(
+                        f"Cannot modify a frozen or sealed array with {name}"
+                    )
+                if not target._extensible and name in ("push", "unshift"):
+                    raise JSTypeError(f"Cannot add elements, object is not extensible")
             result = self._make_array_method(arr, name)(*args)
             if source is not None:
                 if name in ARRAY_MUTATORS:
@@ -1413,10 +1490,8 @@ class VM:
             return acc
 
         def splice_fn(*args):
-            start = int(to_number(args[0])) if args else 0
-            delete_count = (
-                int(to_number(args[1])) if len(args) > 1 else len(arr._elements) - start
-            )
+            start = int_arg(args, 0, 0)
+            delete_count = int_arg(args, 1, len(arr._elements) - start)
             items = list(args[2:]) if len(args) > 2 else []
             vm.charge(8 * len(items))
 
@@ -1449,7 +1524,7 @@ class VM:
 
         def indexOf_fn(*args):
             search = args[0] if args else UNDEFINED
-            start = int(to_number(args[1])) if len(args) > 1 else 0
+            start = int_arg(args, 1, 0)
             if start < 0:
                 start = max(0, len(arr._elements) + start)
             for i in range(start, len(arr._elements)):
@@ -1461,7 +1536,7 @@ class VM:
 
         def lastIndexOf_fn(*args):
             search = args[0] if args else UNDEFINED
-            start = int(to_number(args[1])) if len(args) > 1 else len(arr._elements) - 1
+            start = int_arg(args, 1, len(arr._elements) - 1)
             if start < 0:
                 start = len(arr._elements) + start
             for i in range(min(start, len(arr._elements) - 1), -1, -1):
@@ -1526,8 +1601,8 @@ class VM:
             return result
 
         def slice_fn(*args):
-            start = int(to_number(args[0])) if args else 0
-            end = int(to_number(args[1])) if len(args) > 1 else len(arr._elements)
+            start = int_arg(args, 0, 0)
+            end = int_arg(args, 1, len(arr._elements))
             if start < 0:
                 start = max(0, len(arr._elements) + start)
             if end < 0:
@@ -1542,7 +1617,7 @@ class VM:
 
         def includes_fn(*args):
             search = args[0] if args else UNDEFINED
-            start = int(to_number(args[1])) if len(args) > 1 else 0
+            start = int_arg(args, 1, 0)
             if start < 0:
                 start = max(0, len(arr._elements) + start)
             for i in range(start, len(arr._elements)):
@@ -1594,7 +1669,122 @@ class VM:
             arr._elements.sort(key=cmp_to_key(compare_fn))
             return arr
 
+        def at_fn(*args):
+            idx = int_arg(args, 0, 0)
+            if idx < 0:
+                idx += len(arr._elements)
+            return arr.get_index(idx) if idx >= 0 else UNDEFINED
+
+        def flatten(elements, depth):
+            """Flatten nested arrays up to depth levels, without recursion."""
+            result = []
+            stack = [(iter(elements), depth)]
+            while stack:
+                items, level = stack[-1]
+                for elem in items:
+                    if isinstance(elem, JSArray) and level > 0:
+                        stack.append((iter(elem._elements), level - 1))
+                        break
+                    result.append(elem)
+                    if not len(result) & 4095:
+                        vm.check_deadline()
+                else:
+                    stack.pop()
+            vm.charge(8 * len(result))
+            return result
+
+        def flat_fn(*args):
+            depth = 1
+            if args and args[0] is not UNDEFINED:
+                depth = to_number(args[0])
+                depth = 0 if depth != depth else depth
+            result = JSArray()
+            result._elements = flatten(arr._elements, depth)
+            return result
+
+        def flatMap_fn(*args):
+            mapped = map_fn(*args)
+            result = JSArray()
+            result._elements = flatten(mapped._elements, 1)
+            return result
+
+        def findLast_fn(*args):
+            index = findLastIndex_fn(*args)
+            return arr._elements[index] if index >= 0 else UNDEFINED
+
+        def findLastIndex_fn(*args):
+            callback = args[0] if args else None
+            if not callback:
+                raise JSTypeError("findLastIndex callback is not a function")
+            for i in range(len(arr._elements) - 1, -1, -1):
+                if to_boolean(vm._call_callback(callback, [arr._elements[i], i, arr])):
+                    return i
+            return -1
+
+        def fill_fn(*args):
+            value = args[0] if args else UNDEFINED
+            length = len(arr._elements)
+            start = relative_index(args, 1, length, 0)
+            end = relative_index(args, 2, length, length)
+            for i in range(start, end):
+                arr._elements[i] = value
+            return arr
+
+        def copyWithin_fn(*args):
+            length = len(arr._elements)
+            target = relative_index(args, 0, length, 0)
+            start = relative_index(args, 1, length, 0)
+            end = relative_index(args, 2, length, length)
+            count = min(end - start, length - target)
+            if count > 0:
+                arr._elements[target : target + count] = arr._elements[
+                    start : start + count
+                ]
+            return arr
+
+        def copy():
+            vm.charge(64 + 8 * len(arr._elements))
+            result = JSArray()
+            result._elements = arr._elements[:]
+            return result
+
+        def toReversed_fn(*args):
+            result = copy()
+            result._elements.reverse()
+            return result
+
+        def toSorted_fn(*args):
+            result = copy()
+            return vm._make_array_method(result, "sort")(*args)
+
+        def toSpliced_fn(*args):
+            result = copy()
+            vm._make_array_method(result, "splice")(*args)
+            return result
+
+        def with_fn(*args):
+            idx = int_arg(args, 0, 0)
+            if idx < 0:
+                idx += len(arr._elements)
+            if not 0 <= idx < len(arr._elements):
+                raise JSRangeError("Invalid index")
+            result = copy()
+            result._elements[idx] = args[1] if len(args) > 1 else UNDEFINED
+            return result
+
         methods = {
+            "at": at_fn,
+            "flat": flat_fn,
+            "flatMap": flatMap_fn,
+            "findLast": findLast_fn,
+            "findLastIndex": findLastIndex_fn,
+            "fill": fill_fn,
+            "copyWithin": copyWithin_fn,
+            "toReversed": toReversed_fn,
+            "toSorted": toSorted_fn,
+            "toSpliced": toSpliced_fn,
+            "with": with_fn,
+            "toLocaleString": toString_fn,
             "push": push_fn,
             "pop": pop_fn,
             "shift": shift_fn,
@@ -1798,8 +1988,8 @@ class VM:
             return separator.join(str(arr.get_index(i)) for i in range(arr.length))
 
         def subarray_fn(*args):
-            begin = int(to_number(args[0])) if len(args) > 0 else 0
-            end = int(to_number(args[1])) if len(args) > 1 else arr.length
+            begin = int_arg(args, 0, 0)
+            end = int_arg(args, 1, arr.length)
 
             # Handle negative indices
             if begin < 0:
@@ -1823,7 +2013,7 @@ class VM:
         def set_fn(*args):
             # TypedArray.set(array, offset)
             source = args[0] if args else UNDEFINED
-            offset = int(to_number(args[1])) if len(args) > 1 else 0
+            offset = int_arg(args, 1, 0)
 
             if isinstance(source, (JSArray, JSTypedArray)):
                 for i in range(source.length):
@@ -1948,33 +2138,33 @@ class VM:
         """Create a bound string method."""
 
         def charAt(*args):
-            idx = int(to_number(args[0])) if args else 0
+            idx = int_arg(args, 0, 0)
             if 0 <= idx < len(s):
                 return s[idx]
             return ""
 
         def charCodeAt(*args):
-            idx = int(to_number(args[0])) if args else 0
+            idx = int_arg(args, 0, 0)
             if 0 <= idx < len(s):
                 return ord(s[idx])
             return float("nan")
 
         def indexOf(*args):
             search = to_string(args[0]) if args else ""
-            start = int(to_number(args[1])) if len(args) > 1 else 0
+            start = int_arg(args, 1, 0)
             if start < 0:
                 start = 0
             return s.find(search, start)
 
         def lastIndexOf(*args):
             search = to_string(args[0]) if args else ""
-            end = int(to_number(args[1])) if len(args) > 1 else len(s)
+            end = int_arg(args, 1, len(s))
             # Python's rfind with end position
             return s.rfind(search, 0, end + len(search))
 
         def substring(*args):
-            start = int(to_number(args[0])) if args else 0
-            end = int(to_number(args[1])) if len(args) > 1 else len(s)
+            start = int_arg(args, 0, 0)
+            end = int_arg(args, 1, len(s))
             # Clamp and swap if needed
             if start < 0:
                 start = 0
@@ -1985,8 +2175,8 @@ class VM:
             return s[start:end]
 
         def slice_fn(*args):
-            start = int(to_number(args[0])) if args else 0
-            end = int(to_number(args[1])) if len(args) > 1 else len(s)
+            start = int_arg(args, 0, 0)
+            end = int_arg(args, 1, len(s))
             # Handle negative indices
             if start < 0:
                 start = max(0, len(s) + start)
@@ -1996,7 +2186,7 @@ class VM:
 
         def split(*args):
             sep = args[0] if args else UNDEFINED
-            limit = int(to_number(args[1])) if len(args) > 1 else -1
+            limit = int_arg(args, 1, -1)
             if isinstance(sep, str) or (
                 sep is not UNDEFINED and not isinstance(sep, JSRegExp)
             ):
@@ -2103,22 +2293,52 @@ class VM:
         def padStart(*args):
             return pad(args, at_start=True)
 
+        def string_at(*args):
+            idx = int_arg(args, 0, 0)
+            if idx < 0:
+                idx += len(s)
+            return s[idx] if 0 <= idx < len(s) else UNDEFINED
+
+        def codePointAt(*args):
+            idx = int_arg(args, 0, 0)
+            return ord(s[idx]) if 0 <= idx < len(s) else UNDEFINED
+
+        def localeCompare(*args):
+            other = to_string(args[0]) if args else "undefined"
+            a, b = collation_key(s), collation_key(other)
+            return (a > b) - (a < b)
+
+        def normalize(*args):
+            form = "NFC"
+            if args and args[0] is not UNDEFINED:
+                form = to_string(args[0])
+            if form not in ("NFC", "NFD", "NFKC", "NFKD"):
+                raise JSRangeError(
+                    "The normalization form should be one of NFC, NFD, NFKC, NFKD"
+                )
+            return unicodedata.normalize(form, s)
+
+        def substr(*args):
+            start = relative_index(args, 0, len(s), 0)
+            length = int_arg(args, 1, len(s) - start)
+            return s[start : start + max(0, length)]
+
         def padEnd(*args):
             return pad(args, at_start=False)
 
         def startsWith(*args):
             search = to_string(args[0]) if args else ""
-            pos = int(to_number(args[1])) if len(args) > 1 else 0
+            pos = int_arg(args, 1, 0)
             return s[pos:].startswith(search)
 
         def endsWith(*args):
             search = to_string(args[0]) if args else ""
-            length = int(to_number(args[1])) if len(args) > 1 else len(s)
+            length = int_arg(args, 1, len(s))
             return s[:length].endswith(search)
 
         def includes(*args):
             search = to_string(args[0]) if args else ""
-            pos = int(to_number(args[1])) if len(args) > 1 else 0
+            pos = int_arg(args, 1, 0)
             return search in s[pos:]
 
         def make_replacer(replacement):
@@ -2351,6 +2571,15 @@ class VM:
             "replaceAll": replaceAll,
             "padStart": padStart,
             "padEnd": padEnd,
+            "at": string_at,
+            "codePointAt": codePointAt,
+            "localeCompare": localeCompare,
+            "normalize": normalize,
+            "trimLeft": trimStart,
+            "trimRight": trimEnd,
+            "substr": substr,
+            "toLocaleLowerCase": toLowerCase,
+            "toLocaleUpperCase": toUpperCase,
             "match": match,
             "search": search,
             "toString": toString,
@@ -2378,13 +2607,20 @@ class VM:
         if isinstance(obj, JSArray):
             # Special handling for length property
             if key_str == "length":
-                obj.length = to_array_length(value)
+                new_length = to_array_length(value)
+                if obj._frozen or (obj._sealed and new_length != obj.length):
+                    raise JSTypeError("Cannot change the length of a frozen array")
+                if not obj._extensible and new_length > obj.length:
+                    raise JSTypeError("Cannot add elements, object is not extensible")
+                obj.length = new_length
                 return
             # Strict array mode: reject non-integer indices
             # Valid indices are integer strings in range [0, 2^32-2]
             try:
                 idx = int(key_str)
                 if idx >= 0 and str(idx) == key_str:
+                    if not obj._extensible:
+                        obj.check_writable(key_str if idx < len(obj._elements) else "")
                     if idx == len(obj._elements):
                         self.charge(8)
                     obj.set_index(idx, value)

@@ -35,6 +35,7 @@ from .values import (
 from .ast_nodes import ExpressionStatement, FunctionExpression
 from .errors import (
     JSError,
+    JSRangeError,
     JSSyntaxError,
     JSTypeError,
     MemoryLimitError,
@@ -51,6 +52,72 @@ from .numbers import (
     parse_float,
     parse_int,
 )
+
+# Characters encodeURIComponent leaves alone, and those encodeURI also keeps
+URI_UNRESERVED = (
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.!~*'()"
+)
+URI_RESERVED = ";/?:@&=+$,"
+
+
+def uri_encoder(keep: str):
+    """Build encodeURI or encodeURIComponent: %-encode UTF-8 except keep."""
+
+    def encode(*args):
+        text = to_string(args[0]) if args else "undefined"
+        try:
+            data = text.encode("utf-8")
+        except UnicodeEncodeError:
+            raise JSError("URI malformed", "URIError")
+        return "".join(
+            chr(byte) if chr(byte) in keep else f"%{byte:02X}" for byte in data
+        )
+
+    return encode
+
+
+def uri_decoder(reserved: str):
+    """Build decodeURI or decodeURIComponent: escapes of reserved stay as-is."""
+
+    def decode(*args):
+        text = to_string(args[0]) if args else "undefined"
+        out = []
+        i = 0
+        while i < len(text):
+            if text[i] != "%":
+                out.append(text[i])
+                i += 1
+                continue
+            # Collect one UTF-8 sequence of %XX escapes
+            data = bytearray()
+            start = i
+            while True:
+                hex_digits = text[i + 1 : i + 3]
+                if len(hex_digits) < 2 or not all(
+                    c in "0123456789abcdefABCDEF" for c in hex_digits
+                ):
+                    raise JSError("URI malformed", "URIError")
+                data.append(int(hex_digits, 16))
+                i += 3
+                lead = data[0]
+                needed = (
+                    1
+                    if lead < 0x80
+                    else 2 if lead >> 5 == 6 else 3 if lead >> 4 == 14 else 4
+                )
+                if len(data) == needed or i >= len(text) or text[i] != "%":
+                    break
+            try:
+                decoded = data.decode("utf-8")
+            except UnicodeDecodeError:
+                raise JSError("URI malformed", "URIError")
+            if len(decoded) == 1 and decoded in reserved:
+                out.append(text[start:i])
+            else:
+                out.append(decoded)
+        return "".join(out)
+
+    return decode
 
 
 class Context:
@@ -156,6 +223,10 @@ class Context:
         self._globals["ArrayBuffer"] = self._create_arraybuffer_constructor()
 
         # Global number functions
+        self._globals["encodeURIComponent"] = uri_encoder(URI_UNRESERVED)
+        self._globals["encodeURI"] = uri_encoder(URI_UNRESERVED + URI_RESERVED + "#")
+        self._globals["decodeURIComponent"] = uri_decoder("")
+        self._globals["decodeURI"] = uri_decoder(URI_RESERVED + "#")
         self._globals["isNaN"] = self._global_isnan
         self._globals["isFinite"] = self._global_isfinite
         self._globals["parseInt"] = self._parse_int
@@ -197,7 +268,14 @@ class Context:
             return prototype
 
         link(globals_["Object"], object_prototype)
-        for name in ("toString", "hasOwnProperty", "valueOf", "isPrototypeOf"):
+        for name in (
+            "toString",
+            "hasOwnProperty",
+            "valueOf",
+            "isPrototypeOf",
+            "propertyIsEnumerable",
+            "toLocaleString",
+        ):
             object_prototype.set_hidden(name, object_prototype.get(name))
 
         link(globals_["Function"], function_prototype)
@@ -343,6 +421,26 @@ class Context:
         object_prototype.set("valueOf", JSBoundMethod(proto_valueOf))
         object_prototype.set("isPrototypeOf", JSBoundMethod(proto_isPrototypeOf))
 
+        def proto_propertyIsEnumerable(this_val, *args):
+            key = to_string(args[0]) if args else "undefined"
+            if isinstance(this_val, JSArray):
+                if key.isdigit() and int(key) < len(this_val._elements):
+                    return True
+            if not isinstance(this_val, JSObject):
+                return False
+            return key in this_val._properties and key not in this_val._hidden
+
+        def proto_toLocaleString(this_val, *args):
+            vm = CURRENT_VM.get()
+            return vm._call_callback(
+                vm._get_property(this_val, "toString"), [], this_val
+            )
+
+        object_prototype.set(
+            "propertyIsEnumerable", JSBoundMethod(proto_propertyIsEnumerable)
+        )
+        object_prototype.set("toLocaleString", JSBoundMethod(proto_toLocaleString))
+
         # Store for other constructors to use
         self._object_prototype = object_prototype
         self.intrinsics["ObjectPrototype"] = object_prototype
@@ -477,29 +575,119 @@ class Context:
                 return UNDEFINED
             prop_name = to_string(prop)
 
-            if (
-                not obj.has(prop_name)
-                and prop_name not in obj._getters
-                and prop_name not in obj._setters
-            ):
-                return UNDEFINED
-
             descriptor = JSObject(object_prototype)
-
             getter = obj._getters.get(prop_name)
             setter = obj._setters.get(prop_name)
-
             if getter or setter:
                 descriptor.set("get", getter if getter else UNDEFINED)
                 descriptor.set("set", setter if setter else UNDEFINED)
-            else:
+            elif isinstance(obj, JSArray) and prop_name in array_own_keys(obj):
+                value = (
+                    obj.length
+                    if prop_name == "length"
+                    else obj._elements[int(prop_name)]
+                )
+                descriptor.set("value", value)
+                descriptor.set("writable", not obj._frozen)
+            elif obj.has(prop_name):
                 descriptor.set("value", obj.get(prop_name))
-                descriptor.set("writable", True)
-
-            descriptor.set("enumerable", True)
-            descriptor.set("configurable", True)
-
+                descriptor.set("writable", not obj._frozen)
+            else:
+                return UNDEFINED
+            enumerable = prop_name not in obj._hidden and prop_name != "length"
+            descriptor.set("enumerable", enumerable)
+            descriptor.set("configurable", not obj._sealed and prop_name != "length")
             return descriptor
+
+        def array_own_keys(arr):
+            return [str(i) for i in range(len(arr._elements))] + ["length"]
+
+        def own_property_names(*args):
+            """Object.getOwnPropertyNames(obj): all own keys, enumerable or not."""
+            obj = args[0] if args else UNDEFINED
+            if isinstance(obj, str):
+                names = [str(i) for i in range(len(obj))] + ["length"]
+            elif not isinstance(obj, JSObject):
+                names = []
+            else:
+                names = array_own_keys(obj) if isinstance(obj, JSArray) else []
+                for key in list(obj._properties) + list(obj._getters):
+                    if key not in names:
+                        names.append(key)
+            result = JSArray()
+            result._elements = names
+            return result
+
+        def own_property_descriptors(*args):
+            obj = args[0] if args else UNDEFINED
+            result = JSObject(object_prototype)
+            for name in own_property_names(obj)._elements:
+                result.set(name, get_own_property_descriptor(obj, name))
+            return result
+
+        def is_fn(*args):
+            """Object.is: SameValue (NaN is NaN, 0 is not -0)."""
+            a = args[0] if args else UNDEFINED
+            b = args[1] if len(args) > 1 else UNDEFINED
+            if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+                if isinstance(a, bool) or isinstance(b, bool):
+                    return a is b
+                if a != a and b != b:
+                    return True
+                if a == 0 and b == 0:
+                    return math.copysign(1, a) == math.copysign(1, b)
+                return a == b
+            if isinstance(a, str) and isinstance(b, str):
+                return a == b
+            return a is b
+
+        def from_entries(*args):
+            entries = args[0] if args else UNDEFINED
+            if not isinstance(entries, JSArray):
+                raise JSTypeError("Object.fromEntries requires an array of entries")
+            result = JSObject(object_prototype)
+            for entry in entries._elements:
+                if not isinstance(entry, JSArray):
+                    raise JSTypeError("Object.fromEntries entries must be arrays")
+                key = entry.get_index(0)
+                result.set(to_string(key), entry.get_index(1))
+            return result
+
+        def restrict(level):
+            """Object.preventExtensions (1), seal (2) and freeze (3)."""
+
+            def restrict_fn(*args):
+                obj = args[0] if args else UNDEFINED
+                if isinstance(obj, JSObject):
+                    obj._extensible = False
+                    if level >= 2:
+                        obj._sealed = True
+                    if level >= 3:
+                        obj._frozen = True
+                return obj
+
+            return restrict_fn
+
+        def has_no_own_properties(obj):
+            if isinstance(obj, JSArray) and obj._elements:
+                return False
+            return not obj._properties and not obj._getters and not obj._setters
+
+        def is_frozen(*args):
+            obj = args[0] if args else UNDEFINED
+            if not isinstance(obj, JSObject):
+                return True
+            return obj._frozen or (not obj._extensible and has_no_own_properties(obj))
+
+        def is_sealed(*args):
+            obj = args[0] if args else UNDEFINED
+            if not isinstance(obj, JSObject):
+                return True
+            return obj._sealed or (not obj._extensible and has_no_own_properties(obj))
+
+        def is_extensible(*args):
+            obj = args[0] if args else UNDEFINED
+            return isinstance(obj, JSObject) and obj._extensible
 
         obj_constructor.set("keys", keys_fn)
         obj_constructor.set("values", values_fn)
@@ -511,6 +699,16 @@ class Context:
         obj_constructor.set("defineProperties", define_properties)
         obj_constructor.set("create", create_fn)
         obj_constructor.set("getOwnPropertyDescriptor", get_own_property_descriptor)
+        obj_constructor.set("getOwnPropertyDescriptors", own_property_descriptors)
+        obj_constructor.set("getOwnPropertyNames", own_property_names)
+        obj_constructor.set("is", is_fn)
+        obj_constructor.set("fromEntries", from_entries)
+        obj_constructor.set("preventExtensions", restrict(1))
+        obj_constructor.set("seal", restrict(2))
+        obj_constructor.set("freeze", restrict(3))
+        obj_constructor.set("isFrozen", is_frozen)
+        obj_constructor.set("isSealed", is_sealed)
+        obj_constructor.set("isExtensible", is_extensible)
         obj_constructor.set("prototype", object_prototype)
 
         return obj_constructor
@@ -542,6 +740,32 @@ class Context:
             return isinstance(obj, JSArray)
 
         arr_constructor.set("isArray", is_array)
+
+        def array_from(*args):
+            """Array.from(arrayLike or string, mapFn, thisArg)."""
+            source = args[0] if args else UNDEFINED
+            map_fn = args[1] if len(args) > 1 and args[1] is not UNDEFINED else None
+            this_arg = args[2] if len(args) > 2 else UNDEFINED
+            vm = CURRENT_VM.get()
+            if source is UNDEFINED or source is NULL:
+                raise JSTypeError("Array.from requires an array-like object")
+            items, _ = vm._array_receiver(source)
+            result = JSArray()
+            result._elements = items._elements[:]
+            if map_fn is not None:
+                result._elements = [
+                    vm._call_callback(map_fn, [value, i], this_arg)
+                    for i, value in enumerate(result._elements)
+                ]
+            return result
+
+        def array_of(*args):
+            result = JSArray()
+            result._elements = list(args)
+            return result
+
+        arr_constructor.set("from", array_from)
+        arr_constructor.set("of", array_of)
 
         return arr_constructor
 
@@ -776,6 +1000,17 @@ class Context:
             return "".join(chr(int(to_number(arg))) for arg in args)
 
         string_constructor.set("fromCharCode", fromCharCode_fn)
+
+        def fromCodePoint_fn(*args):
+            chars = []
+            for arg in args:
+                code = to_number(arg)
+                if code != code or code < 0 or code > 0x10FFFF or code != int(code):
+                    raise JSRangeError(f"Invalid code point {to_string(arg)}")
+                chars.append(chr(int(code)))
+            return "".join(chars)
+
+        string_constructor.set("fromCodePoint", fromCodePoint_fn)
 
         return string_constructor
 

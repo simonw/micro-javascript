@@ -79,8 +79,8 @@ PASSING_TESTS = {
 
 # Tests that are known to fail (with reasons)
 FAILING_TESTS = {
-    "test_regexp": "Capture groups inside repetitions not reset correctly",
-    "test_line_column_numbers": "Line/column tracking not implemented",
+    "test_regexp": "Deeply nested regex groups exceed the regex parser's recursion",
+    "test_line_column_numbers": "Error.prototype.stack is not implemented",
 }
 
 

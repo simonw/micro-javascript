@@ -36,6 +36,22 @@ _NON_DECIMAL = {
 }
 
 
+def int_from_digits(digits: str, radix: int = 10) -> Number:
+    """The value of a string of digits in radix, as a JavaScript number.
+
+    Python's int() refuses decimal strings over 4300 digits, and huge
+    results would only overflow to Infinity anyway, so long inputs are
+    handled without building a big integer.
+    """
+    stripped = digits.lstrip("0")
+    if not stripped:
+        return 0
+    if len(stripped) * math.log2(radix) > 1100:
+        # At least 2**1100: beyond the largest double
+        return INF
+    return js_number(int(stripped, radix))
+
+
 def js_number(n: Number) -> Number:
     """Round an integer outside +/- 2**53 to the nearest double."""
     if type(n) is int and not -_EXACT_INT_LIMIT <= n <= _EXACT_INT_LIMIT:
@@ -66,7 +82,7 @@ def string_to_number(text: str) -> Number:
     if radix_info is not None:
         radix, digits = radix_info
         if digits.fullmatch(s, 2):
-            return js_number(int(s[2:], radix))
+            return int_from_digits(s[2:], radix)
         return NAN
     if not _DECIMAL.fullmatch(s):
         return NAN
@@ -79,10 +95,10 @@ def _decimal_value(text: str) -> Number:
         return -INF if text.startswith("-") else INF
     if "." in text or "e" in text or "E" in text:
         return float(text)
-    n = int(text)
-    if n == 0 and text.startswith("-"):
-        return -0.0
-    return js_number(n)
+    n = int_from_digits(text.lstrip("+-"))
+    if text.startswith("-"):
+        return -n if n else -0.0
+    return n
 
 
 def parse_float(text: str) -> Number:
@@ -115,10 +131,10 @@ def parse_int(text: str, radix: Number) -> Number:
         end += 1
     if end == 0:
         return NAN
-    n = int(s[:end], radix)
+    n = int_from_digits(s[:end], radix)
     if negative:
-        return -0.0 if n == 0 else js_number(-n)
-    return js_number(n)
+        return -n if n else -0.0
+    return n
 
 
 def _digit_value(ch: str) -> int:

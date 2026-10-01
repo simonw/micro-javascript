@@ -450,3 +450,22 @@ def test_repeated_squaring_overflows_to_infinity():
     )
     assert result == float("inf")
     assert time.monotonic() - start < 0.5
+
+
+@pytest.mark.parametrize(
+    "source,expected",
+    [
+        # Python refuses int() on over 4300 decimal digits; JS gives a double
+        ('Number("1".repeat(5000))', float("inf")),
+        ('Number("0".repeat(5000) + "7")', 7),
+        ('parseInt("1".repeat(5000))', float("inf")),
+        ('parseInt("1".repeat(5000), 36)', float("inf")),
+        ('parseInt("0".repeat(5000) + "12", 36)', 38),
+        ('JSON.parse("1".repeat(5000))', float("inf")),
+        ("1" * 5000, float("inf")),
+        ("1" * 400 + " / 1e300", float("inf")),
+        ("1" * 300 + " / 1e200", 1.1111111111111112e99),
+    ],
+)
+def test_very_long_digit_strings(source, expected):
+    assert Context(time_limit=5.0).eval(source) == expected

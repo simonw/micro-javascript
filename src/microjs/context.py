@@ -30,6 +30,7 @@ from .numbers import (
     MAX_SAFE_INTEGER,
     UNARY_MATH,
     VARIADIC_MATH,
+    int_from_digits,
     js_number,
     number_to_string,
     parse_float,
@@ -539,8 +540,10 @@ class Context:
             raise json.JSONDecodeError(f"Unexpected token {name}", name, 0)
 
         def parse_json_int(text):
-            n = int(text)
-            return -0.0 if n == 0 and text.startswith("-") else js_number(n)
+            n = int_from_digits(text.lstrip("-"))
+            if text.startswith("-"):
+                return -n if n else -0.0
+            return n
 
         def parse_fn(*args):
             text = to_string(args[0]) if args else ""

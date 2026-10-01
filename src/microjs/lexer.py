@@ -3,7 +3,7 @@
 from typing import Iterator, Optional
 from .tokens import Token, TokenType, KEYWORDS
 from .errors import JSSyntaxError
-from .numbers import js_number
+from .numbers import int_from_digits
 
 
 def _is_digit(ch) -> bool:
@@ -178,7 +178,7 @@ class Lexer:
                     hex_str += self._advance()
                 if not hex_str:
                     raise JSSyntaxError("Invalid hex literal", line, col)
-                return js_number(int(hex_str, 16))
+                return int_from_digits(hex_str, 16)
             elif next_ch and next_ch in "oO":
                 # Octal
                 self._advance()  # 0
@@ -188,7 +188,7 @@ class Lexer:
                     oct_str += self._advance()
                 if not oct_str:
                     raise JSSyntaxError("Invalid octal literal", line, col)
-                return js_number(int(oct_str, 8))
+                return int_from_digits(oct_str, 8)
             elif next_ch and next_ch in "bB":
                 # Binary
                 self._advance()  # 0
@@ -198,7 +198,7 @@ class Lexer:
                     bin_str += self._advance()
                 if not bin_str:
                     raise JSSyntaxError("Invalid binary literal", line, col)
-                return js_number(int(bin_str, 2))
+                return int_from_digits(bin_str, 2)
             # Could be 0, 0.xxx, or 0e... - fall through to decimal handling
 
         # Decimal number (integer part)
@@ -227,7 +227,7 @@ class Lexer:
         num_str = self.source[start : self.pos]
         if is_float:
             return float(num_str)
-        return js_number(int(num_str))
+        return int_from_digits(num_str)
 
     def _read_identifier(self) -> str:
         """Read an identifier."""

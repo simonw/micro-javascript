@@ -30,6 +30,23 @@ def intrinsic(name: str) -> Optional["JSObject"]:
     return vm.intrinsics.get(name) if vm is not None else None
 
 
+def own_enumerable_keys(value: "JSValue") -> List[str]:
+    """Keys of value's own enumerable properties: array or string indexes
+    first, then properties (including accessors) in insertion order."""
+    if isinstance(value, str):
+        return [str(i) for i in range(len(value))]
+    if not isinstance(value, JSObject):
+        return []
+    keys = []
+    if isinstance(value, JSArray):
+        keys = [str(i) for i in range(len(value._elements))]
+    if value._key_order is not None:
+        keys.extend(k for k in value._key_order if k not in value._hidden)
+    else:
+        keys.extend(value.keys())
+    return keys
+
+
 def charge_memory(nbytes: int) -> None:
     """Account for allocating about nbytes against the memory limit.
 
@@ -252,6 +269,9 @@ class JSObject:
     # mapping until define_getter/define_setter gives them their own
     _getters: Any = MappingProxyType({})  # property name -> getter function
     _setters: Any = MappingProxyType({})  # property name -> setter function
+    # Creation order of data and accessor properties together, kept only
+    # once an object has accessors (otherwise _properties' order suffices)
+    _key_order: Optional[List[str]] = None
 
     def __init__(self, prototype: Optional["JSObject"] = None):
         self._properties: Dict[str, JSValue] = {}
@@ -281,16 +301,24 @@ class JSObject:
             return self._prototype.get_setter(key)
         return None
 
+    def _record_accessor_key(self, key: str) -> None:
+        if self._key_order is None:
+            self._key_order = list(self._properties)
+        if key not in self._key_order:
+            self._key_order.append(key)
+
     def define_getter(self, key: str, getter: Any) -> None:
         """Define a getter for a property."""
         if type(self._getters) is not dict:
             self._getters = {}
+        self._record_accessor_key(key)
         self._getters[key] = getter
 
     def define_setter(self, key: str, setter: Any) -> None:
         """Define a setter for a property."""
         if type(self._setters) is not dict:
             self._setters = {}
+        self._record_accessor_key(key)
         self._setters[key] = setter
 
     def check_writable(self, key: str) -> None:
@@ -304,6 +332,8 @@ class JSObject:
         """Set a property value."""
         if not self._extensible:
             self.check_writable(key)
+        if self._key_order is not None and key not in self._key_order:
+            self._key_order.append(key)
         self._properties[key] = value
 
     def set_hidden(self, key: str, value: JSValue) -> None:
@@ -324,6 +354,9 @@ class JSObject:
             if self._sealed:
                 raise JSTypeError(f"Cannot delete property '{key}' of object")
             del self._properties[key]
+            if self._key_order is not None and key not in self._getters:
+                if key not in self._setters:
+                    self._key_order.remove(key)
             return True
         return False
 
@@ -394,7 +427,11 @@ class JSArray(JSObject):
             if index == len(self._elements):
                 self._elements.append(value)
             else:
-                raise IndexError("Array index out of bounds (stricter mode)")
+                # Arrays are dense: only appending at the end can grow them
+                raise JSTypeError(
+                    f"Cannot write index {index} of an array of length "
+                    f"{len(self._elements)}"
+                )
         else:
             self._elements[index] = value
 

@@ -1135,6 +1135,9 @@ class Parser:
         # Stack to track array elements at each depth level
         # Each element is a list of elements for that level
         array_stack: List[List[Node]] = [[] for _ in range(depth)]
+        # Whether each level has just read an element (so a comma is a
+        # separator rather than a hole)
+        after_element: List[bool] = [False] * depth
 
         # Parse elements for innermost array first
         current_depth = depth - 1
@@ -1151,25 +1154,32 @@ class Parser:
                 if current_depth >= 0:
                     # Add this array as an element to the parent
                     array_stack[current_depth].append(array_expr)
+                    after_element[current_depth] = True
                 else:
                     # We're done
                     return array_expr
-            elif self._match(TokenType.COMMA):
-                # More elements in current array - handled by main loop
-                pass
+            elif self._check(TokenType.COMMA):
+                if not after_element[current_depth]:
+                    # Arrays are dense: [1, , 3] is not allowed
+                    raise self._error("Array literals cannot have holes")
+                self._advance()
+                after_element[current_depth] = False
             elif self._check(TokenType.LBRACKET):
                 # Nested array - go deeper
                 self._advance()
                 current_depth += 1
                 if current_depth >= len(array_stack):
                     array_stack.append([])
+                    after_element.append(False)
                 else:
                     array_stack[current_depth] = []
+                    after_element[current_depth] = False
             else:
                 # Parse an element expression
                 element = self._parse_assignment_expression()
                 array_stack[current_depth].append(element)
 
+                after_element[current_depth] = False
                 # Check for comma or closing bracket
                 if not self._check(TokenType.RBRACKET):
                     if not self._match(TokenType.COMMA):

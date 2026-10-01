@@ -27,6 +27,7 @@ from .values import (
     js_typeof,
     CURRENT_VM,
     OutputBudget,
+    own_enumerable_keys,
     reserve_string,
     to_array_length,
 )
@@ -994,18 +995,7 @@ class VM:
 
     def _op_FOR_IN_INIT(self, arg: Optional[int], frame: CallFrame) -> None:
         obj = self.stack.pop()
-        if obj is UNDEFINED or obj is NULL:
-            keys = []
-        elif isinstance(obj, JSArray):
-            # For arrays, iterate over numeric indices as strings
-            keys = [str(i) for i in range(len(obj._elements))]
-            # Also include any non-numeric properties
-            keys.extend(obj.keys())
-        elif isinstance(obj, JSObject):
-            keys = obj.keys()
-        else:
-            keys = []
-        self.stack.append(ForInIterator(keys))
+        self.stack.append(ForInIterator(own_enumerable_keys(obj)))
 
     def _op_FOR_IN_NEXT(self, arg: Optional[int], frame: CallFrame) -> None:
         iterator = self.stack[-1]
@@ -1771,7 +1761,7 @@ class VM:
                         self.charge(8)
                     obj.set_index(idx, value)
                     return
-            except (ValueError, IndexError):
+            except ValueError:
                 pass
             # If key looks like a number but isn't a valid integer index, throw
             # This includes NaN, Infinity, -Infinity, floats like "1.2"

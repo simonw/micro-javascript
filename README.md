@@ -252,6 +252,8 @@ These raise a `SyntaxError` or are undefined:
 - Iterators and the methods that return them (`Array.prototype.keys`, `String.prototype.matchAll`, ...), `globalThis` and `String.raw`
 - `Date` beyond `Date.now()`, and `Error.prototype.stack` (always empty)
 
+Like MicroQuickJS, arrays are dense: `[1, , 3]` is a `SyntaxError`, and writing to an index beyond the end of an array (rather than appending at the end) throws a `TypeError`.
+
 Strings are sequences of Unicode code points rather than UTF-16 code units, so a character outside the Basic Multilingual Plane such as `"😀"` has a `length` of 1, not 2.
 
 See [open-problems.md](https://github.com/simonw/micro-javascript/blob/main/open-problems.md) for known bugs that are tracked as expected-failure tests.

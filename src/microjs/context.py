@@ -30,6 +30,7 @@ from .values import (
     to_string,
     to_number,
     to_array_length,
+    own_enumerable_keys,
     CURRENT_VM,
 )
 from .ast_nodes import ExpressionStatement, FunctionExpression
@@ -452,29 +453,24 @@ class Context:
 
         def keys_fn(*args):
             obj = args[0] if args else UNDEFINED
-            if not isinstance(obj, JSObject):
-                return JSArray()
             arr = JSArray()
-            arr._elements = list(obj.keys())
+            arr._elements = own_enumerable_keys(obj)
             return arr
 
         def values_fn(*args):
             obj = args[0] if args else UNDEFINED
-            if not isinstance(obj, JSObject):
-                return JSArray()
+            vm = CURRENT_VM.get()
             arr = JSArray()
-            arr._elements = [obj.get(k) for k in obj.keys()]
+            arr._elements = [vm._get_property(obj, k) for k in own_enumerable_keys(obj)]
             return arr
 
         def entries_fn(*args):
             obj = args[0] if args else UNDEFINED
-            if not isinstance(obj, JSObject):
-                return JSArray()
+            vm = CURRENT_VM.get()
             arr = JSArray()
-            arr._elements = []
-            for k in obj.keys():
+            for k in own_enumerable_keys(obj):
                 entry = JSArray()
-                entry._elements = [k, obj.get(k)]
+                entry._elements = [k, vm._get_property(obj, k)]
                 arr._elements.append(entry)
             return arr
 
@@ -484,11 +480,10 @@ class Context:
             target = args[0]
             if not isinstance(target, JSObject):
                 return target
-            for i in range(1, len(args)):
-                source = args[i]
-                if isinstance(source, JSObject):
-                    for k in source.keys():
-                        target.set(k, source.get(k))
+            vm = CURRENT_VM.get()
+            for source in args[1:]:
+                for k in own_enumerable_keys(source):
+                    vm._set_property(target, k, vm._get_property(source, k))
             return target
 
         def get_prototype_of(*args):

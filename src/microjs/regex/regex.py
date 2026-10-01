@@ -9,7 +9,6 @@ from .parser import RegexParser, RegExpError
 from .compiler import RegexCompiler
 from .vm import RegexVM, MatchResult, RegexTimeoutError, RegexStackOverflow
 
-
 __all__ = [
     "RegExp",
     "RegExpError",

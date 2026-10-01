@@ -18,7 +18,6 @@ Issues are organized by category:
 import pytest
 from microjs import Context
 
-
 # =============================================================================
 # INDIRECT EVAL ISSUES
 # =============================================================================
@@ -191,8 +190,7 @@ class TestErrorLineColumn:
     def test_thrown_error_has_line_number(self):
         """Thrown errors should have lineNumber property set."""
         ctx = Context(time_limit=5.0)
-        result = ctx.eval(
-            """
+        result = ctx.eval("""
 var e;
 try {
     throw new Error("test");
@@ -200,15 +198,13 @@ try {
     e = ex;
 }
 e.lineNumber
-"""
-        )
+""")
         assert result == 4  # Line where throw statement is
 
     def test_thrown_error_has_column_number(self):
         """Thrown errors should have columnNumber property set."""
         ctx = Context(time_limit=5.0)
-        result = ctx.eval(
-            """
+        result = ctx.eval("""
 var e;
 try {
     throw new Error("test");
@@ -216,15 +212,13 @@ try {
     e = ex;
 }
 e.columnNumber
-"""
-        )
+""")
         assert result == 5  # Column where throw statement starts
 
     def test_thrown_error_line_column_multiline(self):
         """Thrown errors track correct location in multiline code."""
         ctx = Context(time_limit=5.0)
-        result = ctx.eval(
-            """
+        result = ctx.eval("""
 var e;
 try {
     var x = 1;
@@ -234,8 +228,7 @@ try {
     e = ex;
 }
 [e.lineNumber, e.columnNumber]
-"""
-        )
+""")
         assert result == [6, 5]  # Line 6, column 5
 
     @pytest.mark.xfail(reason="Error constructor location tracking not implemented")
@@ -356,16 +349,14 @@ class TestDeepNesting:
         """
         ctx = Context(time_limit=10.0)
         n = 10000
-        ctx.eval(
-            f"""
+        ctx.eval(f"""
             function repeat(s, n) {{
                 var result = "";
                 for (var i = 0; i < n; i++) result += s;
                 return result;
             }}
             var a = new RegExp(repeat("(?:", {n}) + "a+" + repeat(")", {n}));
-        """
-        )
+        """)
         result = ctx.eval('a.exec("aa")')
         expected = ["aa"]
         assert result == expected

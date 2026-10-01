@@ -53,7 +53,6 @@ from .ast_nodes import (
     SourceLocation,
 )
 
-
 # Operator precedence (higher = binds tighter)
 PRECEDENCE = {
     "||": 1,

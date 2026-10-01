@@ -1182,6 +1182,12 @@ class VM:
         if isinstance(b, bool):
             return self._abstract_equals(a, 1 if b else 0)
 
+        # An object compared with a number or string is converted first
+        if isinstance(a, JSObject) and isinstance(b, (int, float, str)):
+            return self._abstract_equals(self._to_primitive(a), b)
+        if isinstance(b, JSObject) and isinstance(a, (int, float, str)):
+            return self._abstract_equals(a, self._to_primitive(b))
+
         return False
 
     def _get_property(self, obj: JSValue, key: JSValue) -> JSValue:

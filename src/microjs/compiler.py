@@ -49,6 +49,7 @@ from .ast_nodes import (
     FunctionExpression,
     ArrowFunctionExpression,
 )
+from .errors import JSSyntaxError
 from .opcodes import OpCode
 from .values import UNDEFINED
 
@@ -76,19 +77,23 @@ class CompiledFunction:
 
 @dataclass
 class LoopContext:
-    """Context for loops (for break/continue)."""
+    """A break/continue target: a loop, a switch or a labelled statement."""
 
     break_jumps: List[int] = field(default_factory=list)
     continue_jumps: List[int] = field(default_factory=list)
-    label: Optional[str] = None
-    is_loop: bool = True  # False for switch statements (break only, no continue)
+    labels: frozenset = frozenset()
+    is_loop: bool = True  # Only loops accept continue
+    is_switch: bool = False  # Unlabelled break targets loops and switches
+    stack_items: int = 0  # Values kept on the stack inside (iterator, discriminant)
 
 
 @dataclass
 class TryContext:
-    """Context for try-finally blocks (for break/continue/return)."""
+    """A region needing cleanup when break/continue/return jump out of it."""
 
-    finalizer: Any = None  # The finally block AST node
+    handlers: int = 0  # Active try handlers to pop with TRY_END
+    finalizer: Any = None  # finally block to run on the way out
+    stack_items: int = 0  # Values to pop (an exception pending a rethrow)
 
 
 class Compiler:
@@ -99,10 +104,9 @@ class Compiler:
         self.constants: List[Any] = []
         self.names: List[str] = []
         self.locals: List[str] = []
-        self.loop_stack: List[LoopContext] = []
-        self.try_stack: List[TryContext] = (
-            []
-        )  # Track try-finally for break/continue/return
+        # Enclosing loops, switches, labels and try blocks, innermost last
+        self.control_stack: List[Any] = []
+        self._pending_labels: frozenset = frozenset()  # Labels for the next loop
         self.functions: List[CompiledFunction] = []
         self._in_function: bool = False  # Track if we're compiling inside a function
         self._outer_locals: List[List[str]] = []  # Stack of outer scope locals
@@ -187,12 +191,60 @@ class Compiler:
         self.bytecode[pos + 1] = target & 0xFF  # Low byte
         self.bytecode[pos + 2] = (target >> 8) & 0xFF  # High byte
 
-    def _emit_pending_finally_blocks(self) -> None:
-        """Emit all pending finally blocks (for break/continue/return)."""
-        # Emit finally blocks in reverse order (innermost first)
-        for try_ctx in reversed(self.try_stack):
-            if try_ctx.finalizer:
-                self._compile_statement(try_ctx.finalizer)
+    def _syntax_error(self, node: Node, message: str) -> JSSyntaxError:
+        """Build a SyntaxError located at node."""
+        if node.loc is not None:
+            return JSSyntaxError(message, node.loc.line, node.loc.column)
+        return JSSyntaxError(message)
+
+    def _take_labels(self) -> frozenset:
+        """Claim the labels written directly before the loop being compiled."""
+        labels, self._pending_labels = self._pending_labels, frozenset()
+        return labels
+
+    def _emit_exit(self, target: int, pop_stack: bool = True) -> None:
+        """Emit cleanup for jumping out of control_stack entries above target.
+
+        Pops their try handlers, runs their finally blocks (each compiled in
+        the scope outside its try) and, if pop_stack, pops their stack
+        values. Returns skip stack pops: RETURN discards the frame's stack.
+        """
+        saved = self.control_stack
+        for i in range(len(saved) - 1, target, -1):
+            ctx = saved[i]
+            if isinstance(ctx, TryContext):
+                for _ in range(ctx.handlers):
+                    self._emit(OpCode.TRY_END)
+            if pop_stack:
+                for _ in range(ctx.stack_items):
+                    self._emit(OpCode.POP)
+            if isinstance(ctx, TryContext) and ctx.finalizer:
+                self.control_stack = saved[:i]
+                try:
+                    self._compile_statement(ctx.finalizer)
+                finally:
+                    self.control_stack = saved
+
+    def _find_jump_target(self, node: Node, is_continue: bool) -> int:
+        """Return the control_stack index that break/continue node targets."""
+        keyword = "continue" if is_continue else "break"
+        label = node.label.name if node.label else None
+        for i in range(len(self.control_stack) - 1, -1, -1):
+            ctx = self.control_stack[i]
+            if not isinstance(ctx, LoopContext):
+                continue
+            if label is not None:
+                if label in ctx.labels:
+                    if is_continue and not ctx.is_loop:
+                        raise self._syntax_error(
+                            node, f"Label '{label}' does not denote a loop"
+                        )
+                    return i
+            elif ctx.is_loop or (ctx.is_switch and not is_continue):
+                return i
+        if label is not None:
+            raise self._syntax_error(node, f"Undefined label '{label}'")
+        raise self._syntax_error(node, f"Illegal {keyword} statement")
 
     def _add_constant(self, value: Any) -> int:
         """Add a constant and return its index."""
@@ -438,8 +490,8 @@ class Compiler:
                 self._patch_jump(jump_false)
 
         elif isinstance(node, WhileStatement):
-            loop_ctx = LoopContext()
-            self.loop_stack.append(loop_ctx)
+            loop_ctx = LoopContext(labels=self._take_labels())
+            self.control_stack.append(loop_ctx)
 
             loop_start = len(self.bytecode)
 
@@ -458,11 +510,11 @@ class Compiler:
             for pos in loop_ctx.continue_jumps:
                 self._patch_jump(pos, loop_start)
 
-            self.loop_stack.pop()
+            self.control_stack.pop()
 
         elif isinstance(node, DoWhileStatement):
-            loop_ctx = LoopContext()
-            self.loop_stack.append(loop_ctx)
+            loop_ctx = LoopContext(labels=self._take_labels())
+            self.control_stack.append(loop_ctx)
 
             loop_start = len(self.bytecode)
 
@@ -479,11 +531,11 @@ class Compiler:
             for pos in loop_ctx.continue_jumps:
                 self._patch_jump(pos, continue_target)
 
-            self.loop_stack.pop()
+            self.control_stack.pop()
 
         elif isinstance(node, ForStatement):
-            loop_ctx = LoopContext()
-            self.loop_stack.append(loop_ctx)
+            loop_ctx = LoopContext(labels=self._take_labels())
+            self.control_stack.append(loop_ctx)
 
             # Init
             if node.init:
@@ -521,11 +573,11 @@ class Compiler:
             for pos in loop_ctx.continue_jumps:
                 self._patch_jump(pos, continue_target)
 
-            self.loop_stack.pop()
+            self.control_stack.pop()
 
         elif isinstance(node, ForInStatement):
-            loop_ctx = LoopContext()
-            self.loop_stack.append(loop_ctx)
+            loop_ctx = LoopContext(labels=self._take_labels(), stack_items=1)
+            self.control_stack.append(loop_ctx)
 
             # Compile object expression
             self._compile_expression(node.right)
@@ -590,11 +642,11 @@ class Compiler:
             for pos in loop_ctx.continue_jumps:
                 self._patch_jump(pos, loop_start)
 
-            self.loop_stack.pop()
+            self.control_stack.pop()
 
         elif isinstance(node, ForOfStatement):
-            loop_ctx = LoopContext()
-            self.loop_stack.append(loop_ctx)
+            loop_ctx = LoopContext(labels=self._take_labels(), stack_items=1)
+            self.control_stack.append(loop_ctx)
 
             # Compile iterable expression
             self._compile_expression(node.right)
@@ -642,74 +694,31 @@ class Compiler:
             for pos in loop_ctx.continue_jumps:
                 self._patch_jump(pos, loop_start)
 
-            self.loop_stack.pop()
+            self.control_stack.pop()
 
         elif isinstance(node, BreakStatement):
-            if not self.loop_stack:
-                raise SyntaxError("'break' outside of loop")
-
-            # Find the right loop context (labeled or innermost loop/switch)
-            target_label = node.label.name if node.label else None
-            ctx = None
-            for loop_ctx in reversed(self.loop_stack):
-                if target_label is not None:
-                    # Labeled break - find the matching label
-                    if loop_ctx.label == target_label:
-                        ctx = loop_ctx
-                        break
-                else:
-                    # Unlabeled break - find innermost loop or switch
-                    # is_loop=True means it's a loop, is_loop=False with no label means switch
-                    # Skip labeled statements (is_loop=False with label) for unlabeled break
-                    if loop_ctx.is_loop or loop_ctx.label is None:
-                        ctx = loop_ctx
-                        break
-
-            if ctx is None:
-                if target_label:
-                    raise SyntaxError(f"label '{target_label}' not found")
-                else:
-                    raise SyntaxError("'break' outside of loop")
-
-            # Emit pending finally blocks before the break
-            self._emit_pending_finally_blocks()
-
+            target = self._find_jump_target(node, is_continue=False)
+            self._emit_exit(target)
+            # break also leaves the target itself
+            for _ in range(self.control_stack[target].stack_items):
+                self._emit(OpCode.POP)
             pos = self._emit_jump(OpCode.JUMP)
-            ctx.break_jumps.append(pos)
+            self.control_stack[target].break_jumps.append(pos)
 
         elif isinstance(node, ContinueStatement):
-            if not self.loop_stack:
-                raise SyntaxError("'continue' outside of loop")
-
-            # Find the right loop context (labeled or innermost loop, not switch)
-            target_label = node.label.name if node.label else None
-            ctx = None
-            for loop_ctx in reversed(self.loop_stack):
-                # Skip non-loop contexts (like switch) unless specifically labeled
-                if not loop_ctx.is_loop and target_label is None:
-                    continue
-                if target_label is None or loop_ctx.label == target_label:
-                    ctx = loop_ctx
-                    break
-
-            if ctx is None:
-                raise SyntaxError(f"label '{target_label}' not found")
-
-            # Emit pending finally blocks before the continue
-            self._emit_pending_finally_blocks()
-
+            target = self._find_jump_target(node, is_continue=True)
+            self._emit_exit(target)
             pos = self._emit_jump(OpCode.JUMP)
-            ctx.continue_jumps.append(pos)
+            self.control_stack[target].continue_jumps.append(pos)
 
         elif isinstance(node, ReturnStatement):
-            # Emit pending finally blocks before the return
-            self._emit_pending_finally_blocks()
-
+            # Evaluate the return value first, then run finally blocks
             if node.argument:
                 self._compile_expression(node.argument)
-                self._emit(OpCode.RETURN)
             else:
-                self._emit(OpCode.RETURN_UNDEFINED)
+                self._emit(OpCode.LOAD_UNDEFINED)
+            self._emit_exit(-1, pop_stack=False)
+            self._emit(OpCode.RETURN)
 
         elif isinstance(node, ThrowStatement):
             self._set_loc(node)  # Record location of throw statement
@@ -717,47 +726,48 @@ class Compiler:
             self._emit(OpCode.THROW)
 
         elif isinstance(node, TryStatement):
-            # Push TryContext if there's a finally block so break/continue/return
-            # can inline the finally code
-            if node.finalizer:
-                self.try_stack.append(TryContext(finalizer=node.finalizer))
+            finalizer = node.finalizer
 
-            # Try block
+            # try block, protected by handler A
             try_start = self._emit_jump(OpCode.TRY_START)
-
+            self.control_stack.append(TryContext(handlers=1, finalizer=finalizer))
             self._compile_statement(node.block)
+            self.control_stack.pop()
             self._emit(OpCode.TRY_END)
+            normal_exits = [self._emit_jump(OpCode.JUMP)]
 
-            # Jump past exception handler to normal finally
-            jump_to_finally = self._emit_jump(OpCode.JUMP)
-
-            # Exception handler
+            # Handler A: the exception is on the stack
             self._patch_jump(try_start)
             if node.handler:
-                # Has catch block
-                self._emit(OpCode.CATCH)
-                # Store exception in catch variable
+                if finalizer:
+                    # Protect the catch block so finally runs if it throws
+                    catch_start = self._emit_jump(OpCode.TRY_START)
                 name = node.handler.param.name
                 self._add_local(name)
-                slot = self._get_local(name)
-                self._emit(OpCode.STORE_LOCAL, slot)
+                self._emit(OpCode.STORE_LOCAL, self._get_local(name))
                 self._emit(OpCode.POP)
+                if finalizer:
+                    self.control_stack.append(
+                        TryContext(handlers=1, finalizer=finalizer)
+                    )
                 self._compile_statement(node.handler.body)
-                # Fall through to finally
-            elif node.finalizer:
-                # No catch, only finally - exception is on stack
-                # Run finally then rethrow
-                self._compile_statement(node.finalizer)
-                self._emit(OpCode.THROW)  # Rethrow the exception
+                if finalizer:
+                    self.control_stack.pop()
+                    self._emit(OpCode.TRY_END)
+                    normal_exits.append(self._emit_jump(OpCode.JUMP))
+                    self._patch_jump(catch_start)
+            if finalizer:
+                # Exceptional path: run finally, then rethrow the exception
+                self.control_stack.append(TryContext(stack_items=1))
+                self._compile_statement(finalizer)
+                self.control_stack.pop()
+                self._emit(OpCode.THROW)
 
-            # Pop TryContext before compiling normal finally
-            if node.finalizer:
-                self.try_stack.pop()
-
-            # Normal finally block (after try completes normally or after catch)
-            self._patch_jump(jump_to_finally)
-            if node.finalizer:
-                self._compile_statement(node.finalizer)
+            # Normal completion (of the try block or the catch block)
+            for pos in normal_exits:
+                self._patch_jump(pos)
+            if finalizer:
+                self._compile_statement(finalizer)
 
         elif isinstance(node, SwitchStatement):
             self._compile_expression(node.discriminant)
@@ -781,8 +791,8 @@ class Compiler:
 
             # Case bodies
             case_positions = []
-            loop_ctx = LoopContext(is_loop=False)  # For break statements only
-            self.loop_stack.append(loop_ctx)
+            loop_ctx = LoopContext(is_loop=False, is_switch=True, stack_items=1)
+            self.control_stack.append(loop_ctx)
 
             for i, case in enumerate(node.cases):
                 case_positions.append(len(self.bytecode))
@@ -803,7 +813,7 @@ class Compiler:
             for pos in loop_ctx.break_jumps:
                 self._patch_jump(pos)
 
-            self.loop_stack.pop()
+            self.control_stack.pop()
 
         elif isinstance(node, FunctionDeclaration):
             # Compile function
@@ -834,19 +844,32 @@ class Compiler:
             self._emit(OpCode.POP)
 
         elif isinstance(node, LabeledStatement):
-            # Create a loop context for the label
-            # is_loop=False so unlabeled break/continue skip this context
-            loop_ctx = LoopContext(label=node.label.name, is_loop=False)
-            self.loop_stack.append(loop_ctx)
-
-            # Compile the labeled body
-            self._compile_statement(node.body)
-
-            # Patch break jumps that target this label
-            for pos in loop_ctx.break_jumps:
-                self._patch_jump(pos)
-
-            self.loop_stack.pop()
+            labels = {node.label.name}
+            body = node.body
+            while isinstance(body, LabeledStatement):
+                labels.add(body.label.name)
+                body = body.body
+            if isinstance(
+                body,
+                (
+                    WhileStatement,
+                    DoWhileStatement,
+                    ForStatement,
+                    ForInStatement,
+                    ForOfStatement,
+                ),
+            ):
+                # The loop owns its labels, so 'continue label' reaches it
+                self._pending_labels = frozenset(labels)
+                self._compile_statement(body)
+            else:
+                # Any other statement: a target for 'break label' only
+                loop_ctx = LoopContext(labels=frozenset(labels), is_loop=False)
+                self.control_stack.append(loop_ctx)
+                self._compile_statement(body)
+                for pos in loop_ctx.break_jumps:
+                    self._patch_jump(pos)
+                self.control_stack.pop()
 
         else:
             raise NotImplementedError(
@@ -971,7 +994,7 @@ class Compiler:
         old_bytecode = self.bytecode
         old_constants = self.constants
         old_locals = self.locals
-        old_loop_stack = self.loop_stack
+        old_control_stack = self.control_stack
         old_in_function = self._in_function
         old_free_vars = self._free_vars
         old_cell_vars = self._cell_vars
@@ -984,7 +1007,7 @@ class Compiler:
         self.bytecode = []
         self.constants = []
         self.locals = [p.name for p in node.params] + ["arguments"]
-        self.loop_stack = []
+        self.control_stack = []
         self._in_function = True
 
         # Collect all var declarations to know the full locals set
@@ -1030,7 +1053,7 @@ class Compiler:
         self.bytecode = old_bytecode
         self.constants = old_constants
         self.locals = old_locals
-        self.loop_stack = old_loop_stack
+        self.control_stack = old_control_stack
         self._in_function = old_in_function
         self._free_vars = old_free_vars
         self._cell_vars = old_cell_vars
@@ -1056,7 +1079,7 @@ class Compiler:
         old_bytecode = self.bytecode
         old_constants = self.constants
         old_locals = self.locals
-        old_loop_stack = self.loop_stack
+        old_control_stack = self.control_stack
         old_in_function = self._in_function
         old_free_vars = self._free_vars
         old_cell_vars = self._cell_vars
@@ -1076,7 +1099,7 @@ class Compiler:
         if is_expression and name:
             self.locals.append(name)
 
-        self.loop_stack = []
+        self.control_stack = []
         self._in_function = True
 
         # Collect all var declarations to know the full locals set
@@ -1128,7 +1151,7 @@ class Compiler:
         self.bytecode = old_bytecode
         self.constants = old_constants
         self.locals = old_locals
-        self.loop_stack = old_loop_stack
+        self.control_stack = old_control_stack
         self._in_function = old_in_function
         self._free_vars = old_free_vars
         self._cell_vars = old_cell_vars

@@ -24,7 +24,13 @@ from .values import (
     to_number,
 )
 from .ast_nodes import ExpressionStatement, FunctionExpression
-from .errors import JSError, JSSyntaxError, MemoryLimitError, TimeLimitError
+from .errors import (
+    JSError,
+    JSSyntaxError,
+    JSTypeError,
+    MemoryLimitError,
+    TimeLimitError,
+)
 from .numbers import (
     BINARY_MATH,
     MAX_SAFE_INTEGER,
@@ -561,7 +567,20 @@ class Context:
             value = args[0] if args else UNDEFINED
 
             # Convert JS value to Python for json.dumps, handling undefined specially
+            in_progress = set()  # ids of the arrays and objects being serialized
+
             def to_json_value(v):
+                if isinstance(v, JSObject):
+                    if id(v) in in_progress:
+                        raise JSTypeError("Converting circular structure to JSON")
+                    in_progress.add(id(v))
+                    try:
+                        return container_to_json(v)
+                    finally:
+                        in_progress.discard(id(v))
+                return scalar_to_json(v)
+
+            def scalar_to_json(v):
                 if v is UNDEFINED:
                     return None  # Will be filtered out for object properties
                 if v is NULL:
@@ -572,6 +591,9 @@ class Context:
                     return v
                 if isinstance(v, str):
                     return v
+                return None
+
+            def container_to_json(v):
                 if isinstance(v, JSArray):
                     # For arrays, undefined becomes null
                     return [
@@ -1012,25 +1034,91 @@ class Context:
         self._globals[name] = self._to_js(value)
 
     def _to_python(self, value: JSValue) -> Any:
-        """Convert a JavaScript value to Python."""
-        if value is UNDEFINED:
+        """Convert a JavaScript value to Python.
+
+        Arrays become lists and objects dicts. Shared and cyclic references
+        are preserved, and nesting depth is not limited by Python's stack.
+        """
+        if not isinstance(value, JSObject):
+            return self._primitive_to_python(value)
+        converted: Dict[int, Any] = {}
+        root = self._empty_python_container(value, converted)
+        pending = [value]
+        while pending:
+            js_value = pending.pop()
+            target = converted[id(js_value)]
+            if isinstance(js_value, JSArray):
+                items = js_value._elements
+                target.extend([None] * len(items))
+                slots = enumerate(items)
+            else:
+                items = js_value._properties
+                slots = items.items()
+            for key, item in slots:
+                if not isinstance(item, JSObject):
+                    target[key] = self._primitive_to_python(item)
+                elif id(item) in converted:
+                    target[key] = converted[id(item)]
+                else:
+                    target[key] = self._empty_python_container(item, converted)
+                    pending.append(item)
+        return root
+
+    @staticmethod
+    def _empty_python_container(value: JSObject, converted: Dict[int, Any]) -> Any:
+        container = [] if isinstance(value, JSArray) else {}
+        converted[id(value)] = container
+        return container
+
+    @staticmethod
+    def _primitive_to_python(value: JSValue) -> Any:
+        if value is UNDEFINED or value is NULL:
             return None
-        if value is NULL:
-            return None
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, (int, float)):
-            return value
-        if isinstance(value, str):
-            return value
-        if isinstance(value, JSArray):
-            return [self._to_python(elem) for elem in value._elements]
-        if isinstance(value, JSObject):
-            return {k: self._to_python(v) for k, v in value._properties.items()}
         return value
 
     def _to_js(self, value: Any) -> JSValue:
-        """Convert a Python value to JavaScript."""
+        """Convert a Python value to JavaScript.
+
+        Lists become arrays and dicts objects, preserving shared and cyclic
+        references without recursion.
+        """
+        if not isinstance(value, (list, dict)):
+            return self._primitive_to_js(value)
+        converted: Dict[int, JSValue] = {}
+        root = self._empty_js_container(value, converted)
+        pending = [value]
+        while pending:
+            py_value = pending.pop()
+            target = converted[id(py_value)]
+            if isinstance(py_value, list):
+                slots = enumerate(py_value)
+            else:
+                slots = ((str(k), v) for k, v in py_value.items())
+            for key, item in slots:
+                if not isinstance(item, (list, dict)):
+                    js_item = self._primitive_to_js(item)
+                elif id(item) in converted:
+                    js_item = converted[id(item)]
+                else:
+                    js_item = self._empty_js_container(item, converted)
+                    pending.append(item)
+                if isinstance(target, JSArray):
+                    target._elements.append(js_item)
+                else:
+                    target.set(key, js_item)
+        return root
+
+    def _empty_js_container(self, value: Any, converted: Dict[int, JSValue]):
+        if isinstance(value, list):
+            container = JSArray()
+            container._prototype = self._array_prototype
+        else:
+            container = JSObject(self._object_prototype)
+        converted[id(value)] = container
+        return container
+
+    @staticmethod
+    def _primitive_to_js(value: Any) -> JSValue:
         if value is None:
             return NULL
         if isinstance(value, bool):
@@ -1044,16 +1132,6 @@ class Context:
             return value
         if value is UNDEFINED:
             return value
-        if isinstance(value, list):
-            arr = JSArray()
-            for elem in value:
-                arr.push(self._to_js(elem))
-            return arr
-        if isinstance(value, dict):
-            obj = JSObject()
-            for k, v in value.items():
-                obj.set(str(k), self._to_js(v))
-            return obj
         # Python callables become JS functions
         if callable(value):
             return value

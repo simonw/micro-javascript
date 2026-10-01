@@ -1444,430 +1444,11 @@ class VM:
         return False
 
     def _make_array_method(self, arr: JSArray, method: str) -> Any:
-        """Create a bound array method."""
-        vm = self  # Reference for closures
-
-        def push_fn(*args):
-            vm.charge(8 * len(args))
-            for arg in args:
-                arr.push(arg)
-            return arr.length
-
-        def pop_fn(*args):
-            return arr.pop()
-
-        def shift_fn(*args):
-            if not arr._elements:
-                return UNDEFINED
-            return arr._elements.pop(0)
-
-        def unshift_fn(*args):
-            vm.charge(8 * len(args))
-            arr._elements[0:0] = args
-            return arr.length
-
-        def array_elem_to_string(elem):
-            # undefined and null convert to empty string in array join/toString
-            if elem is UNDEFINED or elem is NULL:
-                return ""
-            return to_string(elem)
-
-        def join_elements(sep):
-            budget = OutputBudget()
-            parts = []
-            for elem in arr._elements:
-                part = array_elem_to_string(elem)
-                budget.add(len(part) + len(sep))
-                parts.append(part)
-            budget.finish()
-            return sep.join(parts)
-
-        def toString_fn(*args):
-            return join_elements(",")
-
-        def join_fn(*args):
-            sep = "," if not args or args[0] is UNDEFINED else to_string(args[0])
-            return join_elements(sep)
-
-        def map_fn(*args):
-            callback = args[0] if args else None
-            if not callback:
-                return JSArray()
-            result = JSArray()
-            result._elements = []
-            for i, elem in enumerate(arr._elements):
-                val = vm._call_callback(callback, [elem, i, arr])
-                result._elements.append(val)
-            return result
-
-        def filter_fn(*args):
-            callback = args[0] if args else None
-            if not callback:
-                return JSArray()
-            result = JSArray()
-            result._elements = []
-            for i, elem in enumerate(arr._elements):
-                val = vm._call_callback(callback, [elem, i, arr])
-                if to_boolean(val):
-                    result._elements.append(elem)
-            return result
-
-        def reduce_fn(*args):
-            callback = args[0] if args else None
-            initial = args[1] if len(args) > 1 else UNDEFINED
-            if not callback:
-                raise JSTypeError("reduce callback is not a function")
-            acc = initial
-            start_idx = 0
-            if acc is UNDEFINED:
-                if not arr._elements:
-                    raise JSTypeError("Reduce of empty array with no initial value")
-                acc = arr._elements[0]
-                start_idx = 1
-            for i in range(start_idx, len(arr._elements)):
-                elem = arr._elements[i]
-                acc = vm._call_callback(callback, [acc, elem, i, arr])
-            return acc
-
-        def reduceRight_fn(*args):
-            callback = args[0] if args else None
-            initial = args[1] if len(args) > 1 else UNDEFINED
-            if not callback:
-                raise JSTypeError("reduceRight callback is not a function")
-            acc = initial
-            length = len(arr._elements)
-            start_idx = length - 1
-            if acc is UNDEFINED:
-                if not arr._elements:
-                    raise JSTypeError("Reduce of empty array with no initial value")
-                acc = arr._elements[length - 1]
-                start_idx = length - 2
-            for i in range(start_idx, -1, -1):
-                elem = arr._elements[i]
-                acc = vm._call_callback(callback, [acc, elem, i, arr])
-            return acc
-
-        def splice_fn(*args):
-            start = int_arg(args, 0, 0)
-            delete_count = int_arg(args, 1, len(arr._elements) - start)
-            items = list(args[2:]) if len(args) > 2 else []
-            vm.charge(8 * len(items))
-
-            length = len(arr._elements)
-            if start < 0:
-                start = max(0, length + start)
-            else:
-                start = min(start, length)
-
-            delete_count = max(0, min(delete_count, length - start))
-
-            # Create result array with deleted elements
-            result = JSArray()
-            result._elements = arr._elements[start : start + delete_count]
-
-            # Modify original array
-            arr._elements = (
-                arr._elements[:start] + items + arr._elements[start + delete_count :]
-            )
-
-            return result
-
-        def forEach_fn(*args):
-            callback = args[0] if args else None
-            if not callback:
-                return UNDEFINED
-            for i, elem in enumerate(arr._elements):
-                vm._call_callback(callback, [elem, i, arr])
-            return UNDEFINED
-
-        def indexOf_fn(*args):
-            search = args[0] if args else UNDEFINED
-            start = int_arg(args, 1, 0)
-            if start < 0:
-                start = max(0, len(arr._elements) + start)
-            for i in range(start, len(arr._elements)):
-                if vm._strict_equals(arr._elements[i], search):
-                    return i
-                if not i & 4095:
-                    vm.check_deadline()
-            return -1
-
-        def lastIndexOf_fn(*args):
-            search = args[0] if args else UNDEFINED
-            start = int_arg(args, 1, len(arr._elements) - 1)
-            if start < 0:
-                start = len(arr._elements) + start
-            for i in range(min(start, len(arr._elements) - 1), -1, -1):
-                if vm._strict_equals(arr._elements[i], search):
-                    return i
-                if not i & 4095:
-                    vm.check_deadline()
-            return -1
-
-        def find_fn(*args):
-            callback = args[0] if args else None
-            if not callback:
-                return UNDEFINED
-            for i, elem in enumerate(arr._elements):
-                val = vm._call_callback(callback, [elem, i, arr])
-                if to_boolean(val):
-                    return elem
-            return UNDEFINED
-
-        def findIndex_fn(*args):
-            callback = args[0] if args else None
-            if not callback:
-                return -1
-            for i, elem in enumerate(arr._elements):
-                val = vm._call_callback(callback, [elem, i, arr])
-                if to_boolean(val):
-                    return i
-            return -1
-
-        def some_fn(*args):
-            callback = args[0] if args else None
-            if not callback:
-                return False
-            for i, elem in enumerate(arr._elements):
-                val = vm._call_callback(callback, [elem, i, arr])
-                if to_boolean(val):
-                    return True
-            return False
-
-        def every_fn(*args):
-            callback = args[0] if args else None
-            if not callback:
-                return True
-            for i, elem in enumerate(arr._elements):
-                val = vm._call_callback(callback, [elem, i, arr])
-                if not to_boolean(val):
-                    return False
-            return True
-
-        def concat_fn(*args):
-            vm.charge(
-                8 * len(arr._elements)
-                + sum(8 * len(a._elements) for a in args if isinstance(a, JSArray))
-            )
-            result = JSArray()
-            result._elements = arr._elements[:]
-            for arg in args:
-                if isinstance(arg, JSArray):
-                    result._elements.extend(arg._elements)
-                else:
-                    result._elements.append(arg)
-            return result
-
-        def slice_fn(*args):
-            start = int_arg(args, 0, 0)
-            end = int_arg(args, 1, len(arr._elements))
-            if start < 0:
-                start = max(0, len(arr._elements) + start)
-            if end < 0:
-                end = max(0, len(arr._elements) + end)
-            result = JSArray()
-            result._elements = arr._elements[start:end]
-            return result
-
-        def reverse_fn(*args):
-            arr._elements.reverse()
-            return arr
-
-        def includes_fn(*args):
-            search = args[0] if args else UNDEFINED
-            start = int_arg(args, 1, 0)
-            if start < 0:
-                start = max(0, len(arr._elements) + start)
-            for i in range(start, len(arr._elements)):
-                if vm._strict_equals(arr._elements[i], search):
-                    return True
-                if not i & 4095:
-                    vm.check_deadline()
-            return False
-
-        def sort_fn(*args):
-            comparator = args[0] if args else None
-
-            # Default string comparison
-            def default_compare(a, b):
-                # Convert to strings and compare
-                str_a = to_string(a)
-                str_b = to_string(b)
-                if str_a < str_b:
-                    return -1
-                if str_a > str_b:
-                    return 1
-                return 0
-
-            comparisons = [0]
-
-            def compare_fn(a, b):
-                comparisons[0] += 1
-                if not comparisons[0] & 1023:
-                    vm.check_deadline()
-                # undefined values always sort to the end per JS spec
-                if a is UNDEFINED and b is UNDEFINED:
-                    return 0
-                if a is UNDEFINED:
-                    return 1
-                if b is UNDEFINED:
-                    return -1
-                # Use comparator if provided
-                if comparator and (
-                    callable(comparator) or isinstance(comparator, JSFunction)
-                ):
-                    num = to_number(vm._call_callback(comparator, [a, b]))
-                    # Only the sign matters; NaN counts as equal
-                    return (num > 0) - (num < 0)
-                return default_compare(a, b)
-
-            # Sort using Python's sort with custom key
-            from functools import cmp_to_key
-
-            arr._elements.sort(key=cmp_to_key(compare_fn))
-            return arr
-
-        def at_fn(*args):
-            idx = int_arg(args, 0, 0)
-            if idx < 0:
-                idx += len(arr._elements)
-            return arr.get_index(idx) if idx >= 0 else UNDEFINED
-
-        def flatten(elements, depth):
-            """Flatten nested arrays up to depth levels, without recursion."""
-            result = []
-            stack = [(iter(elements), depth)]
-            while stack:
-                items, level = stack[-1]
-                for elem in items:
-                    if isinstance(elem, JSArray) and level > 0:
-                        stack.append((iter(elem._elements), level - 1))
-                        break
-                    result.append(elem)
-                    if not len(result) & 4095:
-                        vm.check_deadline()
-                else:
-                    stack.pop()
-            vm.charge(8 * len(result))
-            return result
-
-        def flat_fn(*args):
-            depth = 1
-            if args and args[0] is not UNDEFINED:
-                depth = to_number(args[0])
-                depth = 0 if depth != depth else depth
-            result = JSArray()
-            result._elements = flatten(arr._elements, depth)
-            return result
-
-        def flatMap_fn(*args):
-            mapped = map_fn(*args)
-            result = JSArray()
-            result._elements = flatten(mapped._elements, 1)
-            return result
-
-        def findLast_fn(*args):
-            index = findLastIndex_fn(*args)
-            return arr._elements[index] if index >= 0 else UNDEFINED
-
-        def findLastIndex_fn(*args):
-            callback = args[0] if args else None
-            if not callback:
-                raise JSTypeError("findLastIndex callback is not a function")
-            for i in range(len(arr._elements) - 1, -1, -1):
-                if to_boolean(vm._call_callback(callback, [arr._elements[i], i, arr])):
-                    return i
-            return -1
-
-        def fill_fn(*args):
-            value = args[0] if args else UNDEFINED
-            length = len(arr._elements)
-            start = relative_index(args, 1, length, 0)
-            end = relative_index(args, 2, length, length)
-            for i in range(start, end):
-                arr._elements[i] = value
-            return arr
-
-        def copyWithin_fn(*args):
-            length = len(arr._elements)
-            target = relative_index(args, 0, length, 0)
-            start = relative_index(args, 1, length, 0)
-            end = relative_index(args, 2, length, length)
-            count = min(end - start, length - target)
-            if count > 0:
-                arr._elements[target : target + count] = arr._elements[
-                    start : start + count
-                ]
-            return arr
-
-        def copy():
-            vm.charge(64 + 8 * len(arr._elements))
-            result = JSArray()
-            result._elements = arr._elements[:]
-            return result
-
-        def toReversed_fn(*args):
-            result = copy()
-            result._elements.reverse()
-            return result
-
-        def toSorted_fn(*args):
-            result = copy()
-            return vm._make_array_method(result, "sort")(*args)
-
-        def toSpliced_fn(*args):
-            result = copy()
-            vm._make_array_method(result, "splice")(*args)
-            return result
-
-        def with_fn(*args):
-            idx = int_arg(args, 0, 0)
-            if idx < 0:
-                idx += len(arr._elements)
-            if not 0 <= idx < len(arr._elements):
-                raise JSRangeError("Invalid index")
-            result = copy()
-            result._elements[idx] = args[1] if len(args) > 1 else UNDEFINED
-            return result
-
-        methods = {
-            "at": at_fn,
-            "flat": flat_fn,
-            "flatMap": flatMap_fn,
-            "findLast": findLast_fn,
-            "findLastIndex": findLastIndex_fn,
-            "fill": fill_fn,
-            "copyWithin": copyWithin_fn,
-            "toReversed": toReversed_fn,
-            "toSorted": toSorted_fn,
-            "toSpliced": toSpliced_fn,
-            "with": with_fn,
-            "toLocaleString": toString_fn,
-            "push": push_fn,
-            "pop": pop_fn,
-            "shift": shift_fn,
-            "unshift": unshift_fn,
-            "toString": toString_fn,
-            "join": join_fn,
-            "map": map_fn,
-            "filter": filter_fn,
-            "reduce": reduce_fn,
-            "forEach": forEach_fn,
-            "indexOf": indexOf_fn,
-            "lastIndexOf": lastIndexOf_fn,
-            "find": find_fn,
-            "findIndex": findIndex_fn,
-            "some": some_fn,
-            "every": every_fn,
-            "concat": concat_fn,
-            "slice": slice_fn,
-            "splice": splice_fn,
-            "reverse": reverse_fn,
-            "includes": includes_fn,
-            "sort": sort_fn,
-            "reduceRight": reduceRight_fn,
-        }
-        return methods.get(method, lambda *args: UNDEFINED)
+        """Return the Array.prototype method called method, bound to arr."""
+        name = _ArrayMethods.NAMES.get(method)
+        if name is None:
+            return _undefined_method
+        return getattr(_ArrayMethods(self, arr), name)
 
     def _make_function_method(self, func: JSFunction, method: str) -> Any:
         """Create a bound function method (bind, call, apply)."""
@@ -2087,59 +1668,11 @@ class VM:
         return methods.get(method, lambda *args: UNDEFINED)
 
     def _make_number_method(self, n: float, method: str) -> Any:
-        """Create a bound number method."""
-
-        def toFixed(*args):
-            digits = to_number(args[0]) if args else 0
-            digits = 0 if digits != digits else int(digits)
-            if digits < 0 or digits > 100:
-                raise JSRangeError(
-                    "toFixed() digits argument must be between 0 and 100"
-                )
-            return to_fixed(n, digits)
-
-        def toString(*args):
-            radix = 10
-            if args and args[0] is not UNDEFINED:
-                radix = to_number(args[0])
-                radix = 0 if radix != radix else int(radix)
-            if radix < 2 or radix > 36:
-                raise JSRangeError("toString() radix must be between 2 and 36")
-            if radix == 10:
-                return to_string(n)
-            return number_to_radix_string(n, radix)
-
-        def toExponential(*args):
-            digits = None
-            if args and args[0] is not UNDEFINED:
-                digits = to_number(args[0])
-                digits = 0 if digits != digits else int(digits)
-            if digits is not None and math.isfinite(n) and not 0 <= digits <= 100:
-                raise JSRangeError("toExponential() digits must be between 0 and 100")
-            return to_exponential(n, digits)
-
-        def toPrecision(*args):
-            if not args or args[0] is UNDEFINED:
-                return to_string(n)
-            precision = to_number(args[0])
-            precision = 0 if precision != precision else int(precision)
-            if not math.isfinite(n):
-                return to_string(n)
-            if not 1 <= precision <= 100:
-                raise JSRangeError("toPrecision() precision must be between 1 and 100")
-            return to_precision(n, precision)
-
-        def valueOf(*args):
-            return n
-
-        methods = {
-            "toFixed": toFixed,
-            "toString": toString,
-            "toExponential": toExponential,
-            "toPrecision": toPrecision,
-            "valueOf": valueOf,
-        }
-        return methods.get(method, lambda *args: UNDEFINED)
+        """Return the Number.prototype method called method, bound to n."""
+        name = _NumberMethods.NAMES.get(method)
+        if name is None:
+            return _undefined_method
+        return getattr(_NumberMethods(self, n), name)
 
     @staticmethod
     def _get_substitution(
@@ -2193,456 +1726,11 @@ class VM:
         return "".join(result)
 
     def _make_string_method(self, s: str, method: str) -> Any:
-        """Create a bound string method."""
-
-        def charAt(*args):
-            idx = int_arg(args, 0, 0)
-            if 0 <= idx < len(s):
-                return s[idx]
-            return ""
-
-        def charCodeAt(*args):
-            idx = int_arg(args, 0, 0)
-            if 0 <= idx < len(s):
-                return ord(s[idx])
-            return float("nan")
-
-        def indexOf(*args):
-            search = to_string(args[0]) if args else ""
-            start = int_arg(args, 1, 0)
-            if start < 0:
-                start = 0
-            return s.find(search, start)
-
-        def lastIndexOf(*args):
-            search = to_string(args[0]) if args else ""
-            end = int_arg(args, 1, len(s))
-            # Python's rfind with end position
-            return s.rfind(search, 0, end + len(search))
-
-        def substring(*args):
-            start = int_arg(args, 0, 0)
-            end = int_arg(args, 1, len(s))
-            # Clamp and swap if needed
-            if start < 0:
-                start = 0
-            if end < 0:
-                end = 0
-            if start > end:
-                start, end = end, start
-            return s[start:end]
-
-        def slice_fn(*args):
-            start = int_arg(args, 0, 0)
-            end = int_arg(args, 1, len(s))
-            # Handle negative indices
-            if start < 0:
-                start = max(0, len(s) + start)
-            if end < 0:
-                end = max(0, len(s) + end)
-            return s[start:end]
-
-        def split(*args):
-            sep = args[0] if args else UNDEFINED
-            limit = int_arg(args, 1, -1)
-            if isinstance(sep, str) or (
-                sep is not UNDEFINED and not isinstance(sep, JSRegExp)
-            ):
-                # Charge for the pieces before making them
-                sep_str = to_string(sep)
-                pieces = len(s) if sep_str == "" else s.count(sep_str) + 1
-                self.charge(64 * pieces + len(s))
-
-            if sep is UNDEFINED:
-                parts = [s]
-            elif isinstance(sep, JSRegExp):
-                # Split with regex using microjs.regex
-                try:
-                    regex_internal = sep._internal
-                    parts = []
-                    last_end = 0
-                    pos = 0
-                    capture_count = regex_internal._capture_count
-
-                    while pos <= len(s):
-                        # Create fresh regex VM for each search to avoid lastIndex issues
-                        vm_regex = regex_internal._create_vm()
-                        result = vm_regex.search(s, pos)
-                        if result is None:
-                            break
-
-                        # Add the part before this match
-                        parts.append(s[last_end : result.index])
-
-                        # Add captured groups (JS behavior) - capture_count includes group 0
-                        for i in range(1, capture_count):
-                            group_val = result[i]
-                            parts.append(
-                                group_val if group_val is not None else UNDEFINED
-                            )
-
-                        # Move past the match
-                        match_len = len(result[0]) if result[0] else 0
-                        last_end = result.index + match_len
-                        # Advance position (at least by 1 to avoid infinite loop on zero-width)
-                        pos = last_end if match_len > 0 else result.index + 1
-
-                    # Add remainder after last match
-                    parts.append(s[last_end:])
-                except RegexTimeoutError:
-                    raise TimeLimitError("Regex execution timeout")
-            elif to_string(sep) == "":
-                parts = list(s)
-            else:
-                parts = s.split(to_string(sep))
-
-            if limit >= 0:
-                parts = parts[:limit]
-            arr = JSArray()
-            arr._elements = parts
-            return arr
-
-        def toLowerCase(*args):
-            return s.lower()
-
-        def toUpperCase(*args):
-            return s.upper()
-
-        def trim(*args):
-            return s.strip()
-
-        def trimStart(*args):
-            return s.lstrip()
-
-        def trimEnd(*args):
-            return s.rstrip()
-
-        def concat(*args):
-            parts = [s] + [to_string(arg) for arg in args]
-            reserve_string(sum(len(part) for part in parts))
-            return "".join(parts)
-
-        def repeat(*args):
-            count = to_number(args[0]) if args else 0
-            if count != count:
-                count = 0
-            if count < 0 or count == float("inf"):
-                raise JSRangeError("Invalid count value")
-            count = int(count)
-            reserve_string(len(s) * count)
-            return s * count
-
-        def pad(args, at_start):
-            target = to_number(args[0]) if args else 0
-            target = 0 if target != target else target
-            filler = " "
-            if len(args) > 1 and args[1] is not UNDEFINED:
-                filler = to_string(args[1])
-            if target <= len(s) or not filler:
-                return s
-            if target == float("inf"):
-                raise JSRangeError("Invalid string length")
-            target = int(target)
-            reserve_string(target)
-            needed = target - len(s)
-            padding = (filler * (needed // len(filler) + 1))[:needed]
-            return padding + s if at_start else s + padding
-
-        def padStart(*args):
-            return pad(args, at_start=True)
-
-        def string_at(*args):
-            idx = int_arg(args, 0, 0)
-            if idx < 0:
-                idx += len(s)
-            return s[idx] if 0 <= idx < len(s) else UNDEFINED
-
-        def codePointAt(*args):
-            idx = int_arg(args, 0, 0)
-            return ord(s[idx]) if 0 <= idx < len(s) else UNDEFINED
-
-        def localeCompare(*args):
-            other = to_string(args[0]) if args else "undefined"
-            a, b = collation_key(s), collation_key(other)
-            return (a > b) - (a < b)
-
-        def normalize(*args):
-            form = "NFC"
-            if args and args[0] is not UNDEFINED:
-                form = to_string(args[0])
-            if form not in ("NFC", "NFD", "NFKC", "NFKD"):
-                raise JSRangeError(
-                    "The normalization form should be one of NFC, NFD, NFKC, NFKD"
-                )
-            return unicodedata.normalize(form, s)
-
-        def substr(*args):
-            start = relative_index(args, 0, len(s), 0)
-            length = int_arg(args, 1, len(s) - start)
-            return s[start : start + max(0, length)]
-
-        def padEnd(*args):
-            return pad(args, at_start=False)
-
-        def startsWith(*args):
-            search = to_string(args[0]) if args else ""
-            pos = int_arg(args, 1, 0)
-            return s[pos:].startswith(search)
-
-        def endsWith(*args):
-            search = to_string(args[0]) if args else ""
-            length = int_arg(args, 1, len(s))
-            return s[:length].endswith(search)
-
-        def includes(*args):
-            search = to_string(args[0]) if args else ""
-            pos = int_arg(args, 1, 0)
-            return search in s[pos:]
-
-        def make_replacer(replacement):
-            """Return f(matched, position, captures) giving the replacement text."""
-            if isinstance(replacement, JSFunction) or callable(replacement):
-                # Called with (match, ...captures, offset, string)
-                def call(matched, position, captures):
-                    args = [matched]
-                    args += [UNDEFINED if c is None else c for c in captures]
-                    args += [position, s]
-                    return to_string(self._call_callback(replacement, args))
-
-                return call
-            template = to_string(replacement)
-            return lambda matched, position, captures: self._get_substitution(
-                template, matched, s, position, captures
-            )
-
-        def replace(*args):
-            pattern = args[0] if args else ""
-            replacer = make_replacer(args[1] if len(args) > 1 else UNDEFINED)
-
-            if isinstance(pattern, JSRegExp):
-                # Replace with regex using microjs.regex
-                try:
-                    regex_internal = pattern._internal
-                    is_global = "g" in pattern._flags
-                    capture_count = regex_internal._capture_count
-
-                    result_parts = []
-                    budget = OutputBudget()
-                    last_end = 0
-                    pos = 0
-
-                    while pos <= len(s):
-                        # Create fresh regex VM for each search
-                        vm_regex = regex_internal._create_vm()
-                        match_result = vm_regex.search(s, pos)
-                        if match_result is None:
-                            break
-
-                        matched = match_result[0] or ""
-                        # _capture_count includes group 0, the whole match
-                        captures = [match_result[i] for i in range(1, capture_count)]
-                        # Add the part before this match, then the replacement
-                        before = s[last_end : match_result.index]
-                        replacement = replacer(matched, match_result.index, captures)
-                        budget.add(len(before) + len(replacement))
-                        result_parts.append(before)
-                        result_parts.append(replacement)
-
-                        # Move past the match
-                        last_end = match_result.index + len(matched)
-                        pos = last_end if matched else match_result.index + 1
-
-                        if not is_global:
-                            break
-
-                    # Add remainder after last match
-                    result_parts.append(s[last_end:])
-                    budget.add(len(s) - last_end)
-                    budget.finish()
-                    return "".join(result_parts)
-                except RegexTimeoutError:
-                    raise TimeLimitError("Regex execution timeout")
-            else:
-                # String pattern: replace the first occurrence only
-                search = to_string(pattern)
-                idx = s.find(search)
-                if idx < 0:
-                    return s
-                return s[:idx] + replacer(search, idx, []) + s[idx + len(search) :]
-
-        def replaceAll(*args):
-            pattern = args[0] if args else ""
-            replacement = args[1] if len(args) > 1 else UNDEFINED
-
-            if isinstance(pattern, JSRegExp):
-                # replaceAll with regex requires global flag
-                if "g" not in pattern._flags:
-                    raise JSTypeError("replaceAll called with a non-global RegExp")
-                return replace(pattern, replacement)
-
-            # String pattern: replace every non-overlapping occurrence
-            search = to_string(pattern)
-            replacer = make_replacer(replacement)
-            if search == "":
-                positions = list(range(len(s) + 1))
-            else:
-                positions = []
-                idx = s.find(search)
-                while idx >= 0:
-                    positions.append(idx)
-                    idx = s.find(search, idx + len(search))
-            parts = []
-            budget = OutputBudget()
-            last_end = 0
-            for idx in positions:
-                before = s[last_end:idx]
-                replacement = replacer(search, idx, [])
-                budget.add(len(before) + len(replacement))
-                parts.append(before)
-                parts.append(replacement)
-                last_end = idx + len(search)
-            parts.append(s[last_end:])
-            budget.add(len(s) - last_end)
-            budget.finish()
-            return "".join(parts)
-
-        def match(*args):
-            pattern = args[0] if args else None
-            if pattern is None:
-                # Match empty string
-                arr = JSArray()
-                arr._elements = [""]
-                arr.set("index", 0)
-                arr.set("input", s)
-                return arr
-
-            from .regex import RegExp as InternalRegExp
-
-            if isinstance(pattern, JSRegExp):
-                regex_internal = pattern._internal
-                is_global = "g" in pattern._flags
-            else:
-                # Convert string to regex using microjs.regex
-                # Create a poll_callback if the VM has time limits
-                poll_callback = None
-                if self.time_limit is not None:
-                    poll_callback = (
-                        lambda: time.monotonic() - self.start_time > self.time_limit
-                    )
-                regex_internal = InternalRegExp(to_string(pattern), "", poll_callback)
-                is_global = False
-
-            try:
-                if is_global:
-                    # Global flag: return all matches without groups
-                    matches = []
-                    pos = 0
-                    while pos <= len(s):
-                        # Create fresh regex VM for each search
-                        vm_regex = regex_internal._create_vm()
-                        result = vm_regex.search(s, pos)
-                        if result is None:
-                            break
-                        matches.append(result[0])
-                        # Advance position
-                        match_len = len(result[0]) if result[0] else 0
-                        pos = (
-                            result.index + match_len
-                            if match_len > 0
-                            else result.index + 1
-                        )
-
-                    if not matches:
-                        return NULL
-                    arr = JSArray()
-                    arr._elements = list(matches)
-                    return arr
-                else:
-                    # Non-global: return first match with groups
-                    vm_regex = regex_internal._create_vm()
-                    result = vm_regex.search(s, 0)
-                    if result is None:
-                        return NULL
-                    arr = JSArray()
-                    arr._elements = [result[0]]
-                    # Add captured groups (capture_count includes group 0, so iterate 1 to capture_count-1)
-                    capture_count = regex_internal._capture_count
-                    for i in range(1, capture_count):
-                        group_val = result[i]
-                        if group_val is None:
-                            arr._elements.append(UNDEFINED)
-                        else:
-                            arr._elements.append(group_val)
-                    arr.set("index", result.index)
-                    arr.set("input", s)
-                    return arr
-            except RegexTimeoutError:
-                raise TimeLimitError("Regex execution timeout")
-
-        def search(*args):
-            pattern = args[0] if args else None
-            if pattern is None:
-                return 0  # Match empty string at start
-
-            from .regex import RegExp as InternalRegExp
-
-            if isinstance(pattern, JSRegExp):
-                regex_internal = pattern._internal
-            else:
-                # Convert string to regex using microjs.regex
-                poll_callback = None
-                if self.time_limit is not None:
-                    poll_callback = (
-                        lambda: time.monotonic() - self.start_time > self.time_limit
-                    )
-                regex_internal = InternalRegExp(to_string(pattern), "", poll_callback)
-
-            try:
-                vm_regex = regex_internal._create_vm()
-                result = vm_regex.search(s, 0)
-                return result.index if result else -1
-            except RegexTimeoutError:
-                raise TimeLimitError("Regex execution timeout")
-
-        def toString(*args):
-            return s
-
-        methods = {
-            "charAt": charAt,
-            "charCodeAt": charCodeAt,
-            "indexOf": indexOf,
-            "lastIndexOf": lastIndexOf,
-            "substring": substring,
-            "slice": slice_fn,
-            "split": split,
-            "toLowerCase": toLowerCase,
-            "toUpperCase": toUpperCase,
-            "trim": trim,
-            "trimStart": trimStart,
-            "trimEnd": trimEnd,
-            "concat": concat,
-            "repeat": repeat,
-            "startsWith": startsWith,
-            "endsWith": endsWith,
-            "includes": includes,
-            "replace": replace,
-            "replaceAll": replaceAll,
-            "padStart": padStart,
-            "padEnd": padEnd,
-            "at": string_at,
-            "codePointAt": codePointAt,
-            "localeCompare": localeCompare,
-            "normalize": normalize,
-            "trimLeft": trimStart,
-            "trimRight": trimEnd,
-            "substr": substr,
-            "toLocaleLowerCase": toLowerCase,
-            "toLocaleUpperCase": toUpperCase,
-            "match": match,
-            "search": search,
-            "toString": toString,
-        }
-        return methods.get(method, lambda *args: UNDEFINED)
+        """Return the String.prototype method called method, bound to s."""
+        name = _StringMethods.NAMES.get(method)
+        if name is None:
+            return _undefined_method
+        return getattr(_StringMethods(self, s), name)
 
     def _set_property(self, obj: JSValue, key: JSValue, value: JSValue) -> None:
         """Set property on object."""
@@ -2992,6 +2080,1056 @@ class VM:
         error.value = exc
         error.__cause__ = getattr(exc, "_python_exception", None)
         return error
+
+
+def _undefined_method(*args):
+    return UNDEFINED
+
+
+class _ArrayMethods:
+    """Array.prototype methods, applied to one receiver.
+
+    Created per call; the methods are defined once, on the class.
+    """
+
+    __slots__ = ("vm", "receiver")
+
+    def __init__(self, vm: "VM", receiver: Any):
+        self.vm = vm
+        self.receiver = receiver
+
+    def push_fn(m, *args):
+        arr = m.receiver
+        vm = m.vm
+        vm.charge(8 * len(args))
+        for arg in args:
+            arr.push(arg)
+        return arr.length
+
+    def pop_fn(m, *args):
+        arr = m.receiver
+        return arr.pop()
+
+    def shift_fn(m, *args):
+        arr = m.receiver
+        if not arr._elements:
+            return UNDEFINED
+        return arr._elements.pop(0)
+
+    def unshift_fn(m, *args):
+        arr = m.receiver
+        vm = m.vm
+        vm.charge(8 * len(args))
+        arr._elements[0:0] = args
+        return arr.length
+
+    def array_elem_to_string(m, elem):
+        # undefined and null convert to empty string in array join/toString
+        if elem is UNDEFINED or elem is NULL:
+            return ""
+        return to_string(elem)
+
+    def join_elements(m, sep):
+        arr = m.receiver
+        budget = OutputBudget()
+        parts = []
+        for elem in arr._elements:
+            part = m.array_elem_to_string(elem)
+            budget.add(len(part) + len(sep))
+            parts.append(part)
+        budget.finish()
+        return sep.join(parts)
+
+    def toString_fn(m, *args):
+        return m.join_elements(",")
+
+    def join_fn(m, *args):
+        sep = "," if not args or args[0] is UNDEFINED else to_string(args[0])
+        return m.join_elements(sep)
+
+    def map_fn(m, *args):
+        arr = m.receiver
+        vm = m.vm
+        callback = args[0] if args else None
+        if not callback:
+            return JSArray()
+        result = JSArray()
+        result._elements = []
+        for i, elem in enumerate(arr._elements):
+            val = vm._call_callback(callback, [elem, i, arr])
+            result._elements.append(val)
+        return result
+
+    def filter_fn(m, *args):
+        arr = m.receiver
+        vm = m.vm
+        callback = args[0] if args else None
+        if not callback:
+            return JSArray()
+        result = JSArray()
+        result._elements = []
+        for i, elem in enumerate(arr._elements):
+            val = vm._call_callback(callback, [elem, i, arr])
+            if to_boolean(val):
+                result._elements.append(elem)
+        return result
+
+    def reduce_fn(m, *args):
+        arr = m.receiver
+        vm = m.vm
+        callback = args[0] if args else None
+        initial = args[1] if len(args) > 1 else UNDEFINED
+        if not callback:
+            raise JSTypeError("reduce callback is not a function")
+        acc = initial
+        start_idx = 0
+        if acc is UNDEFINED:
+            if not arr._elements:
+                raise JSTypeError("Reduce of empty array with no initial value")
+            acc = arr._elements[0]
+            start_idx = 1
+        for i in range(start_idx, len(arr._elements)):
+            elem = arr._elements[i]
+            acc = vm._call_callback(callback, [acc, elem, i, arr])
+        return acc
+
+    def reduceRight_fn(m, *args):
+        arr = m.receiver
+        vm = m.vm
+        callback = args[0] if args else None
+        initial = args[1] if len(args) > 1 else UNDEFINED
+        if not callback:
+            raise JSTypeError("reduceRight callback is not a function")
+        acc = initial
+        length = len(arr._elements)
+        start_idx = length - 1
+        if acc is UNDEFINED:
+            if not arr._elements:
+                raise JSTypeError("Reduce of empty array with no initial value")
+            acc = arr._elements[length - 1]
+            start_idx = length - 2
+        for i in range(start_idx, -1, -1):
+            elem = arr._elements[i]
+            acc = vm._call_callback(callback, [acc, elem, i, arr])
+        return acc
+
+    def splice_fn(m, *args):
+        arr = m.receiver
+        vm = m.vm
+        start = int_arg(args, 0, 0)
+        delete_count = int_arg(args, 1, len(arr._elements) - start)
+        items = list(args[2:]) if len(args) > 2 else []
+        vm.charge(8 * len(items))
+
+        length = len(arr._elements)
+        if start < 0:
+            start = max(0, length + start)
+        else:
+            start = min(start, length)
+
+        delete_count = max(0, min(delete_count, length - start))
+
+        # Create result array with deleted elements
+        result = JSArray()
+        result._elements = arr._elements[start : start + delete_count]
+
+        # Modify original array
+        arr._elements = (
+            arr._elements[:start] + items + arr._elements[start + delete_count :]
+        )
+
+        return result
+
+    def forEach_fn(m, *args):
+        arr = m.receiver
+        vm = m.vm
+        callback = args[0] if args else None
+        if not callback:
+            return UNDEFINED
+        for i, elem in enumerate(arr._elements):
+            vm._call_callback(callback, [elem, i, arr])
+        return UNDEFINED
+
+    def indexOf_fn(m, *args):
+        arr = m.receiver
+        vm = m.vm
+        search = args[0] if args else UNDEFINED
+        start = int_arg(args, 1, 0)
+        if start < 0:
+            start = max(0, len(arr._elements) + start)
+        for i in range(start, len(arr._elements)):
+            if vm._strict_equals(arr._elements[i], search):
+                return i
+            if not i & 4095:
+                vm.check_deadline()
+        return -1
+
+    def lastIndexOf_fn(m, *args):
+        arr = m.receiver
+        vm = m.vm
+        search = args[0] if args else UNDEFINED
+        start = int_arg(args, 1, len(arr._elements) - 1)
+        if start < 0:
+            start = len(arr._elements) + start
+        for i in range(min(start, len(arr._elements) - 1), -1, -1):
+            if vm._strict_equals(arr._elements[i], search):
+                return i
+            if not i & 4095:
+                vm.check_deadline()
+        return -1
+
+    def find_fn(m, *args):
+        arr = m.receiver
+        vm = m.vm
+        callback = args[0] if args else None
+        if not callback:
+            return UNDEFINED
+        for i, elem in enumerate(arr._elements):
+            val = vm._call_callback(callback, [elem, i, arr])
+            if to_boolean(val):
+                return elem
+        return UNDEFINED
+
+    def findIndex_fn(m, *args):
+        arr = m.receiver
+        vm = m.vm
+        callback = args[0] if args else None
+        if not callback:
+            return -1
+        for i, elem in enumerate(arr._elements):
+            val = vm._call_callback(callback, [elem, i, arr])
+            if to_boolean(val):
+                return i
+        return -1
+
+    def some_fn(m, *args):
+        arr = m.receiver
+        vm = m.vm
+        callback = args[0] if args else None
+        if not callback:
+            return False
+        for i, elem in enumerate(arr._elements):
+            val = vm._call_callback(callback, [elem, i, arr])
+            if to_boolean(val):
+                return True
+        return False
+
+    def every_fn(m, *args):
+        arr = m.receiver
+        vm = m.vm
+        callback = args[0] if args else None
+        if not callback:
+            return True
+        for i, elem in enumerate(arr._elements):
+            val = vm._call_callback(callback, [elem, i, arr])
+            if not to_boolean(val):
+                return False
+        return True
+
+    def concat_fn(m, *args):
+        arr = m.receiver
+        vm = m.vm
+        vm.charge(
+            8 * len(arr._elements)
+            + sum(8 * len(a._elements) for a in args if isinstance(a, JSArray))
+        )
+        result = JSArray()
+        result._elements = arr._elements[:]
+        for arg in args:
+            if isinstance(arg, JSArray):
+                result._elements.extend(arg._elements)
+            else:
+                result._elements.append(arg)
+        return result
+
+    def slice_fn(m, *args):
+        arr = m.receiver
+        start = int_arg(args, 0, 0)
+        end = int_arg(args, 1, len(arr._elements))
+        if start < 0:
+            start = max(0, len(arr._elements) + start)
+        if end < 0:
+            end = max(0, len(arr._elements) + end)
+        result = JSArray()
+        result._elements = arr._elements[start:end]
+        return result
+
+    def reverse_fn(m, *args):
+        arr = m.receiver
+        arr._elements.reverse()
+        return arr
+
+    def includes_fn(m, *args):
+        arr = m.receiver
+        vm = m.vm
+        search = args[0] if args else UNDEFINED
+        start = int_arg(args, 1, 0)
+        if start < 0:
+            start = max(0, len(arr._elements) + start)
+        for i in range(start, len(arr._elements)):
+            if vm._strict_equals(arr._elements[i], search):
+                return True
+            if not i & 4095:
+                vm.check_deadline()
+        return False
+
+    def sort_fn(m, *args):
+        arr = m.receiver
+        vm = m.vm
+        comparator = args[0] if args else None
+
+        # Default string comparison
+        def default_compare(a, b):
+            # Convert to strings and compare
+            str_a = to_string(a)
+            str_b = to_string(b)
+            if str_a < str_b:
+                return -1
+            if str_a > str_b:
+                return 1
+            return 0
+
+        comparisons = [0]
+
+        def compare_fn(a, b):
+            comparisons[0] += 1
+            if not comparisons[0] & 1023:
+                vm.check_deadline()
+            # undefined values always sort to the end per JS spec
+            if a is UNDEFINED and b is UNDEFINED:
+                return 0
+            if a is UNDEFINED:
+                return 1
+            if b is UNDEFINED:
+                return -1
+            # Use comparator if provided
+            if comparator and (
+                callable(comparator) or isinstance(comparator, JSFunction)
+            ):
+                num = to_number(vm._call_callback(comparator, [a, b]))
+                # Only the sign matters; NaN counts as equal
+                return (num > 0) - (num < 0)
+            return default_compare(a, b)
+
+        # Sort using Python's sort with custom key
+        from functools import cmp_to_key
+
+        arr._elements.sort(key=cmp_to_key(compare_fn))
+        return arr
+
+    def at_fn(m, *args):
+        arr = m.receiver
+        idx = int_arg(args, 0, 0)
+        if idx < 0:
+            idx += len(arr._elements)
+        return arr.get_index(idx) if idx >= 0 else UNDEFINED
+
+    def flatten(m, elements, depth):
+        """Flatten nested arrays up to depth levels, without recursion."""
+        vm = m.vm
+        result = []
+        stack = [(iter(elements), depth)]
+        while stack:
+            items, level = stack[-1]
+            for elem in items:
+                if isinstance(elem, JSArray) and level > 0:
+                    stack.append((iter(elem._elements), level - 1))
+                    break
+                result.append(elem)
+                if not len(result) & 4095:
+                    vm.check_deadline()
+            else:
+                stack.pop()
+        vm.charge(8 * len(result))
+        return result
+
+    def flat_fn(m, *args):
+        arr = m.receiver
+        depth = 1
+        if args and args[0] is not UNDEFINED:
+            depth = to_number(args[0])
+            depth = 0 if depth != depth else depth
+        result = JSArray()
+        result._elements = m.flatten(arr._elements, depth)
+        return result
+
+    def flatMap_fn(m, *args):
+        mapped = m.map_fn(*args)
+        result = JSArray()
+        result._elements = m.flatten(mapped._elements, 1)
+        return result
+
+    def findLast_fn(m, *args):
+        arr = m.receiver
+        index = m.findLastIndex_fn(*args)
+        return arr._elements[index] if index >= 0 else UNDEFINED
+
+    def findLastIndex_fn(m, *args):
+        arr = m.receiver
+        vm = m.vm
+        callback = args[0] if args else None
+        if not callback:
+            raise JSTypeError("findLastIndex callback is not a function")
+        for i in range(len(arr._elements) - 1, -1, -1):
+            if to_boolean(vm._call_callback(callback, [arr._elements[i], i, arr])):
+                return i
+        return -1
+
+    def fill_fn(m, *args):
+        arr = m.receiver
+        value = args[0] if args else UNDEFINED
+        length = len(arr._elements)
+        start = relative_index(args, 1, length, 0)
+        end = relative_index(args, 2, length, length)
+        for i in range(start, end):
+            arr._elements[i] = value
+        return arr
+
+    def copyWithin_fn(m, *args):
+        arr = m.receiver
+        length = len(arr._elements)
+        target = relative_index(args, 0, length, 0)
+        start = relative_index(args, 1, length, 0)
+        end = relative_index(args, 2, length, length)
+        count = min(end - start, length - target)
+        if count > 0:
+            arr._elements[target : target + count] = arr._elements[
+                start : start + count
+            ]
+        return arr
+
+    def copy(m):
+        arr = m.receiver
+        vm = m.vm
+        vm.charge(64 + 8 * len(arr._elements))
+        result = JSArray()
+        result._elements = arr._elements[:]
+        return result
+
+    def toReversed_fn(m, *args):
+        result = m.copy()
+        result._elements.reverse()
+        return result
+
+    def toSorted_fn(m, *args):
+        vm = m.vm
+        result = m.copy()
+        return vm._make_array_method(result, "sort")(*args)
+
+    def toSpliced_fn(m, *args):
+        vm = m.vm
+        result = m.copy()
+        vm._make_array_method(result, "splice")(*args)
+        return result
+
+    def with_fn(m, *args):
+        arr = m.receiver
+        idx = int_arg(args, 0, 0)
+        if idx < 0:
+            idx += len(arr._elements)
+        if not 0 <= idx < len(arr._elements):
+            raise JSRangeError("Invalid index")
+        result = m.copy()
+        result._elements[idx] = args[1] if len(args) > 1 else UNDEFINED
+        return result
+
+    # JavaScript method name -> Python method name
+    NAMES = {
+        "at": "at_fn",
+        "flat": "flat_fn",
+        "flatMap": "flatMap_fn",
+        "findLast": "findLast_fn",
+        "findLastIndex": "findLastIndex_fn",
+        "fill": "fill_fn",
+        "copyWithin": "copyWithin_fn",
+        "toReversed": "toReversed_fn",
+        "toSorted": "toSorted_fn",
+        "toSpliced": "toSpliced_fn",
+        "with": "with_fn",
+        "toLocaleString": "toString_fn",
+        "push": "push_fn",
+        "pop": "pop_fn",
+        "shift": "shift_fn",
+        "unshift": "unshift_fn",
+        "toString": "toString_fn",
+        "join": "join_fn",
+        "map": "map_fn",
+        "filter": "filter_fn",
+        "reduce": "reduce_fn",
+        "forEach": "forEach_fn",
+        "indexOf": "indexOf_fn",
+        "lastIndexOf": "lastIndexOf_fn",
+        "find": "find_fn",
+        "findIndex": "findIndex_fn",
+        "some": "some_fn",
+        "every": "every_fn",
+        "concat": "concat_fn",
+        "slice": "slice_fn",
+        "splice": "splice_fn",
+        "reverse": "reverse_fn",
+        "includes": "includes_fn",
+        "sort": "sort_fn",
+        "reduceRight": "reduceRight_fn",
+    }
+
+
+class _NumberMethods:
+    """Number.prototype methods, applied to one receiver.
+
+    Created per call; the methods are defined once, on the class.
+    """
+
+    __slots__ = ("vm", "receiver")
+
+    def __init__(self, vm: "VM", receiver: Any):
+        self.vm = vm
+        self.receiver = receiver
+
+    def toFixed(m, *args):
+        n = m.receiver
+        digits = to_number(args[0]) if args else 0
+        digits = 0 if digits != digits else int(digits)
+        if digits < 0 or digits > 100:
+            raise JSRangeError("m.toFixed() digits argument must be between 0 and 100")
+        return to_fixed(n, digits)
+
+    def toString(m, *args):
+        n = m.receiver
+        radix = 10
+        if args and args[0] is not UNDEFINED:
+            radix = to_number(args[0])
+            radix = 0 if radix != radix else int(radix)
+        if radix < 2 or radix > 36:
+            raise JSRangeError("m.toString() radix must be between 2 and 36")
+        if radix == 10:
+            return to_string(n)
+        return number_to_radix_string(n, radix)
+
+    def toExponential(m, *args):
+        n = m.receiver
+        digits = None
+        if args and args[0] is not UNDEFINED:
+            digits = to_number(args[0])
+            digits = 0 if digits != digits else int(digits)
+        if digits is not None and math.isfinite(n) and not 0 <= digits <= 100:
+            raise JSRangeError("m.toExponential() digits must be between 0 and 100")
+        return to_exponential(n, digits)
+
+    def toPrecision(m, *args):
+        n = m.receiver
+        if not args or args[0] is UNDEFINED:
+            return to_string(n)
+        precision = to_number(args[0])
+        precision = 0 if precision != precision else int(precision)
+        if not math.isfinite(n):
+            return to_string(n)
+        if not 1 <= precision <= 100:
+            raise JSRangeError("m.toPrecision() precision must be between 1 and 100")
+        return to_precision(n, precision)
+
+    def valueOf(m, *args):
+        n = m.receiver
+        return n
+
+    # JavaScript method name -> Python method name
+    NAMES = {
+        "toFixed": "toFixed",
+        "toString": "toString",
+        "toExponential": "toExponential",
+        "toPrecision": "toPrecision",
+        "valueOf": "valueOf",
+    }
+
+
+class _StringMethods:
+    """String.prototype methods, applied to one receiver.
+
+    Created per call; the methods are defined once, on the class.
+    """
+
+    __slots__ = ("vm", "receiver")
+
+    def __init__(self, vm: "VM", receiver: Any):
+        self.vm = vm
+        self.receiver = receiver
+
+    def charAt(m, *args):
+        s = m.receiver
+        idx = int_arg(args, 0, 0)
+        if 0 <= idx < len(s):
+            return s[idx]
+        return ""
+
+    def charCodeAt(m, *args):
+        s = m.receiver
+        idx = int_arg(args, 0, 0)
+        if 0 <= idx < len(s):
+            return ord(s[idx])
+        return float("nan")
+
+    def indexOf(m, *args):
+        s = m.receiver
+        search = to_string(args[0]) if args else ""
+        start = int_arg(args, 1, 0)
+        if start < 0:
+            start = 0
+        return s.find(search, start)
+
+    def lastIndexOf(m, *args):
+        s = m.receiver
+        search = to_string(args[0]) if args else ""
+        end = int_arg(args, 1, len(s))
+        # Python's rfind with end position
+        return s.rfind(search, 0, end + len(search))
+
+    def substring(m, *args):
+        s = m.receiver
+        start = int_arg(args, 0, 0)
+        end = int_arg(args, 1, len(s))
+        # Clamp and swap if needed
+        if start < 0:
+            start = 0
+        if end < 0:
+            end = 0
+        if start > end:
+            start, end = end, start
+        return s[start:end]
+
+    def slice_fn(m, *args):
+        s = m.receiver
+        start = int_arg(args, 0, 0)
+        end = int_arg(args, 1, len(s))
+        # Handle negative indices
+        if start < 0:
+            start = max(0, len(s) + start)
+        if end < 0:
+            end = max(0, len(s) + end)
+        return s[start:end]
+
+    def split(m, *args):
+        s = m.receiver
+        self = m.vm
+        sep = args[0] if args else UNDEFINED
+        limit = int_arg(args, 1, -1)
+        if isinstance(sep, str) or (
+            sep is not UNDEFINED and not isinstance(sep, JSRegExp)
+        ):
+            # Charge for the pieces before making them
+            sep_str = to_string(sep)
+            pieces = len(s) if sep_str == "" else s.count(sep_str) + 1
+            self.charge(64 * pieces + len(s))
+
+        if sep is UNDEFINED:
+            parts = [s]
+        elif isinstance(sep, JSRegExp):
+            # Split with regex using microjs.regex
+            try:
+                regex_internal = sep._internal
+                parts = []
+                last_end = 0
+                pos = 0
+                capture_count = regex_internal._capture_count
+
+                while pos <= len(s):
+                    # Create fresh regex VM for each search to avoid lastIndex issues
+                    vm_regex = regex_internal._create_vm()
+                    result = vm_regex.search(s, pos)
+                    if result is None:
+                        break
+
+                    # Add the part before this match
+                    parts.append(s[last_end : result.index])
+
+                    # Add captured groups (JS behavior) - capture_count includes group 0
+                    for i in range(1, capture_count):
+                        group_val = result[i]
+                        parts.append(group_val if group_val is not None else UNDEFINED)
+
+                    # Move past the match
+                    match_len = len(result[0]) if result[0] else 0
+                    last_end = result.index + match_len
+                    # Advance position (at least by 1 to avoid infinite loop on zero-width)
+                    pos = last_end if match_len > 0 else result.index + 1
+
+                # Add remainder after last match
+                parts.append(s[last_end:])
+            except RegexTimeoutError:
+                raise TimeLimitError("Regex execution timeout")
+        elif to_string(sep) == "":
+            parts = list(s)
+        else:
+            parts = s.split(to_string(sep))
+
+        if limit >= 0:
+            parts = parts[:limit]
+        arr = JSArray()
+        arr._elements = parts
+        return arr
+
+    def toLowerCase(m, *args):
+        s = m.receiver
+        return s.lower()
+
+    def toUpperCase(m, *args):
+        s = m.receiver
+        return s.upper()
+
+    def trim(m, *args):
+        s = m.receiver
+        return s.strip()
+
+    def trimStart(m, *args):
+        s = m.receiver
+        return s.lstrip()
+
+    def trimEnd(m, *args):
+        s = m.receiver
+        return s.rstrip()
+
+    def concat(m, *args):
+        s = m.receiver
+        parts = [s] + [to_string(arg) for arg in args]
+        reserve_string(sum(len(part) for part in parts))
+        return "".join(parts)
+
+    def repeat(m, *args):
+        s = m.receiver
+        count = to_number(args[0]) if args else 0
+        if count != count:
+            count = 0
+        if count < 0 or count == float("inf"):
+            raise JSRangeError("Invalid count value")
+        count = int(count)
+        reserve_string(len(s) * count)
+        return s * count
+
+    def pad(m, args, at_start):
+        s = m.receiver
+        target = to_number(args[0]) if args else 0
+        target = 0 if target != target else target
+        filler = " "
+        if len(args) > 1 and args[1] is not UNDEFINED:
+            filler = to_string(args[1])
+        if target <= len(s) or not filler:
+            return s
+        if target == float("inf"):
+            raise JSRangeError("Invalid string length")
+        target = int(target)
+        reserve_string(target)
+        needed = target - len(s)
+        padding = (filler * (needed // len(filler) + 1))[:needed]
+        return padding + s if at_start else s + padding
+
+    def padStart(m, *args):
+        return m.pad(args, at_start=True)
+
+    def string_at(m, *args):
+        s = m.receiver
+        idx = int_arg(args, 0, 0)
+        if idx < 0:
+            idx += len(s)
+        return s[idx] if 0 <= idx < len(s) else UNDEFINED
+
+    def codePointAt(m, *args):
+        s = m.receiver
+        idx = int_arg(args, 0, 0)
+        return ord(s[idx]) if 0 <= idx < len(s) else UNDEFINED
+
+    def localeCompare(m, *args):
+        s = m.receiver
+        other = to_string(args[0]) if args else "undefined"
+        a, b = collation_key(s), collation_key(other)
+        return (a > b) - (a < b)
+
+    def normalize(m, *args):
+        s = m.receiver
+        form = "NFC"
+        if args and args[0] is not UNDEFINED:
+            form = to_string(args[0])
+        if form not in ("NFC", "NFD", "NFKC", "NFKD"):
+            raise JSRangeError(
+                "The normalization form should be one of NFC, NFD, NFKC, NFKD"
+            )
+        return unicodedata.normalize(form, s)
+
+    def substr(m, *args):
+        s = m.receiver
+        start = relative_index(args, 0, len(s), 0)
+        length = int_arg(args, 1, len(s) - start)
+        return s[start : start + max(0, length)]
+
+    def padEnd(m, *args):
+        return m.pad(args, at_start=False)
+
+    def startsWith(m, *args):
+        s = m.receiver
+        search = to_string(args[0]) if args else ""
+        pos = int_arg(args, 1, 0)
+        return s[pos:].startswith(search)
+
+    def endsWith(m, *args):
+        s = m.receiver
+        search = to_string(args[0]) if args else ""
+        length = int_arg(args, 1, len(s))
+        return s[:length].endswith(search)
+
+    def includes(m, *args):
+        s = m.receiver
+        search = to_string(args[0]) if args else ""
+        pos = int_arg(args, 1, 0)
+        return search in s[pos:]
+
+    def make_replacer(m, replacement):
+        """Return f(matched, position, captures) giving the replacement text."""
+        s = m.receiver
+        self = m.vm
+        if isinstance(replacement, JSFunction) or callable(replacement):
+            # Called with (match, ...captures, offset, string)
+            def call(matched, position, captures):
+                args = [matched]
+                args += [UNDEFINED if c is None else c for c in captures]
+                args += [position, s]
+                return to_string(self._call_callback(replacement, args))
+
+            return call
+        template = to_string(replacement)
+        return lambda matched, position, captures: self._get_substitution(
+            template, matched, s, position, captures
+        )
+
+    def replace(m, *args):
+        s = m.receiver
+        pattern = args[0] if args else ""
+        replacer = m.make_replacer(args[1] if len(args) > 1 else UNDEFINED)
+
+        if isinstance(pattern, JSRegExp):
+            # Replace with regex using microjs.regex
+            try:
+                regex_internal = pattern._internal
+                is_global = "g" in pattern._flags
+                capture_count = regex_internal._capture_count
+
+                result_parts = []
+                budget = OutputBudget()
+                last_end = 0
+                pos = 0
+
+                while pos <= len(s):
+                    # Create fresh regex VM for each search
+                    vm_regex = regex_internal._create_vm()
+                    match_result = vm_regex.search(s, pos)
+                    if match_result is None:
+                        break
+
+                    matched = match_result[0] or ""
+                    # _capture_count includes group 0, the whole match
+                    captures = [match_result[i] for i in range(1, capture_count)]
+                    # Add the part before this match, then the replacement
+                    before = s[last_end : match_result.index]
+                    replacement = replacer(matched, match_result.index, captures)
+                    budget.add(len(before) + len(replacement))
+                    result_parts.append(before)
+                    result_parts.append(replacement)
+
+                    # Move past the match
+                    last_end = match_result.index + len(matched)
+                    pos = last_end if matched else match_result.index + 1
+
+                    if not is_global:
+                        break
+
+                # Add remainder after last match
+                result_parts.append(s[last_end:])
+                budget.add(len(s) - last_end)
+                budget.finish()
+                return "".join(result_parts)
+            except RegexTimeoutError:
+                raise TimeLimitError("Regex execution timeout")
+        else:
+            # String pattern: replace the first occurrence only
+            search = to_string(pattern)
+            idx = s.find(search)
+            if idx < 0:
+                return s
+            return s[:idx] + replacer(search, idx, []) + s[idx + len(search) :]
+
+    def replaceAll(m, *args):
+        s = m.receiver
+        pattern = args[0] if args else ""
+        replacement = args[1] if len(args) > 1 else UNDEFINED
+
+        if isinstance(pattern, JSRegExp):
+            # replaceAll with regex requires global flag
+            if "g" not in pattern._flags:
+                raise JSTypeError("replaceAll called with a non-global RegExp")
+            return m.replace(pattern, replacement)
+
+        # String pattern: replace every non-overlapping occurrence
+        search = to_string(pattern)
+        replacer = m.make_replacer(replacement)
+        if search == "":
+            positions = list(range(len(s) + 1))
+        else:
+            positions = []
+            idx = s.find(search)
+            while idx >= 0:
+                positions.append(idx)
+                idx = s.find(search, idx + len(search))
+        parts = []
+        budget = OutputBudget()
+        last_end = 0
+        for idx in positions:
+            before = s[last_end:idx]
+            replacement = replacer(search, idx, [])
+            budget.add(len(before) + len(replacement))
+            parts.append(before)
+            parts.append(replacement)
+            last_end = idx + len(search)
+        parts.append(s[last_end:])
+        budget.add(len(s) - last_end)
+        budget.finish()
+        return "".join(parts)
+
+    def match(m, *args):
+        s = m.receiver
+        self = m.vm
+        pattern = args[0] if args else None
+        if pattern is None:
+            # Match empty string
+            arr = JSArray()
+            arr._elements = [""]
+            arr.set("index", 0)
+            arr.set("input", s)
+            return arr
+
+        from .regex import RegExp as InternalRegExp
+
+        if isinstance(pattern, JSRegExp):
+            regex_internal = pattern._internal
+            is_global = "g" in pattern._flags
+        else:
+            # Convert string to regex using microjs.regex
+            # Create a poll_callback if the VM has time limits
+            poll_callback = None
+            if self.time_limit is not None:
+                poll_callback = (
+                    lambda: time.monotonic() - self.start_time > self.time_limit
+                )
+            regex_internal = InternalRegExp(to_string(pattern), "", poll_callback)
+            is_global = False
+
+        try:
+            if is_global:
+                # Global flag: return all matches without groups
+                matches = []
+                pos = 0
+                while pos <= len(s):
+                    # Create fresh regex VM for each search
+                    vm_regex = regex_internal._create_vm()
+                    result = vm_regex.search(s, pos)
+                    if result is None:
+                        break
+                    matches.append(result[0])
+                    # Advance position
+                    match_len = len(result[0]) if result[0] else 0
+                    pos = (
+                        result.index + match_len if match_len > 0 else result.index + 1
+                    )
+
+                if not matches:
+                    return NULL
+                arr = JSArray()
+                arr._elements = list(matches)
+                return arr
+            else:
+                # Non-global: return first match with groups
+                vm_regex = regex_internal._create_vm()
+                result = vm_regex.search(s, 0)
+                if result is None:
+                    return NULL
+                arr = JSArray()
+                arr._elements = [result[0]]
+                # Add captured groups (capture_count includes group 0, so iterate 1 to capture_count-1)
+                capture_count = regex_internal._capture_count
+                for i in range(1, capture_count):
+                    group_val = result[i]
+                    if group_val is None:
+                        arr._elements.append(UNDEFINED)
+                    else:
+                        arr._elements.append(group_val)
+                arr.set("index", result.index)
+                arr.set("input", s)
+                return arr
+        except RegexTimeoutError:
+            raise TimeLimitError("Regex execution timeout")
+
+    def search(m, *args):
+        s = m.receiver
+        self = m.vm
+        pattern = args[0] if args else None
+        if pattern is None:
+            return 0  # Match empty string at start
+
+        from .regex import RegExp as InternalRegExp
+
+        if isinstance(pattern, JSRegExp):
+            regex_internal = pattern._internal
+        else:
+            # Convert string to regex using microjs.regex
+            poll_callback = None
+            if self.time_limit is not None:
+                poll_callback = (
+                    lambda: time.monotonic() - self.start_time > self.time_limit
+                )
+            regex_internal = InternalRegExp(to_string(pattern), "", poll_callback)
+
+        try:
+            vm_regex = regex_internal._create_vm()
+            result = vm_regex.search(s, 0)
+            return result.index if result else -1
+        except RegexTimeoutError:
+            raise TimeLimitError("Regex execution timeout")
+
+    def toString(m, *args):
+        s = m.receiver
+        return s
+
+    # JavaScript method name -> Python method name
+    NAMES = {
+        "charAt": "charAt",
+        "charCodeAt": "charCodeAt",
+        "indexOf": "indexOf",
+        "lastIndexOf": "lastIndexOf",
+        "substring": "substring",
+        "slice": "slice_fn",
+        "split": "split",
+        "toLowerCase": "toLowerCase",
+        "toUpperCase": "toUpperCase",
+        "trim": "trim",
+        "trimStart": "trimStart",
+        "trimEnd": "trimEnd",
+        "concat": "concat",
+        "repeat": "repeat",
+        "startsWith": "startsWith",
+        "endsWith": "endsWith",
+        "includes": "includes",
+        "replace": "replace",
+        "replaceAll": "replaceAll",
+        "padStart": "padStart",
+        "padEnd": "padEnd",
+        "at": "string_at",
+        "codePointAt": "codePointAt",
+        "localeCompare": "localeCompare",
+        "normalize": "normalize",
+        "trimLeft": "trimStart",
+        "trimRight": "trimEnd",
+        "substr": "substr",
+        "toLocaleLowerCase": "toLowerCase",
+        "toLocaleUpperCase": "toUpperCase",
+        "match": "match",
+        "search": "search",
+        "toString": "toString",
+    }
 
 
 # Opcode handlers indexed by opcode number, and whether each takes an operand

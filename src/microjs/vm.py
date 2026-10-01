@@ -34,6 +34,46 @@ from .errors import (
 from .regex import RegexTimeoutError
 
 
+class JSThrow(Exception):
+    """A JavaScript exception unwinding through Python code.
+
+    Raised when a thrown value finds no handler above the current run loop's
+    floor - for example inside a callback invoked by a native function. The
+    enclosing run loop catches it and continues unwinding from there.
+    """
+
+    def __init__(self, value: JSValue):
+        super().__init__(value)
+        self.value = value
+
+
+# Opcodes followed by a 16-bit operand, and by an 8-bit operand
+_JUMP_OPCODES = frozenset(
+    [OpCode.JUMP, OpCode.JUMP_IF_FALSE, OpCode.JUMP_IF_TRUE, OpCode.TRY_START]
+)
+_ARG_OPCODES = frozenset(
+    [
+        OpCode.LOAD_CONST,
+        OpCode.LOAD_NAME,
+        OpCode.STORE_NAME,
+        OpCode.LOAD_LOCAL,
+        OpCode.STORE_LOCAL,
+        OpCode.LOAD_CLOSURE,
+        OpCode.STORE_CLOSURE,
+        OpCode.LOAD_CELL,
+        OpCode.STORE_CELL,
+        OpCode.CALL,
+        OpCode.CALL_METHOD,
+        OpCode.NEW,
+        OpCode.BUILD_ARRAY,
+        OpCode.BUILD_OBJECT,
+        OpCode.BUILD_REGEX,
+        OpCode.MAKE_CLOSURE,
+        OpCode.TYPEOF_NAME,
+    ]
+)
+
+
 def js_round(x: float, ndigits: int = 0) -> float:
     """Round using JavaScript-style 'round half away from zero' instead of Python's 'round half to even'."""
     if ndigits == 0:
@@ -135,16 +175,16 @@ class VM:
         frame = CallFrame(
             func=compiled,
             ip=0,
-            bp=0,
+            bp=len(self.stack),
             locals=[UNDEFINED] * compiled.num_locals,
             this_value=UNDEFINED,
         )
         self.call_stack.append(frame)
 
         try:
-            return self._execute()
-        except Exception as e:
-            raise
+            return self._run_frames(0)
+        except JSThrow as e:
+            raise self._uncaught_error(e.value) from None
 
     def _check_limits(self) -> None:
         """Check memory and time limits."""
@@ -162,72 +202,48 @@ class VM:
             if mem_used > self.memory_limit:
                 raise MemoryLimitError("Memory limit exceeded")
 
-    def _execute(self) -> JSValue:
-        """Main execution loop."""
-        while self.call_stack:
+    def _run_frames(self, floor: int) -> JSValue:
+        """Execute until the call stack shrinks back to ``floor`` frames.
+
+        Returns the value left by the frame that returned to ``floor``. A
+        thrown value with no handler above ``floor`` propagates as JSThrow,
+        to be caught by whichever run loop called the native code we are
+        nested in.
+        """
+        call_stack = self.call_stack
+        while len(call_stack) > floor:
             self._check_limits()
 
-            frame = self.call_stack[-1]
-            func = frame.func
-            bytecode = func.bytecode
+            frame = call_stack[-1]
+            bytecode = frame.func.bytecode
 
             if frame.ip >= len(bytecode):
-                # End of function
-                return self.stack.pop() if self.stack else UNDEFINED
+                self._return(UNDEFINED)
+                continue
 
             op = OpCode(bytecode[frame.ip])
             frame.ip += 1
 
-            # Get argument if needed
+            # Decode operand, if any
             arg = None
-            if op in (
-                OpCode.JUMP,
-                OpCode.JUMP_IF_FALSE,
-                OpCode.JUMP_IF_TRUE,
-                OpCode.TRY_START,
-            ):
+            if op in _JUMP_OPCODES:
                 # 16-bit little-endian argument for jumps
-                low = bytecode[frame.ip]
-                high = bytecode[frame.ip + 1]
-                arg = low | (high << 8)
+                arg = bytecode[frame.ip] | (bytecode[frame.ip + 1] << 8)
                 frame.ip += 2
-            elif op in (
-                OpCode.LOAD_CONST,
-                OpCode.LOAD_NAME,
-                OpCode.STORE_NAME,
-                OpCode.LOAD_LOCAL,
-                OpCode.STORE_LOCAL,
-                OpCode.LOAD_CLOSURE,
-                OpCode.STORE_CLOSURE,
-                OpCode.LOAD_CELL,
-                OpCode.STORE_CELL,
-                OpCode.CALL,
-                OpCode.CALL_METHOD,
-                OpCode.NEW,
-                OpCode.BUILD_ARRAY,
-                OpCode.BUILD_OBJECT,
-                OpCode.BUILD_REGEX,
-                OpCode.MAKE_CLOSURE,
-                OpCode.TYPEOF_NAME,
-            ):
+            elif op in _ARG_OPCODES:
                 arg = bytecode[frame.ip]
                 frame.ip += 1
 
-            # Execute opcode - wrap in try/except to catch Python JS exceptions
             try:
                 self._execute_opcode(op, arg, frame)
+            except JSThrow as e:
+                self._throw(e.value, floor)
             except JSTypeError as e:
-                # Convert Python JSTypeError to JavaScript TypeError
-                self._handle_python_exception("TypeError", str(e))
+                self._throw(self._make_error("TypeError", e.message), floor)
             except JSReferenceError as e:
-                # Convert Python JSReferenceError to JavaScript ReferenceError
-                self._handle_python_exception("ReferenceError", str(e))
+                self._throw(self._make_error("ReferenceError", e.message), floor)
 
-            # Check if frame was popped (return)
-            if not self.call_stack:
-                break
-
-        return self.stack.pop() if self.stack else UNDEFINED
+        return self.stack.pop()
 
     def _execute_opcode(self, op: OpCode, arg: Optional[int], frame: CallFrame) -> None:
         """Execute a single opcode."""
@@ -659,7 +675,8 @@ class VM:
         # Exception handling
         elif op == OpCode.THROW:
             exc = self.stack.pop()
-            self._throw(exc)
+            self._set_error_location(exc)
+            raise JSThrow(exc)
 
         elif op == OpCode.TRY_START:
             # arg is the catch handler offset
@@ -819,15 +836,11 @@ class VM:
             method_order = ["valueOf", "toString"]
 
         for method_name in method_order:
-            method = value.get(method_name)
+            method = self._get_property(value, method_name)
             if method is UNDEFINED or method is NULL:
                 continue
-            if isinstance(method, JSFunction):
+            if isinstance(method, JSFunction) or callable(method):
                 result = self._call_callback(method, [], value)
-                if not isinstance(result, JSObject):
-                    return result
-            elif callable(method):
-                result = method()
                 if not isinstance(result, JSObject):
                     return result
 
@@ -1557,10 +1570,7 @@ class VM:
         if hasattr(func, "_original_func"):
             func = func._original_func
 
-        # Use existing invoke mechanism
-        self._invoke_js_function(func, args, this_val)
-        result = self._execute()
-        return result
+        return self._call_callback(func, args, this_val)
 
     def _make_regexp_method(self, re: JSRegExp, method: str) -> Any:
         """Create a bound RegExp method."""
@@ -2279,77 +2289,22 @@ class VM:
     def _call_callback(
         self, callback: JSValue, args: List[JSValue], this_val: JSValue = None
     ) -> JSValue:
-        """Call a callback function synchronously and return the result."""
+        """Call a function synchronously from Python and return its result."""
+        from .values import JSBoundMethod
+
+        if this_val is None:
+            this_val = UNDEFINED
         if isinstance(callback, JSFunction):
-            # Save current stack position AND call stack depth
-            stack_len = len(self.stack)
-            call_stack_len = len(self.call_stack)
-
-            # Invoke the function
-            self._invoke_js_function(
-                callback, args, this_val if this_val is not None else UNDEFINED
-            )
-
-            # Execute until the call returns (back to original call stack depth)
-            while len(self.call_stack) > call_stack_len:
-                self._check_limits()
-                frame = self.call_stack[-1]
-                func = frame.func
-                bytecode = func.bytecode
-
-                if frame.ip >= len(bytecode):
-                    self.call_stack.pop()
-                    if len(self.stack) > stack_len:
-                        return self.stack.pop()
-                    return UNDEFINED
-
-                op = OpCode(bytecode[frame.ip])
-                frame.ip += 1
-
-                # Get argument if needed
-                arg = None
-                if op in (
-                    OpCode.JUMP,
-                    OpCode.JUMP_IF_FALSE,
-                    OpCode.JUMP_IF_TRUE,
-                    OpCode.TRY_START,
-                ):
-                    low = bytecode[frame.ip]
-                    high = bytecode[frame.ip + 1]
-                    arg = low | (high << 8)
-                    frame.ip += 2
-                elif op in (
-                    OpCode.LOAD_CONST,
-                    OpCode.LOAD_NAME,
-                    OpCode.STORE_NAME,
-                    OpCode.LOAD_LOCAL,
-                    OpCode.STORE_LOCAL,
-                    OpCode.LOAD_CLOSURE,
-                    OpCode.STORE_CLOSURE,
-                    OpCode.LOAD_CELL,
-                    OpCode.STORE_CELL,
-                    OpCode.CALL,
-                    OpCode.CALL_METHOD,
-                    OpCode.NEW,
-                    OpCode.BUILD_ARRAY,
-                    OpCode.BUILD_OBJECT,
-                    OpCode.BUILD_REGEX,
-                    OpCode.MAKE_CLOSURE,
-                ):
-                    arg = bytecode[frame.ip]
-                    frame.ip += 1
-
-                self._execute_opcode(op, arg, frame)
-
-            # Get result from stack
-            if len(self.stack) > stack_len:
-                return self.stack.pop()
-            return UNDEFINED
+            floor = len(self.call_stack)
+            self._invoke_js_function(callback, args, this_val)
+            return self._run_frames(floor)
+        if isinstance(callback, JSBoundMethod):
+            result = callback(this_val, *args)
         elif callable(callback):
             result = callback(*args)
-            return result if result is not None else UNDEFINED
         else:
             raise JSTypeError(f"{callback} is not a function")
+        return UNDEFINED if result is None else result
 
     def _invoke_js_function(
         self,
@@ -2462,9 +2417,8 @@ class VM:
                     return source_map[ip]
         return None, None
 
-    def _throw(self, exc: JSValue) -> None:
-        """Throw an exception."""
-        # Try to add source location to error object
+    def _set_error_location(self, exc: JSValue) -> None:
+        """Record the current source location on a thrown error object."""
         if isinstance(exc, JSObject):
             line, column = self._get_source_location()
             if line is not None:
@@ -2472,8 +2426,13 @@ class VM:
             if column is not None:
                 exc.set("columnNumber", column)
 
-        # Unwind to the innermost frame with an active handler
-        while self.call_stack:
+    def _throw(self, exc: JSValue, floor: int) -> None:
+        """Transfer control to the innermost handler above ``floor``.
+
+        Frames without a handler are discarded. If no frame above ``floor``
+        has one, the exception continues as JSThrow.
+        """
+        while len(self.call_stack) > floor:
             frame = self.call_stack[-1]
             if frame.handlers:
                 catch_ip, stack_depth = frame.handlers.pop()
@@ -2483,29 +2442,27 @@ class VM:
                 return
             self.call_stack.pop()
             del self.stack[frame.bp :]
-        # Uncaught exception
-        if isinstance(exc, str):
-            raise JSError(exc)
-        elif isinstance(exc, JSObject):
-            msg = exc.get("message")
-            raise JSError(to_string(msg) if msg else "Error")
-        else:
-            raise JSError(to_string(exc))
+        raise JSThrow(exc)
 
-    def _handle_python_exception(self, error_type: str, message: str) -> None:
-        """Convert a Python exception to a JavaScript exception and throw it."""
-        # Get the error constructor from globals
+    def _make_error(self, error_type: str, message: str) -> JSValue:
+        """Create a JavaScript error object, located at the current instruction."""
         error_constructor = self.globals.get(error_type)
         if error_constructor and hasattr(error_constructor, "_call_fn"):
-            # Create the error object using the constructor
-            # Strip the "TypeError: " prefix from the message if present
-            if message.startswith(f"{error_type}: "):
-                message = message[len(error_type) + 2 :]
             error_obj = error_constructor._call_fn(message)
-            self._throw(error_obj)
         else:
-            # Fall back to a plain object with message property
+            # Fall back to a plain object with name and message properties
             error_obj = JSObject()
             error_obj.set("name", error_type)
             error_obj.set("message", message)
-            self._throw(error_obj)
+        self._set_error_location(error_obj)
+        return error_obj
+
+    def _uncaught_error(self, exc: JSValue) -> JSError:
+        """Build the Python exception for a JS exception nothing caught."""
+        if isinstance(exc, str):
+            return JSError(exc)
+        elif isinstance(exc, JSObject):
+            msg = exc.get("message")
+            return JSError(to_string(msg) if msg else "Error")
+        else:
+            return JSError(to_string(exc))

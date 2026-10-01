@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 
 from .parser import Parser
 from .compiler import Compiler
-from .vm import VM
+from .vm import VM, JSThrow
 from .values import (
     UNDEFINED,
     NULL,
@@ -1239,11 +1239,17 @@ class Context:
 
         This is used internally to invoke JSFunction objects from Python code.
         """
+        if self._current_vm is not None:
+            # Run on the active VM so throws unwind into the caller's handlers
+            # and the time limit keeps counting from the start of eval()
+            return self._current_vm._call_callback(func, args, UNDEFINED)
         vm = VM(memory_limit=self.memory_limit, time_limit=self.time_limit)
-        vm.globals.update(self._globals)
-        result = vm._call_callback(func, args, UNDEFINED)
-        self._globals.update(vm.globals)
-        return result
+        vm.globals = self._globals
+        vm.start_time = time.monotonic()
+        try:
+            return vm._call_callback(func, args, UNDEFINED)
+        except JSThrow as e:
+            raise vm._uncaught_error(e.value) from None
 
     def get(self, name: str) -> Any:
         """Get a global variable.

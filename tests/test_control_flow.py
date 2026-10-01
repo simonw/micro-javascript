@@ -98,80 +98,35 @@ class TestBreakContinueThroughTry:
             n
         """) == 3
 
-    def test_break_in_finally_discards_exception(self):
-        assert (
-            run(
-                """
+    def test_break_in_finally_discards_exception(self, stack_growth):
+        assert stack_growth("""
             var n = 0;
-            for (var i = 0; i < 20000; i++) {
+            for (var i = 0; i < 100; i++) {
                 for (;;) { try { throw 1 } finally { break } }
                 n++;
             }
-            n
-        """,
-                memory_limit=1024 * 1024,
-                time_limit=30.0,
-            )
-            == 20000
-        )
+        """) == 0
 
 
 class TestStackBalance:
     """Leaving a loop or switch early must pop its stack values."""
 
-    def test_break_out_of_for_in(self):
-        assert (
-            run(
-                "for (var i = 0; i < 20000; i++) { for (var k in {a: 1}) break } i",
-                memory_limit=1024 * 1024,
-                time_limit=30.0,
-            )
-            == 20000
-        )
-
-    def test_break_out_of_for_of(self):
-        assert (
-            run(
-                "for (var i = 0; i < 20000; i++) { for (var x of [1]) break } i",
-                memory_limit=1024 * 1024,
-                time_limit=30.0,
-            )
-            == 20000
-        )
-
-    def test_break_out_of_switch(self):
-        assert (
-            run(
-                "for (var i = 0; i < 20000; i++) {"
-                " switch (i) { case 0: break; default: break } } i",
-                memory_limit=1024 * 1024,
-                time_limit=30.0,
-            )
-            == 20000
-        )
-
-    def test_continue_from_switch_inside_loop(self):
-        assert (
-            run(
-                "var n = 0; for (var i = 0; i < 20000; i++) {"
-                " switch (i) { default: continue } } i",
-                memory_limit=1024 * 1024,
-                time_limit=30.0,
-            )
-            == 20000
-        )
-
-    def test_labelled_break_out_of_nested_for_in(self):
-        assert (
-            run(
-                "var n = 0; for (var i = 0; i < 20000; i++) {"
-                " outer: for (var a in {x: 1}) { for (var b in {y: 1}) break outer }"
-                " n++ } n",
-                memory_limit=1024 * 1024,
-                time_limit=30.0,
-            )
-            == 20000
-        )
+    @pytest.mark.parametrize(
+        "source",
+        [
+            "for (var i = 0; i < 100; i++) { for (var k in {a: 1}) break }",
+            "for (var i = 0; i < 100; i++) { for (var x of [1]) break }",
+            "for (var i = 0; i < 100; i++) {"
+            " switch (i) { case 0: break; default: break } }",
+            "for (var i = 0; i < 100; i++) { switch (i) { default: continue } }",
+            "for (var i = 0; i < 100; i++) {"
+            " outer: for (var a in {x: 1}) { for (var b in {y: 1}) break outer } }",
+            "for (var i = 0; i < 100; i++) {"
+            " for (var a in {x: 1}) { switch (a) { case 'x': continue } } }",
+        ],
+    )
+    def test_early_exit_pops_stack_values(self, stack_growth, source):
+        assert stack_growth(source) == 0
 
 
 class TestLabels:

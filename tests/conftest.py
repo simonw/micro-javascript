@@ -35,3 +35,17 @@ def test_timeout(request):
         signal.signal(signal.SIGALRM, old_handler)
     else:
         yield
+
+
+@pytest.fixture
+def stack_growth():
+    """Return a function that runs JavaScript and reports how many values it
+    left on the VM's operand stack (anything other than 0 is a leak)."""
+    from microjs import Context
+
+    def measure(source: str) -> int:
+        ctx = Context(time_limit=10.0)
+        ctx.set("depth", lambda: len(ctx._current_vm.stack))
+        return ctx.eval(f"var before = depth();\n{source}\n;depth() - before")
+
+    return measure

@@ -17,7 +17,7 @@ This project provides a JavaScript execution environment with:
 - **An ES5 subset of JavaScript** - the language supported by MicroQuickJS, plus arrow functions and `for...of` (see [Supported features](#supported-features))
 
 > [!WARNING]
-> The sandbox is **not production ready**. Malicious code can still exhaust memory and has not been fully audited against escapes that could allow JavaScript to run arbitrary Python. See the [sandbox issue label](https://github.com/simonw/micro-javascript/issues?q=label%3A%22sandbox%22) for more.
+> The sandbox is **not production ready**. Memory use is estimated rather than measured exactly, and the engine has not been fully audited against escapes that could allow JavaScript to run arbitrary Python. See the [sandbox issue label](https://github.com/simonw/micro-javascript/issues?q=label%3A%22sandbox%22) for more.
 
 ## Interactive demos
 
@@ -137,6 +137,26 @@ def make_point(x, y):
 ctx.set("makePoint", make_point)
 result = ctx.eval("var p = makePoint(10, 20); p.x + p.y;")  # Returns 30
 ```
+
+## Resource limits
+
+`time_limit` is in seconds. It covers everything a script does, including long-running built-in functions and code run by `eval()`.
+
+`memory_limit` is in bytes and applies to the data a script keeps alive, not counting the built-in objects. The engine tallies allocations as they happen; when the tally could exceed the limit it measures everything still reachable, much as a garbage collector would, so a script that creates lots of short-lived garbage is fine. Single large allocations such as `"x".repeat(n)` or `new Array(n)` are refused before they are made. The size of each value is an estimate, so treat the limit as approximate.
+
+Exceeding either limit raises `TimeLimitError` or `MemoryLimitError`, which JavaScript code cannot catch:
+
+```python
+from microjs import Context, MemoryLimitError
+
+ctx = Context(memory_limit=1024 * 1024, time_limit=5.0)
+try:
+    ctx.eval("var s = 'x'; while (true) s = s + s")
+except MemoryLimitError:
+    hit_limit = True  # Returns True
+```
+
+Like other JavaScript engines, micro-javascript also throws a catchable `RangeError` for invalid array lengths, strings longer than 536,870,888 characters and call stacks more than 10,000 calls deep, whether or not limits are set.
 
 ## Handling errors
 

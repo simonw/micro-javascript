@@ -4,16 +4,83 @@ from typing import Any, Dict, List, Optional, Sequence, Union, TYPE_CHECKING
 import contextvars
 import math
 
+from .errors import JSRangeError
 from .numbers import number_to_string, string_to_number
 
 if TYPE_CHECKING:
     from .context import Context
 
 # The VM executing on this thread. Converting an object to a primitive can
-# call its valueOf() or toString(), which needs the running VM.
+# call its valueOf() or toString(), which needs the running VM, as does
+# accounting for memory and time inside native functions.
 CURRENT_VM: contextvars.ContextVar = contextvars.ContextVar(
     "microjs_current_vm", default=None
 )
+
+# The longest string a script can build (V8's limit) and the largest array
+# length; exceeding either is a RangeError whatever the memory limit.
+MAX_STRING_LENGTH = 2**29 - 24
+MAX_ARRAY_LENGTH = 2**32 - 1
+
+
+def charge_memory(nbytes: int) -> None:
+    """Account for allocating about nbytes against the memory limit.
+
+    Call before allocating: raises MemoryLimitError if it will not fit.
+    """
+    vm = CURRENT_VM.get()
+    if vm is not None:
+        vm.charge(nbytes)
+
+
+def check_deadline() -> None:
+    """Raise TimeLimitError if the running script is out of time."""
+    vm = CURRENT_VM.get()
+    if vm is not None:
+        vm.check_deadline()
+
+
+def reserve_string(length: int) -> None:
+    """Check that a string of this length may be created, before creating it."""
+    if length > MAX_STRING_LENGTH:
+        raise JSRangeError("Invalid string length")
+    charge_memory(length + 49)
+
+
+def to_array_length(value: "JSValue") -> int:
+    """Validate a new array length, as new Array(n) and length = n do."""
+    n = to_number(value)
+    if n != n or n < 0 or n > MAX_ARRAY_LENGTH or n != int(n):
+        raise JSRangeError("Invalid array length")
+    return int(n)
+
+
+class OutputBudget:
+    """Checks a string being assembled from parts as it grows.
+
+    Natives that build their result piece by piece (join, replace, ...)
+    add each piece's length; the total is checked against the maximum
+    string length and the memory limit each time it doubles, and the
+    deadline is checked every few thousand pieces.
+    """
+
+    def __init__(self) -> None:
+        self.length = 0
+        self._pieces = 0
+        self._next_check = 4096
+
+    def add(self, length: int) -> None:
+        self.length += length
+        self._pieces += 1
+        if self.length >= self._next_check:
+            reserve_string(self.length)
+            self._next_check = self.length * 2
+        if not self._pieces & 4095:
+            check_deadline()
+
+    def finish(self) -> None:
+        """Check the complete length, just before joining the parts."""
+        reserve_string(self.length)
 
 
 class JSUndefined:
@@ -242,12 +309,24 @@ class JSCallableObject(JSObject):
         return f"JSCallableObject({self._properties})"
 
 
+def grow_array(elements: List["JSValue"], count: int) -> None:
+    """Append count undefined elements, checking memory and time as it goes."""
+    charge_memory(8 * count)
+    while count > 0:
+        chunk = min(count, 1 << 20)
+        elements.extend([UNDEFINED] * chunk)
+        count -= chunk
+        check_deadline()
+
+
 class JSArray(JSObject):
     """JavaScript array."""
 
     def __init__(self, length: int = 0):
         super().__init__()
-        self._elements: List[JSValue] = [UNDEFINED] * length
+        self._elements: List[JSValue] = []
+        if length:
+            grow_array(self._elements, length)
 
     @property
     def length(self) -> int:
@@ -256,9 +335,9 @@ class JSArray(JSObject):
     @length.setter
     def length(self, value: int) -> None:
         if value < len(self._elements):
-            self._elements = self._elements[:value]
+            del self._elements[value:]
         else:
-            self._elements.extend([UNDEFINED] * (value - len(self._elements)))
+            grow_array(self._elements, value - len(self._elements))
 
     def get_index(self, index: int) -> JSValue:
         if 0 <= index < len(self._elements):

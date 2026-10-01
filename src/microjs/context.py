@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 
 from .parser import Parser
 from .compiler import Compiler
-from .vm import VM, JSThrow
+from .vm import VM, JSThrow, heap_size
 from .values import (
     UNDEFINED,
     NULL,
@@ -22,6 +22,7 @@ from .values import (
     JSBoundMethod,
     to_string,
     to_number,
+    to_array_length,
 )
 from .ast_nodes import ExpressionStatement, FunctionExpression
 from .errors import (
@@ -55,14 +56,19 @@ class Context:
         """Create a new JavaScript context.
 
         Args:
-            memory_limit: Maximum memory usage in bytes (approximate)
-            time_limit: Maximum execution time in seconds
+            memory_limit: Maximum bytes of live script data, not counting the
+                built-ins. Value sizes are estimated, so this is approximate.
+            time_limit: Maximum execution time in seconds, per eval() call
         """
         self.memory_limit = memory_limit
         self.time_limit = time_limit
         self._globals: Dict[str, JSValue] = {}
         self._current_vm = None  # Set during eval() for timeout checking
         self._setup_globals()
+        # Memory used by the built-ins, which does not count against the limit
+        self._baseline_bytes = (
+            heap_size(list(self._globals.values())) if memory_limit else 0
+        )
 
     def _setup_globals(self) -> None:
         """Set up built-in global objects and functions."""
@@ -406,7 +412,7 @@ class Context:
 
         def array_constructor(*args):
             if len(args) == 1 and isinstance(args[0], (int, float)):
-                arr = JSArray(int(args[0]))
+                arr = JSArray(to_array_length(args[0]))
             else:
                 arr = JSArray()
                 for arg in args:
@@ -796,9 +802,7 @@ class Context:
 
             # Evaluating the program creates the function object (no
             # user code runs)
-            vm = VM(self.memory_limit, self.time_limit)
-            vm.globals = self._globals
-            return vm.run(bytecode_module)
+            return self._new_vm().run(bytecode_module)
 
         fn_constructor = JSCallableObject(function_constructor_fn)
 
@@ -926,9 +930,7 @@ class Context:
                 # Run inside the current execution so that the time limit
                 # keeps counting and throws reach the caller's handlers
                 return ctx._current_vm.run_nested(compiled)
-            vm = VM(ctx.memory_limit, ctx.time_limit)
-            vm.globals = ctx._globals
-            return vm.run(compiled)
+            return ctx._new_vm().run(compiled)
 
         return eval_fn
 
@@ -976,10 +978,7 @@ class Context:
         compiled = compiler.compile(ast)
 
         # Execute
-        vm = VM(memory_limit=self.memory_limit, time_limit=self.time_limit)
-
-        # Share globals with VM (don't copy - allows nested eval to modify globals)
-        vm.globals = self._globals
+        vm = self._new_vm()
 
         # Store current VM for timeout checking and nested calls; restore the
         # previous one afterwards in case eval() was called re-entrantly
@@ -995,6 +994,14 @@ class Context:
 
         return self._to_python(result)
 
+    def _new_vm(self) -> VM:
+        """Create a VM sharing this context's globals and limits."""
+        vm = VM(memory_limit=self.memory_limit, time_limit=self.time_limit)
+        # Share globals with the VM (not a copy, so eval can modify them)
+        vm.globals = self._globals
+        vm.baseline_bytes = self._baseline_bytes
+        return vm
+
     def _call_function(self, func: JSFunction, args: list) -> Any:
         """Call a JavaScript function with the given arguments.
 
@@ -1004,8 +1011,7 @@ class Context:
             # Run on the active VM so throws unwind into the caller's handlers
             # and the time limit keeps counting from the start of eval()
             return self._current_vm._call_callback(func, args, UNDEFINED)
-        vm = VM(memory_limit=self.memory_limit, time_limit=self.time_limit)
-        vm.globals = self._globals
+        vm = self._new_vm()
         vm.start_time = time.monotonic()
         try:
             return vm._call_callback(func, args, UNDEFINED)

@@ -1,6 +1,7 @@
 """Virtual machine for executing JavaScript bytecode."""
 
 import math
+import sys
 import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 from dataclasses import dataclass, field
@@ -24,6 +25,9 @@ from .values import (
     to_string,
     js_typeof,
     CURRENT_VM,
+    OutputBudget,
+    reserve_string,
+    to_array_length,
 )
 from .errors import (
     JSError,
@@ -121,6 +125,64 @@ class ForOfIterator:
         return value, False
 
 
+# Deepest JavaScript call stack before a RangeError
+MAX_CALL_DEPTH = 10000
+
+
+def heap_size(roots: List[Any]) -> int:
+    """Estimate the bytes used by every JS value reachable from roots."""
+    total = 0
+    seen = set()
+    pending = list(roots)
+    while pending:
+        value = pending.pop()
+        if isinstance(value, str):
+            # Count each large string once; small ones are cheap to recount
+            if len(value) > 256:
+                if id(value) in seen:
+                    continue
+                seen.add(id(value))
+            total += sys.getsizeof(value)
+            continue
+        if value is None or isinstance(value, (bool, int, float, JSUndefined, JSNull)):
+            continue  # Stored inline in the slot that holds them
+        if id(value) in seen:
+            continue
+        seen.add(id(value))
+        if isinstance(value, JSObject):
+            total += 64
+            if isinstance(value, JSArray):
+                total += 8 * len(value._elements)
+                pending.extend(value._elements)
+            elif isinstance(value, JSTypedArray):
+                total += value.length * value._element_size
+            elif isinstance(value, JSArrayBuffer):
+                total += value.byteLength
+            for props in (value._properties, value._getters, value._setters):
+                if props:
+                    total += 64 * len(props)
+                    pending.extend(props.keys())
+                    pending.extend(props.values())
+            if value._prototype is not None:
+                pending.append(value._prototype)
+        elif isinstance(value, JSFunction):
+            total += 256
+            for cell in getattr(value, "_closure_cells", None) or ():
+                pending.append(cell.value)
+            for attr in ("_prototype", "_bound_this", "_original_func"):
+                pending.append(getattr(value, attr, None))
+            pending.extend(getattr(value, "_bound_args", None) or ())
+        elif isinstance(value, ForInIterator):
+            total += 64 + 8 * len(value.keys)
+            pending.extend(value.keys)
+        elif isinstance(value, ForOfIterator):
+            total += 64 + 8 * len(value.values)
+            pending.extend(value.values)
+        else:
+            total += 64  # Native functions and other host objects
+    return total
+
+
 class VM:
     """JavaScript virtual machine."""
 
@@ -138,6 +200,13 @@ class VM:
 
         self.start_time: Optional[float] = None
         self.instruction_count = 0
+
+        # Memory accounting: bytes charged since the heap was last measured,
+        # and how many more may be charged before measuring it again
+        self._allocated = 0
+        self._allocation_budget = memory_limit or 0
+        # Size of the environment (built-ins) not counted against the limit
+        self.baseline_bytes = 0
 
     def run(self, compiled: CompiledFunction) -> JSValue:
         """Run compiled bytecode and return result."""
@@ -193,20 +262,66 @@ class VM:
             raise
 
     def _check_limits(self) -> None:
-        """Check memory and time limits."""
-        self.instruction_count += 1
+        """Check the time limit every 1024 instructions.
 
-        # Check time limit every 1000 instructions
-        if self.time_limit and self.instruction_count % 1000 == 0:
+        Memory is checked when it is allocated, by charge().
+        """
+        self.instruction_count += 1
+        if not self.instruction_count & 1023:
+            self.check_deadline()
+
+    def check_deadline(self) -> None:
+        """Raise TimeLimitError if the time limit has passed."""
+        if self.time_limit is not None:
             if time.monotonic() - self.start_time > self.time_limit:
                 raise TimeLimitError("Execution timeout")
 
-        # Check memory limit (approximate)
-        if self.memory_limit:
-            # Rough estimate: 100 bytes per stack item
-            mem_used = len(self.stack) * 100 + len(self.call_stack) * 200
-            if mem_used > self.memory_limit:
+    def charge(self, nbytes: int) -> None:
+        """Account for an allocation of about nbytes, before it is made.
+
+        Charges are tallied. Once the tally could take the heap past
+        memory_limit, the live heap is measured - as a garbage collector
+        would, only reachable values count - and MemoryLimitError is raised
+        if the allocation does not fit.
+        """
+        if self.memory_limit is None:
+            return
+        self._allocated += nbytes
+        if self._allocated > self._allocation_budget:
+            live = self.measure_heap()
+            if live + nbytes > self.memory_limit:
                 raise MemoryLimitError("Memory limit exceeded")
+            self._allocated = nbytes
+            # Don't re-measure constantly when close to the limit
+            self._allocation_budget = max(
+                self.memory_limit - live, self.memory_limit // 8
+            )
+
+    def measure_heap(self) -> int:
+        """Estimate the bytes of live script data (excluding the baseline)."""
+        roots: List[Any] = list(self.globals.values())
+        roots.extend(self.stack)
+        frames_size = 0
+        for frame in self.call_stack:
+            frames_size += 128 + 8 * len(frame.locals)
+            roots.extend(frame.locals)
+            roots.append(frame.this_value)
+            roots.append(frame.new_target)
+            for cells in (frame.closure_cells, frame.cell_storage):
+                for cell in cells or ():
+                    roots.append(cell.value)
+        return max(0, heap_size(roots) + frames_size - self.baseline_bytes)
+
+    def _charge_result(self, value: JSValue) -> None:
+        """Charge for a value a native function returned."""
+        if self.memory_limit is None:
+            return
+        if isinstance(value, str):
+            self.charge(len(value) + 49)
+        elif isinstance(value, JSArray):
+            self.charge(64 + 8 * len(value._elements))
+        elif isinstance(value, JSObject):
+            self.charge(64 + 64 * len(value._properties))
 
     def _run_frames(self, floor: int) -> JSValue:
         """Execute until the call stack shrinks back to ``floor`` frames.
@@ -384,6 +499,7 @@ class VM:
 
         # Arrays/Objects
         elif op == OpCode.BUILD_ARRAY:
+            self.charge(64 + 8 * arg)
             elements = []
             for _ in range(arg):
                 elements.insert(0, self.stack.pop())
@@ -396,6 +512,7 @@ class VM:
             self.stack.append(arr)
 
         elif op == OpCode.BUILD_OBJECT:
+            self.charge(64 + 64 * arg)
             obj = JSObject()
             # Set prototype from Object constructor
             object_constructor = self.globals.get("Object")
@@ -777,6 +894,7 @@ class VM:
 
         # Closures
         elif op == OpCode.MAKE_CLOSURE:
+            self.charge(512)  # Function, prototype object and cells
             compiled_func = self.stack.pop()
             if isinstance(compiled_func, CompiledFunction):
                 js_func = JSFunction(
@@ -883,7 +1001,10 @@ class VM:
 
         # String concatenation if either is string
         if isinstance(a, str) or isinstance(b, str):
-            return to_string(a) + to_string(b)
+            a_str = to_string(a)
+            b_str = to_string(b)
+            reserve_string(len(a_str) + len(b_str))
+            return a_str + b_str
         # Numeric addition
         return js_number(to_number(a) + to_number(b))
 
@@ -1115,6 +1236,8 @@ class VM:
                 "includes",
                 "replace",
                 "replaceAll",
+                "padStart",
+                "padEnd",
                 "match",
                 "search",
                 "toString",
@@ -1148,6 +1271,7 @@ class VM:
         vm = self  # Reference for closures
 
         def push_fn(*args):
+            vm.charge(8 * len(args))
             for arg in args:
                 arr.push(arg)
             return arr.length
@@ -1161,8 +1285,8 @@ class VM:
             return arr._elements.pop(0)
 
         def unshift_fn(*args):
-            for i, arg in enumerate(args):
-                arr._elements.insert(i, arg)
+            vm.charge(8 * len(args))
+            arr._elements[0:0] = args
             return arr.length
 
         def array_elem_to_string(elem):
@@ -1171,12 +1295,22 @@ class VM:
                 return ""
             return to_string(elem)
 
+        def join_elements(sep):
+            budget = OutputBudget()
+            parts = []
+            for elem in arr._elements:
+                part = array_elem_to_string(elem)
+                budget.add(len(part) + len(sep))
+                parts.append(part)
+            budget.finish()
+            return sep.join(parts)
+
         def toString_fn(*args):
-            return ",".join(array_elem_to_string(elem) for elem in arr._elements)
+            return join_elements(",")
 
         def join_fn(*args):
-            sep = "," if not args else to_string(args[0])
-            return sep.join(array_elem_to_string(elem) for elem in arr._elements)
+            sep = "," if not args or args[0] is UNDEFINED else to_string(args[0])
+            return join_elements(sep)
 
         def map_fn(*args):
             callback = args[0] if args else None
@@ -1242,6 +1376,7 @@ class VM:
                 int(to_number(args[1])) if len(args) > 1 else len(arr._elements) - start
             )
             items = list(args[2:]) if len(args) > 2 else []
+            vm.charge(8 * len(items))
 
             length = len(arr._elements)
             if start < 0:
@@ -1278,6 +1413,8 @@ class VM:
             for i in range(start, len(arr._elements)):
                 if vm._strict_equals(arr._elements[i], search):
                     return i
+                if not i & 4095:
+                    vm.check_deadline()
             return -1
 
         def lastIndexOf_fn(*args):
@@ -1288,6 +1425,8 @@ class VM:
             for i in range(min(start, len(arr._elements) - 1), -1, -1):
                 if vm._strict_equals(arr._elements[i], search):
                     return i
+                if not i & 4095:
+                    vm.check_deadline()
             return -1
 
         def find_fn(*args):
@@ -1331,6 +1470,10 @@ class VM:
             return True
 
         def concat_fn(*args):
+            vm.charge(
+                8 * len(arr._elements)
+                + sum(8 * len(a._elements) for a in args if isinstance(a, JSArray))
+            )
             result = JSArray()
             result._elements = arr._elements[:]
             for arg in args:
@@ -1363,6 +1506,8 @@ class VM:
             for i in range(start, len(arr._elements)):
                 if vm._strict_equals(arr._elements[i], search):
                     return True
+                if not i & 4095:
+                    vm.check_deadline()
             return False
 
         def sort_fn(*args):
@@ -1379,7 +1524,12 @@ class VM:
                     return 1
                 return 0
 
+            comparisons = [0]
+
             def compare_fn(a, b):
+                comparisons[0] += 1
+                if not comparisons[0] & 1023:
+                    vm.check_deadline()
                 # undefined values always sort to the end per JS spec
                 if a is UNDEFINED and b is UNDEFINED:
                     return 0
@@ -1391,10 +1541,9 @@ class VM:
                 if comparator and (
                     callable(comparator) or isinstance(comparator, JSFunction)
                 ):
-                    result = vm._call_callback(comparator, [a, b])
-                    # Convert to integer for cmp_to_key
-                    num = to_number(result) if result is not UNDEFINED else 0
-                    return int(num) if isinstance(num, (int, float)) else 0
+                    num = to_number(vm._call_callback(comparator, [a, b]))
+                    # Only the sign matters; NaN counts as equal
+                    return (num > 0) - (num < 0)
                 return default_compare(a, b)
 
             # Sort using Python's sort with custom key
@@ -1815,6 +1964,13 @@ class VM:
         def split(*args):
             sep = args[0] if args else UNDEFINED
             limit = int(to_number(args[1])) if len(args) > 1 else -1
+            if isinstance(sep, str) or (
+                sep is not UNDEFINED and not isinstance(sep, JSRegExp)
+            ):
+                # Charge for the pieces before making them
+                sep_str = to_string(sep)
+                pieces = len(s) if sep_str == "" else s.count(sep_str) + 1
+                self.charge(64 * pieces + len(s))
 
             if sep is UNDEFINED:
                 parts = [s]
@@ -1881,16 +2037,41 @@ class VM:
             return s.rstrip()
 
         def concat(*args):
-            result = s
-            for arg in args:
-                result += to_string(arg)
-            return result
+            parts = [s] + [to_string(arg) for arg in args]
+            reserve_string(sum(len(part) for part in parts))
+            return "".join(parts)
 
         def repeat(*args):
-            count = int(to_number(args[0])) if args else 0
-            if count < 0:
-                raise JSReferenceError("Invalid count value")
+            count = to_number(args[0]) if args else 0
+            if count != count:
+                count = 0
+            if count < 0 or count == float("inf"):
+                raise JSRangeError("Invalid count value")
+            count = int(count)
+            reserve_string(len(s) * count)
             return s * count
+
+        def pad(args, at_start):
+            target = to_number(args[0]) if args else 0
+            target = 0 if target != target else target
+            filler = " "
+            if len(args) > 1 and args[1] is not UNDEFINED:
+                filler = to_string(args[1])
+            if target <= len(s) or not filler:
+                return s
+            if target == float("inf"):
+                raise JSRangeError("Invalid string length")
+            target = int(target)
+            reserve_string(target)
+            needed = target - len(s)
+            padding = (filler * (needed // len(filler) + 1))[:needed]
+            return padding + s if at_start else s + padding
+
+        def padStart(*args):
+            return pad(args, at_start=True)
+
+        def padEnd(*args):
+            return pad(args, at_start=False)
 
         def startsWith(*args):
             search = to_string(args[0]) if args else ""
@@ -1935,6 +2116,7 @@ class VM:
                     capture_count = regex_internal._capture_count
 
                     result_parts = []
+                    budget = OutputBudget()
                     last_end = 0
                     pos = 0
 
@@ -1949,10 +2131,11 @@ class VM:
                         # _capture_count includes group 0, the whole match
                         captures = [match_result[i] for i in range(1, capture_count)]
                         # Add the part before this match, then the replacement
-                        result_parts.append(s[last_end : match_result.index])
-                        result_parts.append(
-                            replacer(matched, match_result.index, captures)
-                        )
+                        before = s[last_end : match_result.index]
+                        replacement = replacer(matched, match_result.index, captures)
+                        budget.add(len(before) + len(replacement))
+                        result_parts.append(before)
+                        result_parts.append(replacement)
 
                         # Move past the match
                         last_end = match_result.index + len(matched)
@@ -1963,6 +2146,8 @@ class VM:
 
                     # Add remainder after last match
                     result_parts.append(s[last_end:])
+                    budget.add(len(s) - last_end)
+                    budget.finish()
                     return "".join(result_parts)
                 except RegexTimeoutError:
                     raise TimeLimitError("Regex execution timeout")
@@ -1996,12 +2181,18 @@ class VM:
                     positions.append(idx)
                     idx = s.find(search, idx + len(search))
             parts = []
+            budget = OutputBudget()
             last_end = 0
             for idx in positions:
-                parts.append(s[last_end:idx])
-                parts.append(replacer(search, idx, []))
+                before = s[last_end:idx]
+                replacement = replacer(search, idx, [])
+                budget.add(len(before) + len(replacement))
+                parts.append(before)
+                parts.append(replacement)
                 last_end = idx + len(search)
             parts.append(s[last_end:])
+            budget.add(len(s) - last_end)
+            budget.finish()
             return "".join(parts)
 
         def match(*args):
@@ -2125,6 +2316,8 @@ class VM:
             "includes": includes,
             "replace": replace,
             "replaceAll": replaceAll,
+            "padStart": padStart,
+            "padEnd": padEnd,
             "match": match,
             "search": search,
             "toString": toString,
@@ -2152,14 +2345,15 @@ class VM:
         if isinstance(obj, JSArray):
             # Special handling for length property
             if key_str == "length":
-                new_len = int(to_number(value))
-                obj.length = new_len
+                obj.length = to_array_length(value)
                 return
             # Strict array mode: reject non-integer indices
             # Valid indices are integer strings in range [0, 2^32-2]
             try:
                 idx = int(key_str)
                 if idx >= 0 and str(idx) == key_str:
+                    if idx == len(obj._elements):
+                        self.charge(8)
                     obj.set_index(idx, value)
                     return
             except (ValueError, IndexError):
@@ -2187,6 +2381,8 @@ class VM:
             if setter is not None:
                 self._invoke_setter(setter, obj, value)
             else:
+                if key_str not in obj._properties:
+                    self.charge(64 + len(key_str))
                 obj.set(key_str, value)
 
     def _delete_property(self, obj: JSValue, key: JSValue) -> bool:
@@ -2225,6 +2421,7 @@ class VM:
         elif callable(callee):
             # Native function
             result = callee(*args)
+            self._charge_result(result)
             self.stack.append(result if result is not None else UNDEFINED)
         else:
             raise JSTypeError(f"{callee} is not a function")
@@ -2240,9 +2437,11 @@ class VM:
         elif isinstance(method, JSBoundMethod):
             # JSBoundMethod expects this_val as first argument
             result = method(this_val, *args)
+            self._charge_result(result)
             self.stack.append(result if result is not None else UNDEFINED)
         elif callable(method):
             result = method(*args)
+            self._charge_result(result)
             self.stack.append(result if result is not None else UNDEFINED)
         else:
             raise JSTypeError(f"{method} is not a function")
@@ -2288,6 +2487,9 @@ class VM:
         compiled = getattr(func, "_compiled", None)
         if compiled is None:
             raise JSTypeError("Function has no bytecode")
+        if len(self.call_stack) >= MAX_CALL_DEPTH:
+            raise JSRangeError("Maximum call stack size exceeded")
+        self.charge(192 + 8 * (compiled.num_locals + len(args)))
 
         # Prepare locals (parameters + arguments + local variables)
         locals_list = [UNDEFINED] * compiled.num_locals
@@ -2361,6 +2563,7 @@ class VM:
         elif isinstance(constructor, JSObject) and hasattr(constructor, "_call_fn"):
             # Built-in constructor (like Object, Array, RegExp)
             result = constructor._call_fn(*args)
+            self._charge_result(result)
             self.stack.append(result)
         else:
             raise JSTypeError(f"{constructor} is not a constructor")

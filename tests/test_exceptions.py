@@ -24,27 +24,21 @@ class TestHandlerUnwinding:
                 "f(); nope"
             )
 
-    def test_caught_exceptions_do_not_leak_stack(self):
+    def test_caught_exceptions_do_not_leak_stack(self, stack_growth):
         """Catching an exception discards values pushed inside the try block."""
-        ctx = Context(memory_limit=1024 * 1024, time_limit=20.0)
-        result = ctx.eval("""
+        assert stack_growth("""
             var n = 0;
-            for (var i = 0; i < 20000; i++) {
+            for (var i = 0; i < 100; i++) {
                 try { n = 1 + (function () { throw 1 })() } catch (e) { n++ }
             }
-            n
-        """)
-        assert result == 20000
+        """) == 0
 
-    def test_return_from_for_in_does_not_leak_stack(self):
+    def test_return_from_for_in_does_not_leak_stack(self, stack_growth):
         """Returning from inside a for-in loop discards the iterator."""
-        ctx = Context(memory_limit=1024 * 1024, time_limit=20.0)
-        result = ctx.eval("""
+        assert stack_growth("""
             function f() { for (var k in {a: 1}) return k }
-            for (var i = 0; i < 20000; i++) f();
-            i
-        """)
-        assert result == 20000
+            for (var i = 0; i < 100; i++) f();
+        """) == 0
 
 
 class TestThrowAcrossNativeCallbacks:

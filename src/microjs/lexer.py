@@ -3,6 +3,12 @@
 from typing import Iterator, Optional
 from .tokens import Token, TokenType, KEYWORDS
 from .errors import JSSyntaxError
+from .numbers import js_number
+
+
+def _is_digit(ch) -> bool:
+    """Whether ch is an ASCII decimal digit (str.isdigit accepts others)."""
+    return bool(ch) and "0" <= ch <= "9"
 
 
 class Lexer:
@@ -172,7 +178,7 @@ class Lexer:
                     hex_str += self._advance()
                 if not hex_str:
                     raise JSSyntaxError("Invalid hex literal", line, col)
-                return int(hex_str, 16)
+                return js_number(int(hex_str, 16))
             elif next_ch and next_ch in "oO":
                 # Octal
                 self._advance()  # 0
@@ -182,7 +188,7 @@ class Lexer:
                     oct_str += self._advance()
                 if not oct_str:
                     raise JSSyntaxError("Invalid octal literal", line, col)
-                return int(oct_str, 8)
+                return js_number(int(oct_str, 8))
             elif next_ch and next_ch in "bB":
                 # Binary
                 self._advance()  # 0
@@ -192,19 +198,19 @@ class Lexer:
                     bin_str += self._advance()
                 if not bin_str:
                     raise JSSyntaxError("Invalid binary literal", line, col)
-                return int(bin_str, 2)
+                return js_number(int(bin_str, 2))
             # Could be 0, 0.xxx, or 0e... - fall through to decimal handling
 
         # Decimal number (integer part)
-        while self._current() and self._current().isdigit():
+        while _is_digit(self._current()):
             self._advance()
 
         # Decimal point
         is_float = False
-        if self._current() == "." and self._peek().isdigit():
+        if self._current() == "." and _is_digit(self._peek()):
             is_float = True
             self._advance()  # .
-            while self._current() and self._current().isdigit():
+            while _is_digit(self._current()):
                 self._advance()
 
         # Exponent
@@ -213,15 +219,15 @@ class Lexer:
             self._advance()
             if self._current() in "+-":
                 self._advance()
-            if not self._current() or not self._current().isdigit():
+            if not _is_digit(self._current()):
                 raise JSSyntaxError("Invalid number literal", line, col)
-            while self._current() and self._current().isdigit():
+            while _is_digit(self._current()):
                 self._advance()
 
         num_str = self.source[start : self.pos]
         if is_float:
             return float(num_str)
-        return int(num_str)
+        return js_number(int(num_str))
 
     def _read_identifier(self) -> str:
         """Read an identifier."""

@@ -1,10 +1,19 @@
 """JavaScript value types."""
 
 from typing import Any, Dict, List, Optional, Sequence, Union, TYPE_CHECKING
+import contextvars
 import math
+
+from .numbers import number_to_string, string_to_number
 
 if TYPE_CHECKING:
     from .context import Context
+
+# The VM executing on this thread. Converting an object to a primitive can
+# call its valueOf() or toString(), which needs the running VM.
+CURRENT_VM: contextvars.ContextVar = contextvars.ContextVar(
+    "microjs_current_vm", default=None
+)
 
 
 class JSUndefined:
@@ -118,7 +127,7 @@ def to_boolean(value: JSValue) -> bool:
 
 
 def to_number(value: JSValue) -> Union[int, float]:
-    """Convert a JavaScript value to number."""
+    """Convert a JavaScript value to number (ToNumber)."""
     if value is UNDEFINED:
         return float("nan")
     if value is NULL:
@@ -128,53 +137,30 @@ def to_number(value: JSValue) -> Union[int, float]:
     if isinstance(value, (int, float)):
         return value
     if isinstance(value, str):
-        s = value.strip()
-        if s == "":
-            return 0
-        try:
-            if "." in s or "e" in s.lower():
-                return float(s)
-            if s.startswith("0x") or s.startswith("0X"):
-                return int(s, 16)
-            if s.startswith("0o") or s.startswith("0O"):
-                return int(s, 8)
-            if s.startswith("0b") or s.startswith("0B"):
-                return int(s, 2)
-            return int(s)
-        except ValueError:
-            return float("nan")
-    # TODO: Handle objects with valueOf
+        return string_to_number(value)
+    if isinstance(value, JSObject):
+        vm = CURRENT_VM.get()
+        if vm is not None:
+            return to_number(vm._to_primitive(value, "number"))
     return float("nan")
 
 
 def to_string(value: JSValue) -> str:
-    """Convert a JavaScript value to string."""
+    """Convert a JavaScript value to string (ToString)."""
     if value is UNDEFINED:
         return "undefined"
     if value is NULL:
         return "null"
     if isinstance(value, bool):
         return "true" if value else "false"
-    if isinstance(value, int):
-        return str(value)
-    if isinstance(value, float):
-        if is_nan(value):
-            return "NaN"
-        if value == float("inf"):
-            return "Infinity"
-        if value == float("-inf"):
-            return "-Infinity"
-        # Handle -0
-        if value == 0 and math.copysign(1, value) < 0:
-            return "0"
-        # Format float nicely
-        s = repr(value)
-        if s.endswith(".0"):
-            return s[:-2]
-        return s
+    if isinstance(value, (int, float)):
+        return number_to_string(value)
     if isinstance(value, str):
         return value
-    # TODO: Handle objects with toString
+    if isinstance(value, JSObject):
+        vm = CURRENT_VM.get()
+        if vm is not None:
+            return to_string(vm._to_primitive(value, "string"))
     return "[object Object]"
 
 

@@ -23,6 +23,7 @@ from .values import (
     to_number,
     to_string,
     js_typeof,
+    CURRENT_VM,
 )
 from .errors import (
     JSError,
@@ -32,6 +33,17 @@ from .errors import (
     JSReferenceError,
     MemoryLimitError,
     TimeLimitError,
+)
+from .numbers import (
+    js_number,
+    js_pow,
+    js_remainder,
+    number_to_radix_string,
+    to_exponential,
+    to_fixed,
+    to_precision,
+    to_int32,
+    to_uint32,
 )
 from .regex import RegExpError, RegexTimeoutError
 
@@ -47,21 +59,6 @@ class JSThrow(Exception):
     def __init__(self, value: JSValue):
         super().__init__(value)
         self.value = value
-
-
-def js_round(x: float, ndigits: int = 0) -> float:
-    """Round using JavaScript-style 'round half away from zero' instead of Python's 'round half to even'."""
-    if ndigits == 0:
-        if x >= 0:
-            return math.floor(x + 0.5)
-        else:
-            return math.ceil(x - 0.5)
-    else:
-        multiplier = 10**ndigits
-        if x >= 0:
-            return math.floor(x * multiplier + 0.5) / multiplier
-        else:
-            return math.ceil(x * multiplier - 0.5) / multiplier
 
 
 @dataclass
@@ -156,11 +153,14 @@ class VM:
         )
         self.call_stack.append(frame)
 
+        token = CURRENT_VM.set(self)
         try:
             return self._run_frames(0)
         except JSThrow as e:
             error = self._uncaught_error(e.value)
             raise error from error.__cause__
+        finally:
+            CURRENT_VM.reset(token)
 
     def run_nested(self, compiled: CompiledFunction) -> JSValue:
         """Run a compiled program inside the current execution.
@@ -446,14 +446,18 @@ class VM:
         elif op == OpCode.SUB:
             b = self.stack.pop()
             a = self.stack.pop()
-            self.stack.append(to_number(a) - to_number(b))
+            self.stack.append(js_number(to_number(a) - to_number(b)))
 
         elif op == OpCode.MUL:
             b = self.stack.pop()
             a = self.stack.pop()
-            a_num = float(self._to_number(a))  # Use float for proper -0 handling
-            b_num = float(self._to_number(b))
-            self.stack.append(a_num * b_num)
+            a_num = to_number(a)
+            b_num = to_number(b)
+            if a_num == 0 or b_num == 0:
+                # Floats keep the sign of zero: 0 * -1 is -0
+                self.stack.append(float(a_num) * float(b_num))
+            else:
+                self.stack.append(js_number(a_num * b_num))
 
         elif op == OpCode.DIV:
             b = self.stack.pop()
@@ -475,17 +479,14 @@ class VM:
         elif op == OpCode.MOD:
             b = self.stack.pop()
             a = self.stack.pop()
-            b_num = to_number(b)
             a_num = to_number(a)
-            if b_num == 0:
-                self.stack.append(float("nan"))
-            else:
-                self.stack.append(a_num % b_num)
+            self.stack.append(js_remainder(a_num, to_number(b)))
 
         elif op == OpCode.POW:
             b = self.stack.pop()
             a = self.stack.pop()
-            self.stack.append(to_number(a) ** to_number(b))
+            a_num = to_number(a)
+            self.stack.append(js_pow(a_num, to_number(b)))
 
         elif op == OpCode.NEG:
             a = self.stack.pop()
@@ -768,11 +769,11 @@ class VM:
         # Increment/Decrement
         elif op == OpCode.INC:
             a = self.stack.pop()
-            self.stack.append(to_number(a) + 1)
+            self.stack.append(js_number(to_number(a) + 1))
 
         elif op == OpCode.DEC:
             a = self.stack.pop()
-            self.stack.append(to_number(a) - 1)
+            self.stack.append(js_number(to_number(a) - 1))
 
         # Closures
         elif op == OpCode.MAKE_CLOSURE:
@@ -870,8 +871,6 @@ class VM:
 
     def _to_number(self, value: JSValue) -> Union[int, float]:
         """Convert to number, with ToPrimitive for objects."""
-        if isinstance(value, JSObject):
-            value = self._to_primitive(value, "number")
         return to_number(value)
 
     def _add(self, a: JSValue, b: JSValue) -> JSValue:
@@ -886,26 +885,15 @@ class VM:
         if isinstance(a, str) or isinstance(b, str):
             return to_string(a) + to_string(b)
         # Numeric addition
-        return to_number(a) + to_number(b)
+        return js_number(to_number(a) + to_number(b))
 
     def _to_int32(self, value: JSValue) -> int:
         """Convert to 32-bit signed integer."""
-        n = to_number(value)
-        if math.isnan(n) or math.isinf(n) or n == 0:
-            return 0
-        n = int(n)
-        n = n & 0xFFFFFFFF
-        if n >= 0x80000000:
-            n -= 0x100000000
-        return n
+        return to_int32(to_number(value))
 
     def _to_uint32(self, value: JSValue) -> int:
         """Convert to 32-bit unsigned integer."""
-        n = to_number(value)
-        if math.isnan(n) or math.isinf(n) or n == 0:
-            return 0
-        n = int(n)
-        return n & 0xFFFFFFFF
+        return to_uint32(to_number(value))
 
     def _compare(self, a: JSValue, b: JSValue) -> int:
         """Compare two values. Returns -1, 0, or 1."""
@@ -1672,130 +1660,44 @@ class VM:
         """Create a bound number method."""
 
         def toFixed(*args):
-            digits = int(to_number(args[0])) if args else 0
+            digits = to_number(args[0]) if args else 0
+            digits = 0 if digits != digits else int(digits)
             if digits < 0 or digits > 100:
-                raise JSReferenceError("toFixed() digits out of range")
-            # Use JavaScript-style rounding (round half away from zero)
-            rounded = js_round(n, digits)
-            result = f"{rounded:.{digits}f}"
-            # Handle negative zero: if n was negative but rounded to 0, keep the sign
-            if n < 0 or (n == 0 and math.copysign(1, n) == -1):
-                if rounded == 0:
-                    result = "-" + result.lstrip("-")
-            return result
+                raise JSRangeError(
+                    "toFixed() digits argument must be between 0 and 100"
+                )
+            return to_fixed(n, digits)
 
         def toString(*args):
-            radix = int(to_number(args[0])) if args else 10
+            radix = 10
+            if args and args[0] is not UNDEFINED:
+                radix = to_number(args[0])
+                radix = 0 if radix != radix else int(radix)
             if radix < 2 or radix > 36:
-                raise JSReferenceError("toString() radix must be between 2 and 36")
+                raise JSRangeError("toString() radix must be between 2 and 36")
             if radix == 10:
-                if isinstance(n, float) and n.is_integer():
-                    return str(int(n))
-                return str(n)
-            # Convert to different base
-            if n < 0:
-                return "-" + self._number_to_base(-n, radix)
-            return self._number_to_base(n, radix)
+                return to_string(n)
+            return number_to_radix_string(n, radix)
 
         def toExponential(*args):
-            import math
-
+            digits = None
             if args and args[0] is not UNDEFINED:
-                digits = int(to_number(args[0]))
-            else:
-                digits = None
-
-            if math.isnan(n):
-                return "NaN"
-            if math.isinf(n):
-                return "-Infinity" if n < 0 else "Infinity"
-
-            if digits is None:
-                # Default precision - minimal representation
-                # Use repr-style formatting and convert to exponential
-                if n == 0:
-                    return "0e+0"
-                sign = "-" if n < 0 else ""
-                abs_n = abs(n)
-                exp = int(math.floor(math.log10(abs_n)))
-                mantissa = abs_n / (10**exp)
-                # Format mantissa without trailing zeros
-                mantissa_str = f"{mantissa:.15g}".rstrip("0").rstrip(".")
-                exp_sign = "+" if exp >= 0 else ""
-                return f"{sign}{mantissa_str}e{exp_sign}{exp}"
-            else:
-                if digits < 0 or digits > 100:
-                    raise JSReferenceError("toExponential() digits out of range")
-                # Round to specified digits
-                if n == 0:
-                    return "0" + ("." + "0" * digits if digits > 0 else "") + "e+0"
-                sign = "-" if n < 0 else ""
-                abs_n = abs(n)
-                exp = int(math.floor(math.log10(abs_n)))
-                mantissa = abs_n / (10**exp)
-                # Round mantissa to specified digits using JS-style rounding
-                rounded = js_round(mantissa, digits)
-                if rounded >= 10:
-                    rounded /= 10
-                    exp += 1
-                if digits == 0:
-                    mantissa_str = str(int(js_round(rounded)))
-                else:
-                    mantissa_str = f"{rounded:.{digits}f}"
-                exp_sign = "+" if exp >= 0 else ""
-                return f"{sign}{mantissa_str}e{exp_sign}{exp}"
+                digits = to_number(args[0])
+                digits = 0 if digits != digits else int(digits)
+            if digits is not None and math.isfinite(n) and not 0 <= digits <= 100:
+                raise JSRangeError("toExponential() digits must be between 0 and 100")
+            return to_exponential(n, digits)
 
         def toPrecision(*args):
-            import math
-
             if not args or args[0] is UNDEFINED:
-                if isinstance(n, float) and n.is_integer():
-                    return str(int(n))
-                return str(n)
-
-            precision = int(to_number(args[0]))
-            if precision < 1 or precision > 100:
-                raise JSReferenceError("toPrecision() precision out of range")
-
-            if math.isnan(n):
-                return "NaN"
-            if math.isinf(n):
-                return "-Infinity" if n < 0 else "Infinity"
-
-            if n == 0:
-                if precision == 1:
-                    return "0"
-                return "0." + "0" * (precision - 1)
-
-            sign = "-" if n < 0 else ""
-            abs_n = abs(n)
-            exp = int(math.floor(math.log10(abs_n)))
-
-            # Decide if we use exponential or fixed notation
-            if exp < -6 or exp >= precision:
-                # Use exponential notation
-                mantissa = abs_n / (10**exp)
-                rounded = js_round(mantissa, precision - 1)
-                if rounded >= 10:
-                    rounded /= 10
-                    exp += 1
-                if precision == 1:
-                    mantissa_str = str(int(js_round(rounded)))
-                else:
-                    mantissa_str = f"{rounded:.{precision - 1}f}"
-                exp_sign = "+" if exp >= 0 else ""
-                return f"{sign}{mantissa_str}e{exp_sign}{exp}"
-            else:
-                # Use fixed notation
-                # Calculate digits after decimal
-                if exp >= 0:
-                    decimal_places = max(0, precision - exp - 1)
-                else:
-                    decimal_places = precision - 1 - exp
-                rounded = js_round(abs_n, decimal_places)
-                if decimal_places <= 0:
-                    return f"{sign}{int(rounded)}"
-                return f"{sign}{rounded:.{decimal_places}f}"
+                return to_string(n)
+            precision = to_number(args[0])
+            precision = 0 if precision != precision else int(precision)
+            if not math.isfinite(n):
+                return to_string(n)
+            if not 1 <= precision <= 100:
+                raise JSRangeError("toPrecision() precision must be between 1 and 100")
+            return to_precision(n, precision)
 
         def valueOf(*args):
             return n
@@ -1808,21 +1710,6 @@ class VM:
             "valueOf": valueOf,
         }
         return methods.get(method, lambda *args: UNDEFINED)
-
-    def _number_to_base(self, n: float, radix: int) -> str:
-        """Convert number to string in given base."""
-        if n != int(n):
-            # For non-integers, just use base 10
-            return str(n)
-        n = int(n)
-        if n == 0:
-            return "0"
-        digits = "0123456789abcdefghijklmnopqrstuvwxyz"
-        result = []
-        while n:
-            result.append(digits[n % radix])
-            n //= radix
-        return "".join(reversed(result))
 
     @staticmethod
     def _get_substitution(

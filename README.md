@@ -179,6 +179,8 @@ Point.prototype.sum = function () { return this.x + this.y; };
 new Point(1, 2).sum();  // => 3
 var temp = { c: 20, get f() { return this.c * 9 / 5 + 32; } };
 temp.f;  // => 68
+var key = "dynamic";
+({ [key]: 1 }).dynamic;  // => 1
 
 // Labelled break, for...in and for...of
 var found = null;
@@ -199,6 +201,7 @@ caught;  // => "TypeError!"
 // Regular expressions, including lookbehind
 /(\d+)-(\d+)/.exec("10-20");  // => ["10-20", "10", "20"]
 "2026-10-01".replace(/-/g, "/");  // => "2026/10/01"
+"a1b2".replace(/\d/g, d => d * 2);  // => "a2b4"
 /(?<=\$)\d+/.exec("cost: $42")[0];  // => "42"
 
 // JSON, Math and typed arrays

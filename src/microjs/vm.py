@@ -1850,6 +1850,57 @@ class VM:
             n //= radix
         return "".join(reversed(result))
 
+    @staticmethod
+    def _get_substitution(
+        template: str, matched: str, string: str, position: int, captures: List
+    ) -> str:
+        """Expand $$, $&, $`, $' and $n/$nn in a replacement string."""
+        result = []
+        i = 0
+        n = len(template)
+        while i < n:
+            ch = template[i]
+            if ch != "$" or i + 1 >= n:
+                result.append(ch)
+                i += 1
+                continue
+            nxt = template[i + 1]
+            if nxt == "$":
+                result.append("$")
+            elif nxt == "&":
+                result.append(matched)
+            elif nxt == "`":
+                result.append(string[:position])
+            elif nxt == "'":
+                result.append(string[position + len(matched) :])
+            elif "0" <= nxt <= "9":
+                # Prefer a two-digit group number when that group exists
+                two = template[i + 1 : i + 3]
+                if (
+                    len(two) == 2
+                    and "0" <= two[1] <= "9"
+                    and 1 <= int(two) <= len(captures)
+                ):
+                    group, width = int(two), 2
+                elif 1 <= int(nxt) <= len(captures):
+                    group, width = int(nxt), 1
+                else:
+                    result.append("$")
+                    i += 1
+                    continue
+                capture = captures[group - 1]
+                result.append(
+                    "" if capture is None or capture is UNDEFINED else capture
+                )
+                i += 1 + width
+                continue
+            else:
+                result.append("$")
+                i += 1
+                continue
+            i += 2
+        return "".join(result)
+
     def _make_string_method(self, s: str, method: str) -> Any:
         """Create a bound string method."""
 
@@ -1995,9 +2046,25 @@ class VM:
             pos = int(to_number(args[1])) if len(args) > 1 else 0
             return search in s[pos:]
 
+        def make_replacer(replacement):
+            """Return f(matched, position, captures) giving the replacement text."""
+            if isinstance(replacement, JSFunction) or callable(replacement):
+                # Called with (match, ...captures, offset, string)
+                def call(matched, position, captures):
+                    args = [matched]
+                    args += [UNDEFINED if c is None else c for c in captures]
+                    args += [position, s]
+                    return to_string(self._call_callback(replacement, args))
+
+                return call
+            template = to_string(replacement)
+            return lambda matched, position, captures: self._get_substitution(
+                template, matched, s, position, captures
+            )
+
         def replace(*args):
             pattern = args[0] if args else ""
-            replacement = to_string(args[1]) if len(args) > 1 else "undefined"
+            replacer = make_replacer(args[1] if len(args) > 1 else UNDEFINED)
 
             if isinstance(pattern, JSRegExp):
                 # Replace with regex using microjs.regex
@@ -2005,23 +2072,6 @@ class VM:
                     regex_internal = pattern._internal
                     is_global = "g" in pattern._flags
                     capture_count = regex_internal._capture_count
-
-                    # Handle special replacement patterns
-                    def handle_replacement(match_result):
-                        result = replacement
-                        # Handle $$ escape first (must be done before other $ patterns)
-                        result = result.replace("$$", "\x00DOLLAR\x00")
-                        # $& - the matched substring
-                        result = result.replace("$&", match_result[0] or "")
-                        # $n - nth captured group
-                        for i in range(1, 10):
-                            if i <= capture_count:
-                                result = result.replace(f"${i}", match_result[i] or "")
-                            else:
-                                result = result.replace(f"${i}", "")
-                        # Restore escaped dollars
-                        result = result.replace("\x00DOLLAR\x00", "$")
-                        return result
 
                     result_parts = []
                     last_end = 0
@@ -2034,15 +2084,18 @@ class VM:
                         if match_result is None:
                             break
 
-                        # Add the part before this match
+                        matched = match_result[0] or ""
+                        # _capture_count includes group 0, the whole match
+                        captures = [match_result[i] for i in range(1, capture_count)]
+                        # Add the part before this match, then the replacement
                         result_parts.append(s[last_end : match_result.index])
-                        # Add the replacement
-                        result_parts.append(handle_replacement(match_result))
+                        result_parts.append(
+                            replacer(matched, match_result.index, captures)
+                        )
 
                         # Move past the match
-                        match_len = len(match_result[0]) if match_result[0] else 0
-                        last_end = match_result.index + match_len
-                        pos = last_end if match_len > 0 else match_result.index + 1
+                        last_end = match_result.index + len(matched)
+                        pos = last_end if matched else match_result.index + 1
 
                         if not is_global:
                             break
@@ -2053,42 +2106,42 @@ class VM:
                 except RegexTimeoutError:
                     raise TimeLimitError("Regex execution timeout")
             else:
-                # String replace - only replace first occurrence
+                # String pattern: replace the first occurrence only
                 search = to_string(pattern)
-                # Handle special replacement patterns
-                repl = replacement
-                if "$$" in repl:
-                    repl = repl.replace("$$", "\x00DOLLAR\x00")
-                if "$&" in repl:
-                    repl = repl.replace("$&", search)
-                repl = repl.replace("\x00DOLLAR\x00", "$")
-                # Find first occurrence and replace
                 idx = s.find(search)
-                if idx >= 0:
-                    return s[:idx] + repl + s[idx + len(search) :]
-                return s
+                if idx < 0:
+                    return s
+                return s[:idx] + replacer(search, idx, []) + s[idx + len(search) :]
 
         def replaceAll(*args):
             pattern = args[0] if args else ""
-            replacement = to_string(args[1]) if len(args) > 1 else "undefined"
+            replacement = args[1] if len(args) > 1 else UNDEFINED
 
             if isinstance(pattern, JSRegExp):
                 # replaceAll with regex requires global flag
                 if "g" not in pattern._flags:
                     raise JSTypeError("replaceAll called with a non-global RegExp")
                 return replace(pattern, replacement)
+
+            # String pattern: replace every non-overlapping occurrence
+            search = to_string(pattern)
+            replacer = make_replacer(replacement)
+            if search == "":
+                positions = list(range(len(s) + 1))
             else:
-                # String replaceAll - replace all occurrences
-                search = to_string(pattern)
-                # Handle special replacement patterns
-                if "$$" in replacement:
-                    # $$ -> $ (must be done before other replacements)
-                    replacement = replacement.replace("$$", "\x00DOLLAR\x00")
-                if "$&" in replacement:
-                    # $& -> the matched substring
-                    replacement = replacement.replace("$&", search)
-                replacement = replacement.replace("\x00DOLLAR\x00", "$")
-                return s.replace(search, replacement)
+                positions = []
+                idx = s.find(search)
+                while idx >= 0:
+                    positions.append(idx)
+                    idx = s.find(search, idx + len(search))
+            parts = []
+            last_end = 0
+            for idx in positions:
+                parts.append(s[last_end:idx])
+                parts.append(replacer(search, idx, []))
+                last_end = idx + len(search)
+            parts.append(s[last_end:])
+            return "".join(parts)
 
         def match(*args):
             pattern = args[0] if args else None

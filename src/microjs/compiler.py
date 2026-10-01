@@ -1239,8 +1239,8 @@ class Compiler:
 
         elif isinstance(node, ObjectExpression):
             for prop in node.properties:
-                # Key
-                if isinstance(prop.key, Identifier):
+                # Key: a name, or an expression if computed ({[expr]: value})
+                if isinstance(prop.key, Identifier) and not prop.computed:
                     idx = self._add_constant(prop.key.name)
                     self._emit(OpCode.LOAD_CONST, idx)
                 else:

@@ -1,5 +1,6 @@
 """JavaScript value types."""
 
+from types import MappingProxyType
 from typing import Any, Dict, List, Optional, Sequence, Union, TYPE_CHECKING
 import contextvars
 import math
@@ -247,10 +248,13 @@ class JSObject:
     _sealed: bool = False
     _frozen: bool = False
 
+    # Getters and setters are rare, so objects share an empty read-only
+    # mapping until define_getter/define_setter gives them their own
+    _getters: Any = MappingProxyType({})  # property name -> getter function
+    _setters: Any = MappingProxyType({})  # property name -> setter function
+
     def __init__(self, prototype: Optional["JSObject"] = None):
         self._properties: Dict[str, JSValue] = {}
-        self._getters: Dict[str, Any] = {}  # property name -> getter function
-        self._setters: Dict[str, Any] = {}  # property name -> setter function
         self._prototype = prototype
 
     def get(self, key: str) -> JSValue:
@@ -279,10 +283,14 @@ class JSObject:
 
     def define_getter(self, key: str, getter: Any) -> None:
         """Define a getter for a property."""
+        if type(self._getters) is not dict:
+            self._getters = {}
         self._getters[key] = getter
 
     def define_setter(self, key: str, setter: Any) -> None:
         """Define a setter for a property."""
+        if type(self._setters) is not dict:
+            self._setters = {}
         self._setters[key] = setter
 
     def check_writable(self, key: str) -> None:

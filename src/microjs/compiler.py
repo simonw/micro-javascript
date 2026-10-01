@@ -73,6 +73,8 @@ class CompiledFunction:
     source_map: Dict[int, Tuple[int, int]] = field(
         default_factory=dict
     )  # bytecode_pos -> (line, column)
+    # Whether the body mentions `arguments` (if not, calls skip creating it)
+    uses_arguments: bool = True
 
 
 @dataclass
@@ -420,6 +422,21 @@ class Compiler:
                 handler.param = self._renamed(handler.param, new)
                 self._rename_refs(handler.body, old, new)
             stack.extend(self._child_nodes(node))
+
+    def _mentions_arguments(self, body: Node) -> bool:
+        """Whether a function body refers to `arguments` (outside nested functions)."""
+        stack = [body]
+        while stack:
+            node = stack.pop()
+            if isinstance(node, Identifier) and node.name == "arguments":
+                return True
+            for child in self._child_nodes(node):
+                if not isinstance(
+                    child,
+                    (FunctionDeclaration, FunctionExpression, ArrowFunctionExpression),
+                ):
+                    stack.append(child)
+        return False
 
     @staticmethod
     def _child_nodes(node: Node) -> List[Node]:
@@ -1120,6 +1137,7 @@ class Compiler:
         required_free = self._find_required_free_vars(node.body, local_vars_set)
         self._free_vars = list(required_free)
 
+        body_node = node.body
         if node.expression:
             # Expression body: compile expression and return it
             self._compile_expression(node.body)
@@ -1140,6 +1158,7 @@ class Compiler:
             num_locals=len(self.locals),
             free_vars=self._free_vars[:],
             cell_vars=self._cell_vars[:],
+            uses_arguments=self._mentions_arguments(body_node),
         )
 
         # Pop outer scope if we pushed it
@@ -1229,6 +1248,7 @@ class Compiler:
         # Implicit return undefined
         self._emit(OpCode.RETURN_UNDEFINED)
 
+        body_node = body
         func = CompiledFunction(
             name=name,
             params=[p.name for p in params],
@@ -1238,6 +1258,7 @@ class Compiler:
             num_locals=len(self.locals),
             free_vars=self._free_vars[:],
             cell_vars=self._cell_vars[:],
+            uses_arguments=self._mentions_arguments(body_node),
         )
 
         # Pop outer scope if we pushed it

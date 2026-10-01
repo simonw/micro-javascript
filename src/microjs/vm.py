@@ -5,7 +5,6 @@ import sys
 import time
 import unicodedata
 from typing import Any, Dict, List, Optional, Tuple, Union
-from dataclasses import dataclass, field
 
 from .opcodes import OPCODES_WITH_ARG, OpCode
 from .compiler import CompiledFunction
@@ -67,32 +66,57 @@ class JSThrow(Exception):
         self.value = value
 
 
-@dataclass
 class ClosureCell:
     """A cell for closure variable - allows sharing between scopes."""
 
-    value: JSValue
+    __slots__ = ("value",)
+
+    def __init__(self, value: JSValue):
+        self.value = value
 
 
-@dataclass
 class CallFrame:
     """Call frame on the call stack."""
 
-    func: CompiledFunction
-    ip: int  # Instruction pointer
-    bp: int  # Base pointer (stack base for this frame)
-    locals: List[JSValue]
-    this_value: JSValue
-    closure_cells: List[ClosureCell] = (
-        None  # Cells for captured variables (from outer function)
+    __slots__ = (
+        "func",
+        "ip",
+        "bp",
+        "locals",
+        "this_value",
+        "closure_cells",
+        "cell_storage",
+        "is_constructor_call",
+        "new_target",
+        "handlers",
     )
-    cell_storage: List[ClosureCell] = (
-        None  # Cells for variables captured by inner functions
-    )
-    is_constructor_call: bool = False  # True if this frame is from a "new" call
-    new_target: JSValue = None  # The new object for constructor calls
-    # Active try handlers in this frame: (catch_ip, stack_depth at TRY_START)
-    handlers: List[Tuple[int, int]] = field(default_factory=list)
+
+    def __init__(
+        self,
+        func: CompiledFunction,
+        ip: int,
+        bp: int,
+        locals: List[JSValue],
+        this_value: JSValue,
+        closure_cells: Optional[List[ClosureCell]] = None,
+        cell_storage: Optional[List[ClosureCell]] = None,
+        is_constructor_call: bool = False,
+        new_target: JSValue = None,
+    ):
+        self.func = func
+        self.ip = ip  # Instruction pointer
+        self.bp = bp  # Base pointer (stack base for this frame)
+        self.locals = locals
+        self.this_value = this_value
+        # Cells for captured variables (from outer function)
+        self.closure_cells = closure_cells
+        # Cells for variables captured by inner functions
+        self.cell_storage = cell_storage
+        # True if this frame is from a "new" call, and the new object
+        self.is_constructor_call = is_constructor_call
+        self.new_target = new_target
+        # Active try handlers in this frame: (catch_ip, stack_depth at TRY_START)
+        self.handlers: List[Tuple[int, int]] = []
 
 
 class ForInIterator:
@@ -129,6 +153,10 @@ class ForOfIterator:
 
 # Deepest JavaScript call stack before a RangeError
 MAX_CALL_DEPTH = 10000
+
+# Integers JavaScript doubles hold exactly, and the types of plain numbers
+_EXACT_INT = 2**53
+_NUMBER_TYPES = (int, float)
 
 
 def int_arg(args, index: int, default: int) -> int:
@@ -329,7 +357,6 @@ class VM:
         self.globals: Dict[str, JSValue] = {}
 
         self.start_time: Optional[float] = None
-        self.instruction_count = 0
 
         # Memory accounting: bytes charged since the heap was last measured,
         # and how many more may be charged before measuring it again
@@ -458,30 +485,27 @@ class VM:
         call_stack = self.call_stack
         handlers = self._HANDLERS
         has_arg = _HAS_ARG
+        count = 0
         while len(call_stack) > floor:
-            # Check the time limit every 1024 instructions
-            self.instruction_count += 1
-            if not self.instruction_count & 1023:
-                self.check_deadline()
-
             frame = call_stack[-1]
             bytecode = frame.func.bytecode
-            ip = frame.ip
-
-            if ip >= len(bytecode):
-                self._return(UNDEFINED)
-                continue
-
-            op = bytecode[ip]
-            if has_arg[op]:
-                arg = bytecode[ip + 1]
-                frame.ip = ip + 2
-            else:
-                arg = None
-                frame.ip = ip + 1
-
+            depth = len(call_stack)
             try:
-                handlers[op](self, arg, frame)
+                # Run this frame until a call, return or throw changes the
+                # call stack. Every function ends with a return instruction.
+                while len(call_stack) == depth:
+                    count += 1
+                    if not count & 1023:
+                        # Check the time limit every 1024 instructions
+                        self.check_deadline()
+                    ip = frame.ip
+                    op = bytecode[ip]
+                    if has_arg[op]:
+                        frame.ip = ip + 2
+                        handlers[op](self, bytecode[ip + 1], frame)
+                    else:
+                        frame.ip = ip + 1
+                        handlers[op](self, None, frame)
             except JSThrow as e:
                 self._throw(e.value, floor)
             except (TimeLimitError, MemoryLimitError):
@@ -518,8 +542,7 @@ class VM:
         raise NotImplementedError("Unknown opcode")
 
     def _op_POP(self, arg: Optional[int], frame: CallFrame) -> None:
-        if self.stack:
-            self.stack.pop()
+        self.stack.pop()
 
     def _op_DUP(self, arg: Optional[int], frame: CallFrame) -> None:
         self.stack.append(self.stack[-1])
@@ -575,10 +598,10 @@ class VM:
 
     def _op_LOAD_NAME(self, arg: Optional[int], frame: CallFrame) -> None:
         name = frame.func.constants[arg]
-        if name in self.globals:
+        try:
             self.stack.append(self.globals[name])
-        else:
-            raise JSReferenceError(f"{name} is not defined")
+        except KeyError:
+            raise JSReferenceError(f"{name} is not defined") from None
 
     def _op_STORE_NAME(self, arg: Optional[int], frame: CallFrame) -> None:
         name = frame.func.constants[arg]
@@ -675,14 +698,31 @@ class VM:
         self.stack.append(regex)
 
     def _op_ADD(self, arg: Optional[int], frame: CallFrame) -> None:
-        b = self.stack.pop()
-        a = self.stack.pop()
-        self.stack.append(self._add(a, b))
+        stack = self.stack
+        b = stack.pop()
+        a = stack[-1]
+        type_a = type(a)
+        if type_a is type(b):
+            if type_a is int:
+                result = a + b
+                if -_EXACT_INT <= result <= _EXACT_INT:
+                    stack[-1] = result
+                    return
+            elif type_a is float:
+                stack[-1] = a + b
+                return
+        stack[-1] = self._add(a, b)
 
     def _op_SUB(self, arg: Optional[int], frame: CallFrame) -> None:
-        b = self.stack.pop()
-        a = self.stack.pop()
-        self.stack.append(js_number(to_number(a) - to_number(b)))
+        stack = self.stack
+        b = stack.pop()
+        a = stack[-1]
+        if type(a) is int and type(b) is int:
+            result = a - b
+            if -_EXACT_INT <= result <= _EXACT_INT:
+                stack[-1] = result
+                return
+        stack[-1] = js_number(to_number(a) - to_number(b))
 
     def _op_MUL(self, arg: Optional[int], frame: CallFrame) -> None:
         b = self.stack.pop()
@@ -780,26 +820,45 @@ class VM:
         result = self._to_uint32(a) >> shift
         self.stack.append(result)
 
+    # Python compares two numbers (NaN included) exactly as JavaScript does,
+    # so plain numbers take a fast path
+
     def _op_LT(self, arg: Optional[int], frame: CallFrame) -> None:
-        b = self.stack.pop()
-        a = self.stack.pop()
-        self.stack.append(self._less_than(a, b) is True)
+        stack = self.stack
+        b = stack.pop()
+        a = stack[-1]
+        if type(a) in _NUMBER_TYPES and type(b) in _NUMBER_TYPES:
+            stack[-1] = a < b
+        else:
+            stack[-1] = self._less_than(a, b) is True
 
     def _op_LE(self, arg: Optional[int], frame: CallFrame) -> None:
-        b = self.stack.pop()
-        a = self.stack.pop()
-        # a <= b is "not (b < a)", unless either is NaN
-        self.stack.append(self._less_than(b, a, left_first=False) is False)
+        stack = self.stack
+        b = stack.pop()
+        a = stack[-1]
+        if type(a) in _NUMBER_TYPES and type(b) in _NUMBER_TYPES:
+            stack[-1] = a <= b
+        else:
+            # a <= b is "not (b < a)", unless either is NaN
+            stack[-1] = self._less_than(b, a, left_first=False) is False
 
     def _op_GT(self, arg: Optional[int], frame: CallFrame) -> None:
-        b = self.stack.pop()
-        a = self.stack.pop()
-        self.stack.append(self._less_than(b, a, left_first=False) is True)
+        stack = self.stack
+        b = stack.pop()
+        a = stack[-1]
+        if type(a) in _NUMBER_TYPES and type(b) in _NUMBER_TYPES:
+            stack[-1] = a > b
+        else:
+            stack[-1] = self._less_than(b, a, left_first=False) is True
 
     def _op_GE(self, arg: Optional[int], frame: CallFrame) -> None:
-        b = self.stack.pop()
-        a = self.stack.pop()
-        self.stack.append(self._less_than(a, b) is False)
+        stack = self.stack
+        b = stack.pop()
+        a = stack[-1]
+        if type(a) in _NUMBER_TYPES and type(b) in _NUMBER_TYPES:
+            stack[-1] = a >= b
+        else:
+            stack[-1] = self._less_than(a, b) is False
 
     def _op_EQ(self, arg: Optional[int], frame: CallFrame) -> None:
         b = self.stack.pop()
@@ -882,11 +941,13 @@ class VM:
         frame.ip = arg
 
     def _op_JUMP_IF_FALSE(self, arg: Optional[int], frame: CallFrame) -> None:
-        if not to_boolean(self.stack.pop()):
+        value = self.stack.pop()
+        if value is False or (value is not True and not to_boolean(value)):
             frame.ip = arg
 
     def _op_JUMP_IF_TRUE(self, arg: Optional[int], frame: CallFrame) -> None:
-        if to_boolean(self.stack.pop()):
+        value = self.stack.pop()
+        if value is True or (value is not False and to_boolean(value)):
             frame.ip = arg
 
     def _op_CALL(self, arg: Optional[int], frame: CallFrame) -> None:
@@ -986,12 +1047,20 @@ class VM:
             self.stack.append(True)
 
     def _op_INC(self, arg: Optional[int], frame: CallFrame) -> None:
-        a = self.stack.pop()
-        self.stack.append(js_number(to_number(a) + 1))
+        stack = self.stack
+        a = stack[-1]
+        if type(a) is int and a < _EXACT_INT:
+            stack[-1] = a + 1
+        else:
+            stack[-1] = js_number(to_number(a) + 1)
 
     def _op_DEC(self, arg: Optional[int], frame: CallFrame) -> None:
-        a = self.stack.pop()
-        self.stack.append(js_number(to_number(a) - 1))
+        stack = self.stack
+        a = stack[-1]
+        if type(a) is int and a > -_EXACT_INT:
+            stack[-1] = a - 1
+        else:
+            stack[-1] = js_number(to_number(a) - 1)
 
     def _op_MAKE_CLOSURE(self, arg: Optional[int], frame: CallFrame) -> None:
         self.charge(512)  # Function, prototype object and cells
@@ -2762,7 +2831,7 @@ class VM:
         # Create 'arguments' object (stored after params in locals)
         # The 'arguments' slot is at index len(compiled.params)
         arguments_slot = len(compiled.params)
-        if arguments_slot < compiled.num_locals:
+        if compiled.uses_arguments and arguments_slot < compiled.num_locals:
             arguments_obj = JSArray()
             arguments_obj._elements = list(args)
             locals_list[arguments_slot] = arguments_obj

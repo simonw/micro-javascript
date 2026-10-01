@@ -121,3 +121,179 @@ class TestThrowAcrossNativeCallbacks:
     def test_add_object_with_custom_tostring(self):
         ctx = Context(time_limit=5.0)
         assert ctx.eval('"" + {toString: function () { return "T" }}') == "T"
+
+
+class TestUncaughtErrors:
+    """Uncaught JS errors reach Python with their type and thrown value."""
+
+    def test_uncaught_reference_error_type(self):
+        from microjs.errors import JSReferenceError
+
+        with pytest.raises(JSReferenceError) as info:
+            Context().eval("nope")
+        assert info.value.name == "ReferenceError"
+        assert str(info.value) == "ReferenceError: nope is not defined"
+
+    def test_uncaught_type_error_type(self):
+        from microjs.errors import JSTypeError
+
+        with pytest.raises(JSTypeError) as info:
+            Context().eval("null.x")
+        assert info.value.name == "TypeError"
+
+    def test_uncaught_thrown_range_error(self):
+        from microjs.errors import JSRangeError
+
+        with pytest.raises(JSRangeError, match="RangeError: too big"):
+            Context().eval('throw new RangeError("too big")')
+
+    def test_uncaught_custom_error_name(self):
+        with pytest.raises(JSError) as info:
+            Context().eval('var e = new Error("m"); e.name = "MyError"; throw e')
+        assert info.value.name == "MyError"
+        assert str(info.value) == "MyError: m"
+
+    def test_uncaught_thrown_object_value(self):
+        with pytest.raises(JSError) as info:
+            Context().eval("throw {code: 42}")
+        assert info.value.value == {"code": 42}
+
+    def test_uncaught_thrown_primitive_value(self):
+        with pytest.raises(JSError) as info:
+            Context().eval("throw 42")
+        assert info.value.value == 42
+        assert str(info.value) == "Error: 42"
+
+    def test_uncaught_error_object_value(self):
+        with pytest.raises(JSError) as info:
+            Context().eval('throw new TypeError("bad")')
+        assert info.value.value["message"] == "bad"
+        assert info.value.value["name"] == "TypeError"
+
+
+class TestPythonExceptionsBecomeJSErrors:
+    """Python exceptions raised during execution are catchable JS errors."""
+
+    def test_host_function_exception_is_catchable(self):
+        ctx = Context(time_limit=5.0)
+        ctx.set("boom", lambda: 1 / 0)
+        result = ctx.eval(
+            "var r; try { boom() } catch (e) { r = e.name + ': ' + e.message } r"
+        )
+        assert result == "InternalError: ZeroDivisionError: division by zero"
+
+    def test_uncaught_host_exception_raises_jserror_with_cause(self):
+        ctx = Context(time_limit=5.0)
+        ctx.set("boom", lambda: 1 / 0)
+        with pytest.raises(JSError) as info:
+            ctx.eval("boom()")
+        assert isinstance(info.value.__cause__, ZeroDivisionError)
+
+    def test_host_exception_inside_callback_is_catchable(self):
+        ctx = Context(time_limit=5.0)
+        ctx.set("boom", lambda x: {}[x])
+        result = ctx.eval(
+            "var r; try { [1].forEach(function (x) { boom(x) }) }"
+            " catch (e) { r = e.name } r"
+        )
+        assert result == "InternalError"
+
+    def test_python_recursion_becomes_range_error(self):
+        """JS -> native -> JS recursion exhausts the Python stack."""
+        ctx = Context(time_limit=10.0)
+        result = ctx.eval("""
+            function f(n) { return [n].map(function (x) { return f(x + 1) }) }
+            var r; try { f(0) } catch (e) { r = e.name } r
+        """)
+        assert result == "RangeError"
+
+
+class TestLimitsAreNotCatchable:
+    """JavaScript must not be able to catch the sandbox's limit errors."""
+
+    def test_time_limit_not_catchable(self):
+        from microjs import TimeLimitError
+
+        with pytest.raises(TimeLimitError):
+            Context(time_limit=0.5).eval("try { while (true) {} } catch (e) {}")
+
+    def test_time_limit_not_catchable_in_callback(self):
+        from microjs import TimeLimitError
+
+        with pytest.raises(TimeLimitError):
+            Context(time_limit=0.5).eval(
+                "try { [1].forEach(function () { while (true) {} }) } catch (e) {}"
+            )
+
+    def test_time_limit_not_catchable_in_eval(self):
+        import time
+
+        from microjs import TimeLimitError
+
+        start = time.monotonic()
+        with pytest.raises(TimeLimitError):
+            Context(time_limit=0.5).eval(
+                'for (;;) { try { (1, eval)("while (true) {}") } catch (e) {} }'
+            )
+        assert time.monotonic() - start < 3
+
+    def test_memory_limit_not_catchable(self):
+        from microjs import MemoryLimitError
+
+        with pytest.raises(MemoryLimitError):
+            Context(memory_limit=100 * 1024, time_limit=5.0).eval(
+                "function f() { return f() } try { f() } catch (e) {}"
+            )
+
+
+class TestEvalAndFunctionErrors:
+    """Errors from indirect eval and new Function propagate as JS errors."""
+
+    def test_eval_propagates_thrown_error_unchanged(self):
+        ctx = Context(time_limit=5.0)
+        result = ctx.eval("""
+            var r;
+            try { (1, eval)("throw new TypeError('x')") } catch (e) { r = e.name + ":" + e.message }
+            r
+        """)
+        assert result == "TypeError:x"
+
+    def test_eval_reference_error(self):
+        ctx = Context(time_limit=5.0)
+        result = ctx.eval('var r; try { (1, eval)("nope") } catch (e) { r = e.name } r')
+        assert result == "ReferenceError"
+
+    def test_eval_syntax_error_is_catchable(self):
+        ctx = Context(time_limit=5.0)
+        result = ctx.eval(
+            'var r; try { (1, eval)("var @") } catch (e) { r = e.name } r'
+        )
+        assert result == "SyntaxError"
+
+    def test_uncaught_eval_syntax_error(self):
+        from microjs import JSSyntaxError
+
+        with pytest.raises(JSSyntaxError):
+            Context(time_limit=5.0).eval('(1, eval)("var @")')
+
+    def test_function_constructor_syntax_error_is_catchable(self):
+        ctx = Context(time_limit=5.0)
+        result = ctx.eval(
+            'var r; try { new Function("return @") } catch (e) { r = e.name } r'
+        )
+        assert result == "SyntaxError"
+
+    def test_function_constructor_rejects_body_injection(self):
+        """A body that closes the wrapper must not run code at creation."""
+        ctx = Context(time_limit=5.0)
+        result = ctx.eval("""
+            var injected = false, r;
+            try { new Function("}); injected = true; (function () {") }
+            catch (e) { r = e.name }
+            r + " " + injected
+        """)
+        assert result == "SyntaxError false"
+
+    def test_function_constructor_still_works(self):
+        ctx = Context(time_limit=5.0)
+        assert ctx.eval('new Function("a", "b", "return a + b")(2, 3)') == 5

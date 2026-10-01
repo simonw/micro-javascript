@@ -26,6 +26,8 @@ from .values import (
 )
 from .errors import (
     JSError,
+    JSRangeError,
+    JSSyntaxError,
     JSTypeError,
     JSReferenceError,
     MemoryLimitError,
@@ -184,7 +186,38 @@ class VM:
         try:
             return self._run_frames(0)
         except JSThrow as e:
-            raise self._uncaught_error(e.value) from None
+            error = self._uncaught_error(e.value)
+            raise error from error.__cause__
+
+    def run_nested(self, compiled: CompiledFunction) -> JSValue:
+        """Run a compiled program inside the current execution.
+
+        Used by indirect eval: the program shares this VM's globals, time
+        limit and exception handlers, so its throws reach enclosing catches.
+        """
+        frame = CallFrame(
+            func=compiled,
+            ip=0,
+            bp=len(self.stack),
+            locals=[UNDEFINED] * compiled.num_locals,
+            this_value=UNDEFINED,
+        )
+        floor = len(self.call_stack)
+        self.call_stack.append(frame)
+        return self._run_nested(floor, frame.bp)
+
+    def _run_nested(self, floor: int, stack_len: int) -> JSValue:
+        """Run frames above ``floor`` from Python code, cleaning up on error.
+
+        However the nested run ends, its frames and stack values are gone
+        afterwards, so an outer handler can never resume a dead frame.
+        """
+        try:
+            return self._run_frames(floor)
+        except BaseException:
+            del self.call_stack[floor:]
+            del self.stack[stack_len:]
+            raise
 
     def _check_limits(self) -> None:
         """Check memory and time limits."""
@@ -238,10 +271,24 @@ class VM:
                 self._execute_opcode(op, arg, frame)
             except JSThrow as e:
                 self._throw(e.value, floor)
-            except JSTypeError as e:
-                self._throw(self._make_error("TypeError", e.message), floor)
-            except JSReferenceError as e:
-                self._throw(self._make_error("ReferenceError", e.message), floor)
+            except (TimeLimitError, MemoryLimitError):
+                # Sandbox limits must never be catchable by JavaScript
+                raise
+            except RegexTimeoutError:
+                raise TimeLimitError("Regex execution timeout")
+            except JSError as e:
+                self._throw(self._make_error(e.name, e.message), floor)
+            except RecursionError:
+                # JS -> native -> JS nesting exhausted the Python stack
+                error = self._make_error(
+                    "RangeError", "Maximum call stack size exceeded"
+                )
+                self._throw(error, floor)
+            except Exception as e:
+                # A host function, or an engine bug: surface it as a JS error
+                error = self._make_error("InternalError", f"{type(e).__name__}: {e}")
+                error._python_exception = e
+                self._throw(error, floor)
 
         return self.stack.pop()
 
@@ -2296,8 +2343,9 @@ class VM:
             this_val = UNDEFINED
         if isinstance(callback, JSFunction):
             floor = len(self.call_stack)
+            stack_len = len(self.stack)
             self._invoke_js_function(callback, args, this_val)
-            return self._run_frames(floor)
+            return self._run_nested(floor, stack_len)
         if isinstance(callback, JSBoundMethod):
             result = callback(this_val, *args)
         elif callable(callback):
@@ -2418,8 +2466,12 @@ class VM:
         return None, None
 
     def _set_error_location(self, exc: JSValue) -> None:
-        """Record the current source location on a thrown error object."""
-        if isinstance(exc, JSObject):
+        """Record the current source location on a thrown error object.
+
+        Error constructors create a lineNumber placeholder; other thrown
+        objects are user data and are left alone.
+        """
+        if isinstance(exc, JSObject) and exc.has("lineNumber"):
             line, column = self._get_source_location()
             if line is not None:
                 exc.set("lineNumber", line)
@@ -2445,24 +2497,49 @@ class VM:
         raise JSThrow(exc)
 
     def _make_error(self, error_type: str, message: str) -> JSValue:
-        """Create a JavaScript error object, located at the current instruction."""
+        """Create a JavaScript error object, located at the current instruction.
+
+        Uses the global constructor named ``error_type`` (TypeError, ...) if
+        there is one, otherwise an Error whose name is ``error_type``.
+        """
         error_constructor = self.globals.get(error_type)
-        if error_constructor and hasattr(error_constructor, "_call_fn"):
+        if not hasattr(error_constructor, "_call_fn"):
+            error_constructor = self.globals.get("Error")
+        if hasattr(error_constructor, "_call_fn"):
             error_obj = error_constructor._call_fn(message)
         else:
-            # Fall back to a plain object with name and message properties
             error_obj = JSObject()
-            error_obj.set("name", error_type)
             error_obj.set("message", message)
+        if not isinstance(error_obj, JSObject):
+            error_obj = JSObject()
+            error_obj.set("message", message)
+        error_obj.set("name", error_type)
         self._set_error_location(error_obj)
         return error_obj
 
+    _ERROR_CLASSES = {
+        "TypeError": JSTypeError,
+        "ReferenceError": JSReferenceError,
+        "RangeError": JSRangeError,
+        "SyntaxError": JSSyntaxError,
+    }
+
     def _uncaught_error(self, exc: JSValue) -> JSError:
-        """Build the Python exception for a JS exception nothing caught."""
-        if isinstance(exc, str):
-            return JSError(exc)
-        elif isinstance(exc, JSObject):
-            msg = exc.get("message")
-            return JSError(to_string(msg) if msg else "Error")
-        else:
-            return JSError(to_string(exc))
+        """Build the Python exception for a JS exception nothing caught.
+
+        The exception's class and name follow the thrown error's name, and
+        its ``value`` attribute holds the thrown JS value.
+        """
+        name, message = "Error", to_string(exc)
+        if isinstance(exc, JSObject):
+            js_name = exc.get("name")
+            js_message = exc.get("message")
+            if js_name is not UNDEFINED or js_message is not UNDEFINED:
+                if js_name is not UNDEFINED and js_name is not NULL:
+                    name = to_string(js_name)
+                message = "" if js_message is UNDEFINED else to_string(js_message)
+        error_class = self._ERROR_CLASSES.get(name)
+        error = error_class(message) if error_class else JSError(message, name)
+        error.value = exc
+        error.__cause__ = getattr(exc, "_python_exception", None)
+        return error

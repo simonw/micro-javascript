@@ -9,6 +9,9 @@ class JSError(Exception):
     def __init__(self, message: str = "", name: str = "Error"):
         self.message = message
         self.name = name
+        # For uncaught JavaScript exceptions: the thrown value, converted to
+        # Python the same way eval() results are
+        self.value = None
         super().__init__(f"{name}: {message}" if message else name)
 
 

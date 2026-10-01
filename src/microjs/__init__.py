@@ -15,13 +15,24 @@ except PackageNotFoundError:  # Running from an uninstalled source checkout
     __version__ = "unknown"
 
 from .context import Context, JSContext
-from .errors import JSError, JSSyntaxError, MemoryLimitError, TimeLimitError
+from .errors import (
+    JSError,
+    JSRangeError,
+    JSReferenceError,
+    JSSyntaxError,
+    JSTypeError,
+    MemoryLimitError,
+    TimeLimitError,
+)
 from .values import UNDEFINED, NULL
 
 __all__ = [
     "Context",
     "JSError",
+    "JSRangeError",
+    "JSReferenceError",
     "JSSyntaxError",
+    "JSTypeError",
     "MemoryLimitError",
     "TimeLimitError",
     "UNDEFINED",

@@ -22,7 +22,8 @@ from .values import (
     to_string,
     to_number,
 )
-from .errors import JSError, MemoryLimitError, TimeLimitError
+from .ast_nodes import ExpressionStatement, FunctionExpression
+from .errors import JSError, JSSyntaxError, MemoryLimitError, TimeLimitError
 
 
 class Context:
@@ -950,31 +951,26 @@ class Context:
 
             # Create a function expression to parse
             param_str = ", ".join(params)
-            source = f"(function({param_str}) {{ {body} }})"
+            source = f"(function({param_str}) {{\n{body}\n}})"
 
-            # Parse and compile
-            try:
-                parser = Parser(source)
-                ast = parser.parse()
-                compiler = Compiler()
-                bytecode_module = compiler.compile(ast)
+            # Parse errors propagate as JSSyntaxError, which the VM throws
+            # as a JavaScript SyntaxError
+            ast = Parser(source).parse()
+            # Reject bodies that close the wrapper early, such as
+            # "}); code(); (function() {", rather than running them
+            if not (
+                len(ast.body) == 1
+                and isinstance(ast.body[0], ExpressionStatement)
+                and isinstance(ast.body[0].expression, FunctionExpression)
+            ):
+                raise JSSyntaxError("Invalid function body")
+            bytecode_module = Compiler().compile(ast)
 
-                # The result should be a function expression wrapped in a program
-                # We need to extract the function from the bytecode
-                # Execute the expression to get the function object
-                vm = VM(self.memory_limit, self.time_limit)
-                vm.globals = self._globals
-                result = vm.run(bytecode_module)
-
-                if isinstance(result, JSFunction):
-                    return result
-                else:
-                    # Fallback: return a simple empty function
-                    return JSFunction("anonymous", params, bytes(), {})
-            except Exception as e:
-                from .errors import JSError
-
-                raise JSError(f"SyntaxError: {str(e)}")
+            # Evaluating the program creates the function object (no
+            # user code runs)
+            vm = VM(self.memory_limit, self.time_limit)
+            vm.globals = self._globals
+            return vm.run(bytecode_module)
 
         fn_constructor = JSCallableObject(function_constructor_fn)
 
@@ -1095,19 +1091,16 @@ class Context:
                 # If not a string, return the argument unchanged
                 return code
 
-            try:
-                parser = Parser(code)
-                ast = parser.parse()
-                compiler = Compiler()
-                bytecode_module = compiler.compile(ast)
-
-                vm = VM(ctx.memory_limit, ctx.time_limit)
-                vm.globals = ctx._globals
-                return vm.run(bytecode_module)
-            except Exception as e:
-                from .errors import JSError
-
-                raise JSError(f"EvalError: {str(e)}")
+            # Parse errors propagate as JSSyntaxError, which the VM throws
+            # as a JavaScript SyntaxError
+            compiled = Compiler().compile(Parser(code).parse())
+            if ctx._current_vm is not None:
+                # Run inside the current execution so that the time limit
+                # keeps counting and throws reach the caller's handlers
+                return ctx._current_vm.run_nested(compiled)
+            vm = VM(ctx.memory_limit, ctx.time_limit)
+            vm.globals = ctx._globals
+            return vm.run(compiled)
 
         return eval_fn
 
@@ -1225,12 +1218,17 @@ class Context:
         # Share globals with VM (don't copy - allows nested eval to modify globals)
         vm.globals = self._globals
 
-        # Store current VM for timeout checking in RegExp constructor
+        # Store current VM for timeout checking and nested calls; restore the
+        # previous one afterwards in case eval() was called re-entrantly
+        previous_vm = self._current_vm
         self._current_vm = vm
         try:
             result = vm.run(compiled)
+        except JSError as e:
+            e.value = self._to_python(e.value)
+            raise
         finally:
-            self._current_vm = None
+            self._current_vm = previous_vm
 
         return self._to_python(result)
 

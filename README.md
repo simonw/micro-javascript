@@ -138,6 +138,27 @@ ctx.set("makePoint", make_point)
 result = ctx.eval("var p = makePoint(10, 20); p.x + p.y;")  # Returns 30
 ```
 
+## Handling errors
+
+An uncaught JavaScript exception is raised as a `JSError`, or as the subclass matching its type: `JSTypeError`, `JSReferenceError`, `JSRangeError` or `JSSyntaxError`. The thrown value is available as `.value`:
+
+```python
+from microjs import Context, JSError, JSReferenceError
+
+ctx = Context()
+try:
+    ctx.eval("missing()")
+except JSReferenceError as e:
+    message = str(e)  # Returns 'ReferenceError: missing is not defined'
+
+try:
+    ctx.eval("throw {code: 42}")
+except JSError as e:
+    value = e.value  # Returns {'code': 42}
+```
+
+Exceptions raised by Python functions you expose become JavaScript errors named `InternalError`, which scripts can catch. If nothing catches one, the original Python exception is the `__cause__` of the resulting `JSError`. `TimeLimitError` and `MemoryLimitError` can never be caught by JavaScript.
+
 ## Supported features
 
 micro-javascript implements roughly the subset of JavaScript supported by MicroQuickJS: ES5, plus arrow functions, `for...of` and regex lookbehind. The test suite runs every line of this example and checks each `// =>` result:

@@ -346,3 +346,47 @@ class TestSyntaxErrors:
             'var r; try { new RegExp("(") } catch (e) { r = e instanceof SyntaxError } r'
         )
         assert result is True
+
+
+class TestCatchParameterScope:
+    """The catch parameter is scoped to its catch block."""
+
+    @pytest.mark.parametrize(
+        "source,expected",
+        [
+            # Closures capture the catch parameter, at program level too
+            ("var f; try { throw 1 } catch (e) { f = function () { return e } } f()", 1),
+            (
+                "function g() { var f; try { throw 2 } catch (e)"
+                " { f = function () { return e } } return f() } g()",
+                2,
+            ),
+            # It does not overwrite a variable of the same name
+            ('var e = "outer"; try { throw "inner" } catch (e) {} e', "outer"),
+            ("function g() { var e = 1; try { throw 2 } catch (e) {} return e } g()", 1),
+            # Nested catch blocks with the same name each get their own binding
+            (
+                "var r = []; try { throw 1 } catch (e) {"
+                " try { throw 2 } catch (e) { r.push(e) } r.push(e) } r.join()",
+                "2,1",
+            ),
+            # Property names, shorthand properties and shadowing parameters
+            ("var r; try { throw {e: 5} } catch (e) { r = e.e + ({e: 1}).e } r", 6),
+            ("var r; try { throw 3 } catch (e) { r = ({e}).e } r", 3),
+            (
+                "var r; try { throw 1 } catch (e)"
+                " { r = (function (e) { return e })(2) + e } r",
+                3,
+            ),
+            ("var r; try { throw 1 } catch (e) { e = e + 1; r = e } r", 2),
+            ("var r; try { throw 1 } catch (e) { r = typeof e } r", "number"),
+        ],
+    )
+    def test_catch_scope(self, source, expected):
+        assert Context(time_limit=5.0).eval(source) == expected
+
+    def test_catch_parameter_not_visible_after_catch(self):
+        from microjs import JSReferenceError
+
+        with pytest.raises(JSReferenceError, match="e is not defined"):
+            Context(time_limit=5.0).eval("try { throw 1 } catch (e) {} e")

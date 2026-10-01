@@ -119,6 +119,8 @@ class Compiler:
 
     def compile(self, node: Program) -> CompiledFunction:
         """Compile a program to bytecode."""
+        self._catch_count = 0
+        self._rename_catch_params(node)
         body = node.body
 
         # Compile all statements except the last one
@@ -224,6 +226,18 @@ class Compiler:
                     self._compile_statement(ctx.finalizer)
                 finally:
                     self.control_stack = saved
+
+    def _emit_store_declared(self, name: str) -> None:
+        """Store the top of stack in a declared variable (it stays on the stack)."""
+        if self._in_function:
+            self._add_local(name)
+            cell_slot = self._get_cell_var(name)
+            if cell_slot is not None:
+                self._emit(OpCode.STORE_CELL, cell_slot)
+            else:
+                self._emit(OpCode.STORE_LOCAL, self._get_local(name))
+        else:
+            self._emit(OpCode.STORE_NAME, self._add_name(name))
 
     def _find_jump_target(self, node: Node, is_continue: bool) -> int:
         """Return the control_stack index that break/continue node targets."""
@@ -398,9 +412,111 @@ class Compiler:
         visit_expr(body)
         return free_vars
 
+    # ---- Catch parameter scoping ----
+
+    def _rename_catch_params(self, root: Node) -> None:
+        """Give every catch parameter in the tree a unique name.
+
+        A catch parameter is scoped to its catch block, but the compiler
+        only has function-level locals and globals. Renaming the parameter
+        and its references in the catch body (to a name like "e%catch1",
+        which no identifier can clash with) lets the existing variable
+        machinery handle it without clobbering an outer variable.
+
+        Iterative, like the parser, so deeply nested code cannot overflow
+        the Python stack.
+        """
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            if isinstance(node, TryStatement) and node.handler:
+                handler = node.handler
+                old = handler.param.name
+                self._catch_count += 1
+                new = f"{old}%catch{self._catch_count}"
+                handler.param = self._renamed(handler.param, new)
+                self._rename_refs(handler.body, old, new)
+            stack.extend(self._child_nodes(node))
+
+    @staticmethod
+    def _child_nodes(node: Node) -> List[Node]:
+        """Return the direct child nodes of an AST node."""
+        children = []
+        for key, value in node.__dict__.items():
+            if key.startswith("_"):
+                continue
+            if isinstance(value, Node):
+                children.append(value)
+            elif isinstance(value, list):
+                children.extend(item for item in value if isinstance(item, Node))
+        return children
+
+    @staticmethod
+    def _renamed(ident: Identifier, name: str) -> Identifier:
+        new = Identifier(name)
+        new.loc = ident.loc
+        return new
+
+    @staticmethod
+    def _is_variable_slot(node: Node, key: str) -> bool:
+        """Whether the child at node.key can be a variable reference."""
+        if key == "label":
+            return False
+        if key == "property" and isinstance(node, MemberExpression):
+            return node.computed
+        if key == "key" and isinstance(node, Property):
+            return node.computed
+        return True
+
+    def _binds_name(self, node: Node, name: str) -> bool:
+        """Whether node introduces its own binding of name for its body."""
+        if isinstance(node, CatchClause):
+            return node.param.name == name
+        if isinstance(
+            node, (FunctionDeclaration, FunctionExpression, ArrowFunctionExpression)
+        ):
+            declared = {p.name for p in node.params}
+            if getattr(node, "id", None) is not None:
+                declared.add(node.id.name)
+            if isinstance(node.body, BlockStatement):
+                self._collect_var_decls(node.body, declared)
+            return name in declared
+        return False
+
+    def _rename_refs(self, root: Node, old: str, new: str) -> None:
+        """Rename references to variable old under root to new, in place.
+
+        Identifiers are replaced rather than mutated, since the parser can
+        share one Identifier between a shorthand property's key and value.
+        """
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            for key, value in list(node.__dict__.items()):
+                if key.startswith("_") or not self._is_variable_slot(node, key):
+                    continue
+                if isinstance(value, Node):
+                    value = [value]
+                    single = True
+                elif isinstance(value, list):
+                    single = False
+                else:
+                    continue
+                for i, child in enumerate(value):
+                    if isinstance(child, Identifier):
+                        if child.name == old:
+                            value[i] = self._renamed(child, new)
+                    elif isinstance(child, Node) and not self._binds_name(child, old):
+                        stack.append(child)
+                if single:
+                    setattr(node, key, value[0])
+
     def _collect_var_decls(self, node, var_set: set):
-        """Collect all var declarations in a node."""
-        if isinstance(node, VariableDeclaration):
+        """Collect all var declarations (and catch parameters) in a node."""
+        if isinstance(node, CatchClause):
+            var_set.add(node.param.name)
+            self._collect_var_decls(node.body, var_set)
+        elif isinstance(node, VariableDeclaration):
             for decl in node.declarations:
                 var_set.add(decl.id.name)
         elif isinstance(node, FunctionDeclaration):
@@ -742,9 +858,7 @@ class Compiler:
                 if finalizer:
                     # Protect the catch block so finally runs if it throws
                     catch_start = self._emit_jump(OpCode.TRY_START)
-                name = node.handler.param.name
-                self._add_local(name)
-                self._emit(OpCode.STORE_LOCAL, self._get_local(name))
+                self._emit_store_declared(node.handler.param.name)
                 self._emit(OpCode.POP)
                 if finalizer:
                     self.control_stack.append(

@@ -355,7 +355,10 @@ class TestCatchParameterScope:
         "source,expected",
         [
             # Closures capture the catch parameter, at program level too
-            ("var f; try { throw 1 } catch (e) { f = function () { return e } } f()", 1),
+            (
+                "var f; try { throw 1 } catch (e) { f = function () { return e } } f()",
+                1,
+            ),
             (
                 "function g() { var f; try { throw 2 } catch (e)"
                 " { f = function () { return e } } return f() } g()",
@@ -363,7 +366,10 @@ class TestCatchParameterScope:
             ),
             # It does not overwrite a variable of the same name
             ('var e = "outer"; try { throw "inner" } catch (e) {} e', "outer"),
-            ("function g() { var e = 1; try { throw 2 } catch (e) {} return e } g()", 1),
+            (
+                "function g() { var e = 1; try { throw 2 } catch (e) {} return e } g()",
+                1,
+            ),
             # Nested catch blocks with the same name each get their own binding
             (
                 "var r = []; try { throw 1 } catch (e) {"

@@ -50,7 +50,7 @@ from .ast_nodes import (
     ArrowFunctionExpression,
 )
 from .errors import JSSyntaxError
-from .opcodes import OpCode
+from .opcodes import OPCODES_WITH_ARG, OpCode
 from .values import UNDEFINED
 
 
@@ -60,7 +60,7 @@ class CompiledFunction:
 
     name: str
     params: List[str]
-    bytecode: bytes
+    bytecode: Tuple[int, ...]
     constants: List[Any]
     locals: List[str]
     num_locals: int
@@ -139,17 +139,12 @@ class Compiler:
         return CompiledFunction(
             name="<program>",
             params=[],
-            bytecode=bytes(self.bytecode),
+            bytecode=tuple(self.bytecode),
             constants=self.constants,
             locals=self.locals,
             num_locals=len(self.locals),
             source_map=self.source_map,
         )
-
-    # Opcodes that use 16-bit arguments (jumps and jump-like)
-    _JUMP_OPCODES = frozenset(
-        [OpCode.JUMP, OpCode.JUMP_IF_FALSE, OpCode.JUMP_IF_TRUE, OpCode.TRY_START]
-    )
 
     def _emit(self, opcode: OpCode, arg: Optional[int] = None) -> int:
         """Emit an opcode, return its position."""
@@ -157,14 +152,10 @@ class Compiler:
         # Record source location for this bytecode position
         if self._current_loc is not None:
             self.source_map[pos] = self._current_loc
-        self.bytecode.append(opcode)
-        if arg is not None:
-            if opcode in self._JUMP_OPCODES:
-                # 16-bit little-endian for jump targets
-                self.bytecode.append(arg & 0xFF)
-                self.bytecode.append((arg >> 8) & 0xFF)
-            else:
-                self.bytecode.append(arg)
+        self.bytecode.append(int(opcode))
+        if opcode in OPCODES_WITH_ARG:
+            assert arg is not None, f"{opcode.name} needs an operand"
+            self.bytecode.append(arg)
         return pos
 
     def _set_loc(self, node: Node) -> None:
@@ -173,25 +164,17 @@ class Compiler:
             self._current_loc = (node.loc.line, node.loc.column)
 
     def _emit_jump(self, opcode: OpCode) -> int:
-        """Emit a jump instruction, return position for patching.
-
-        Uses 16-bit (2 byte) little-endian offset.
-        """
+        """Emit a jump instruction with a placeholder target, return its position."""
         pos = len(self.bytecode)
-        self.bytecode.append(opcode)
-        self.bytecode.append(0)  # Low byte placeholder
-        self.bytecode.append(0)  # High byte placeholder
+        self.bytecode.append(int(opcode))
+        self.bytecode.append(0)  # Target, set by _patch_jump
         return pos
 
     def _patch_jump(self, pos: int, target: Optional[int] = None) -> None:
-        """Patch a jump instruction to jump to target (or current position).
-
-        Uses 16-bit (2 byte) little-endian offset.
-        """
+        """Point the jump at pos to target (default: the current position)."""
         if target is None:
             target = len(self.bytecode)
-        self.bytecode[pos + 1] = target & 0xFF  # Low byte
-        self.bytecode[pos + 2] = (target >> 8) & 0xFF  # High byte
+        self.bytecode[pos + 1] = target
 
     def _syntax_error(self, node: Node, message: str) -> JSSyntaxError:
         """Build a SyntaxError located at node."""
@@ -1151,7 +1134,7 @@ class Compiler:
         func = CompiledFunction(
             name="",  # Arrow functions are anonymous
             params=[p.name for p in node.params],
-            bytecode=bytes(self.bytecode),
+            bytecode=tuple(self.bytecode),
             constants=self.constants,
             locals=self.locals,
             num_locals=len(self.locals),
@@ -1249,7 +1232,7 @@ class Compiler:
         func = CompiledFunction(
             name=name,
             params=[p.name for p in params],
-            bytecode=bytes(self.bytecode),
+            bytecode=tuple(self.bytecode),
             constants=self.constants,
             locals=self.locals,
             num_locals=len(self.locals),

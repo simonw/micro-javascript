@@ -5,7 +5,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 from dataclasses import dataclass, field
 
-from .opcodes import OpCode
+from .opcodes import OPCODES_WITH_ARG, OpCode
 from .compiler import CompiledFunction
 from .values import (
     UNDEFINED,
@@ -47,33 +47,6 @@ class JSThrow(Exception):
     def __init__(self, value: JSValue):
         super().__init__(value)
         self.value = value
-
-
-# Opcodes followed by a 16-bit operand, and by an 8-bit operand
-_JUMP_OPCODES = frozenset(
-    [OpCode.JUMP, OpCode.JUMP_IF_FALSE, OpCode.JUMP_IF_TRUE, OpCode.TRY_START]
-)
-_ARG_OPCODES = frozenset(
-    [
-        OpCode.LOAD_CONST,
-        OpCode.LOAD_NAME,
-        OpCode.STORE_NAME,
-        OpCode.LOAD_LOCAL,
-        OpCode.STORE_LOCAL,
-        OpCode.LOAD_CLOSURE,
-        OpCode.STORE_CLOSURE,
-        OpCode.LOAD_CELL,
-        OpCode.STORE_CELL,
-        OpCode.CALL,
-        OpCode.CALL_METHOD,
-        OpCode.NEW,
-        OpCode.BUILD_ARRAY,
-        OpCode.BUILD_OBJECT,
-        OpCode.BUILD_REGEX,
-        OpCode.MAKE_CLOSURE,
-        OpCode.TYPEOF_NAME,
-    ]
-)
 
 
 def js_round(x: float, ndigits: int = 0) -> float:
@@ -259,11 +232,7 @@ class VM:
 
             # Decode operand, if any
             arg = None
-            if op in _JUMP_OPCODES:
-                # 16-bit little-endian argument for jumps
-                arg = bytecode[frame.ip] | (bytecode[frame.ip + 1] << 8)
-                frame.ip += 2
-            elif op in _ARG_OPCODES:
+            if op in OPCODES_WITH_ARG:
                 arg = bytecode[frame.ip]
                 frame.ip += 1
 

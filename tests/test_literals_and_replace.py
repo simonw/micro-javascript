@@ -26,7 +26,7 @@ def test_computed_property_keys(source, expected):
         ('"a1b2".replace(/\\d/g, function (m) { return m * 2 })', "a2b4"),
         (
             '"x-10 y-20".replace(/(\\w)-(\\d+)/g, function (m, a, b, i) {'
-            ' return b + a + i })',
+            " return b + a + i })",
             "10x0 20y5",
         ),
         ('"abc".replace(/b/, function (m, i, s) { return s })', "aabcc"),
@@ -36,10 +36,13 @@ def test_computed_property_keys(source, expected):
         # Replacement patterns
         ('"abc".replace("b", "[$&]")', "a[b]c"),
         ('"abc".replace("b", "[$`]")', "a[a]c"),
-        ("\"abc\".replace(\"b\", \"[$']\")", "a[c]c"),
+        ('"abc".replace("b", "[$\']")', "a[c]c"),
         ('"abc".replace("b", "$$")', "a$c"),
         ('"abc".replace(/(b)/, "[$1$2]")', "a[b$2]c"),
-        ('"abcdefghijk".replace(/(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)(k)/, "$11-$10")', "k-j"),
+        (
+            '"abcdefghijk".replace(/(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)(k)/, "$11-$10")',
+            "k-j",
+        ),
         ('"aaa".replaceAll("a", "$&$&")', "aaaaaa"),
         ('"a.b.c".replaceAll(".", "$`")', "aaba.bc"),
     ],

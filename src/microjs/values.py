@@ -1,6 +1,6 @@
 """JavaScript value types."""
 
-from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Sequence, Union, TYPE_CHECKING
 import math
 
 if TYPE_CHECKING:
@@ -311,7 +311,7 @@ class JSFunction:
         self,
         name: str,
         params: List[str],
-        bytecode: bytes,
+        bytecode: Sequence[int],
         closure_vars: Optional[Dict[str, JSValue]] = None,
     ):
         self.name = name

@@ -297,3 +297,52 @@ class TestEvalAndFunctionErrors:
     def test_function_constructor_still_works(self):
         ctx = Context(time_limit=5.0)
         assert ctx.eval('new Function("a", "b", "return a + b")(2, 3)') == 5
+
+
+class TestSyntaxErrors:
+    """Invalid programs raise SyntaxError instead of running or crashing."""
+
+    @pytest.mark.parametrize(
+        "source",
+        ["1 2", "var a = 1 var b = 2", "x = 1 y = 2", "return 1 2"],
+    )
+    def test_invalid_programs(self, source):
+        from microjs import JSSyntaxError
+
+        with pytest.raises(JSSyntaxError):
+            Context(time_limit=5.0).eval(f"function f() {{ {source}\n}}")
+
+    def test_unterminated_comment(self):
+        from microjs import JSSyntaxError
+
+        with pytest.raises(JSSyntaxError, match="Unterminated comment"):
+            Context(time_limit=5.0).eval("1 /* unterminated")
+
+    @pytest.mark.parametrize(
+        "source,expected",
+        [
+            ("var a = 1\nvar b = 2\na + b", 3),
+            ("var a = 1; { a = 2 } a", 2),
+            ("var x = 5", None),
+            ("var i = 0; do { i++ } while (i < 3) i", 3),
+            ("var f = function () { return 1 }\nf()", 1),
+            ("/* comment */ 1 /* another\n */ + 1", 2),
+        ],
+    )
+    def test_automatic_semicolon_insertion(self, source, expected):
+        assert Context(time_limit=5.0).eval(source) == expected
+
+    @pytest.mark.parametrize("source", ['"/(/"', '"/aaa]/u"', '"/a{2,1}/"'])
+    def test_invalid_regex_literal_is_syntax_error(self, source):
+        ctx = Context(time_limit=5.0)
+        result = ctx.eval(
+            f"var r; try {{ (1, eval)({source}) }} catch (e) {{ r = e.name }} r"
+        )
+        assert result == "SyntaxError"
+
+    def test_invalid_regexp_constructor_is_syntax_error(self):
+        ctx = Context(time_limit=5.0)
+        result = ctx.eval(
+            'var r; try { new RegExp("(") } catch (e) { r = e instanceof SyntaxError } r'
+        )
+        assert result is True

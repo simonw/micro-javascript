@@ -61,6 +61,7 @@ class Lexer:
 
             # Multi-line comment
             if ch == "/" and self._peek() == "*":
+                line, column = self.line, self.column
                 self._advance()  # /
                 self._advance()  # *
                 while self.pos < self.length:
@@ -69,6 +70,8 @@ class Lexer:
                         self._advance()  # /
                         break
                     self._advance()
+                else:
+                    raise JSSyntaxError("Unterminated comment", line, column)
                 continue
 
             break

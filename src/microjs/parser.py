@@ -409,7 +409,7 @@ class Parser:
         self._expect(TokenType.LPAREN, "Expected '(' after 'while'")
         test = self._parse_expression()
         self._expect(TokenType.RPAREN, "Expected ')' after condition")
-        self._consume_semicolon()
+        self._consume_semicolon(after_do_while=True)
         return DoWhileStatement(body, test)
 
     def _parse_for_statement(self) -> Node:
@@ -604,9 +604,19 @@ class Parser:
         self._consume_semicolon()
         return ExpressionStatement(expr)
 
-    def _consume_semicolon(self) -> None:
-        """Consume a semicolon if present (ASI simulation)."""
-        self._match(TokenType.SEMICOLON)
+    def _consume_semicolon(self, after_do_while: bool = False) -> None:
+        """Consume the semicolon ending a statement, applying ASI rules.
+
+        The semicolon may be omitted before '}', at the end of the input,
+        after a line break and after the ')' ending a do-while statement.
+        """
+        if self._match(TokenType.SEMICOLON) or after_do_while:
+            return
+        if self._check(TokenType.RBRACE) or self._check(TokenType.EOF):
+            return
+        if self.previous is not None and self.current.line > self.previous.line:
+            return
+        raise self._error("Expected ';' after statement")
 
     # ---- Expressions ----
 

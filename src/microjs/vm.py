@@ -33,7 +33,7 @@ from .errors import (
     MemoryLimitError,
     TimeLimitError,
 )
-from .regex import RegexTimeoutError
+from .regex import RegExpError, RegexTimeoutError
 
 
 class JSThrow(Exception):
@@ -278,6 +278,11 @@ class VM:
                 raise TimeLimitError("Regex execution timeout")
             except JSError as e:
                 self._throw(self._make_error(e.name, e.message), floor)
+            except RegExpError as e:
+                error = self._make_error(
+                    "SyntaxError", f"Invalid regular expression: {e}"
+                )
+                self._throw(error, floor)
             except RecursionError:
                 # JS -> native -> JS nesting exhausted the Python stack
                 error = self._make_error(

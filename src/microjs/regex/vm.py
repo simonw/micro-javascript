@@ -279,26 +279,7 @@ class RegexVM:
                     pc, sp, captures, registers = self._backtrack(stack)
                     continue
 
-                ch = string[sp]
-                ch_code = ord(ch.lower() if self.ignorecase else ch)
-
-                matched = False
-                for start, end in ranges:
-                    if self.ignorecase:
-                        # Check both cases
-                        if start <= ch_code <= end:
-                            matched = True
-                            break
-                        ch_upper = ord(ch.upper())
-                        if start <= ch_upper <= end:
-                            matched = True
-                            break
-                    else:
-                        if start <= ch_code <= end:
-                            matched = True
-                            break
-
-                if matched:
+                if self._in_class(string[sp], ranges):
                     sp += 1
                     pc += 1
                 else:
@@ -314,16 +295,7 @@ class RegexVM:
                     pc, sp, captures, registers = self._backtrack(stack)
                     continue
 
-                ch = string[sp]
-                ch_code = ord(ch.lower() if self.ignorecase else ch)
-
-                matched = False
-                for start, end in ranges:
-                    if start <= ch_code <= end:
-                        matched = True
-                        break
-
-                if not matched:
+                if not self._in_class(string[sp], ranges):
                     sp += 1
                     pc += 1
                 else:
@@ -607,6 +579,18 @@ class RegexVM:
 
             else:
                 raise RuntimeError(f"Unknown opcode: {opcode}")
+
+    def _in_class(self, ch: str, ranges) -> bool:
+        """Whether ch is in a character class, ignoring case if requested."""
+        candidates = (ch, ch.lower(), ch.upper()) if self.ignorecase else (ch,)
+        for candidate in candidates:
+            if len(candidate) != 1:
+                continue  # e.g. "ß".upper() is "SS"
+            code = ord(candidate)
+            for start, end in ranges:
+                if start <= code <= end:
+                    return True
+        return False
 
     def _backtrack(self, stack: List[Tuple]) -> Tuple:
         """Pop and return state from backtrack stack."""

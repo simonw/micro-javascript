@@ -665,3 +665,21 @@ class TestComplexPatterns:
         re = RegExp(r"<(\w+)>.*?</\1>")
         assert re.test("<div>content</div>") is True
         assert re.test("<div>content</span>") is False
+
+
+class TestCaseInsensitiveClasses:
+    """With the i flag a negated class is the complement of the plain one."""
+
+    @pytest.mark.parametrize(
+        "pattern,text,expected",
+        [
+            (r"[^A-B]", "a", False),
+            (r"[^a-b]", "A", False),
+            (r"[^x]", "X", False),
+            (r"[^x]", "y", True),
+            (r"[A-B]", "a", True),
+            (r"[a-b]", "B", True),
+        ],
+    )
+    def test_negated_class_ignores_case(self, pattern, text, expected):
+        assert RegExp(pattern, "i").test(text) is expected

@@ -66,27 +66,23 @@ class TestArrowFunctionScope:
     def test_arrow_captures_outer_var(self):
         """Arrow function captures outer variables."""
         ctx = Context()
-        result = ctx.eval(
-            """
+        result = ctx.eval("""
             var x = 10;
             var f = () => x;
             f()
-        """
-        )
+        """)
         assert result == 10
 
     def test_arrow_closure(self):
         """Arrow function creates proper closures."""
         ctx = Context()
-        result = ctx.eval(
-            """
+        result = ctx.eval("""
             function makeAdder(n) {
                 return x => x + n;
             }
             var add5 = makeAdder(5);
             add5(10)
-        """
-        )
+        """)
         assert result == 15
 
 
@@ -102,15 +98,13 @@ class TestArrowFunctionEdgeCases:
     def test_arrow_multiple_statements(self):
         """Arrow function with multiple statements in block."""
         ctx = Context()
-        result = ctx.eval(
-            """
+        result = ctx.eval("""
             var f = (a, b) => {
                 var sum = a + b;
                 return sum * 2;
             };
             f(3, 4)
-        """
-        )
+        """)
         assert result == 14
 
     def test_nested_arrow_functions(self):

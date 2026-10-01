@@ -74,26 +74,30 @@ PASSING_TESTS = {
     "test_json",
     "test_typed_array",
     "test_global_eval",
+    "test_large_eval_parse_stack",
 }
 
 # Tests that are known to fail (with reasons)
 FAILING_TESTS = {
-    "test_regexp": "Capture groups inside repetitions not reset correctly",
-    "test_line_column_numbers": "Line/column tracking not implemented",
-    "test_large_eval_parse_stack": "Deeply nested parsing not implemented",
+    "test_regexp": "Deeply nested regex groups exceed the regex parser's recursion",
+    "test_line_column_numbers": "Error.prototype.stack is not implemented",
 }
 
 
-@pytest.mark.parametrize(
-    "func_name",
-    [name for name, _ in _TEST_CASES],
-    ids=lambda x: x,
-)
+def _builtin_params():
+    """Build params, marking known failures so they still run (strict xfail)."""
+    params = []
+    for name, _ in _TEST_CASES:
+        marks = []
+        if name in FAILING_TESTS:
+            marks.append(pytest.mark.xfail(reason=FAILING_TESTS[name]))
+        params.append(pytest.param(name, id=name, marks=marks))
+    return params
+
+
+@pytest.mark.parametrize("func_name", _builtin_params())
 def test_builtin_function(func_name: str):
     """Run an individual test function from test_builtin.js."""
-    if func_name in FAILING_TESTS:
-        pytest.xfail(FAILING_TESTS[func_name])
-
     ctx = Context(time_limit=5.0)
 
     # Load all the function definitions

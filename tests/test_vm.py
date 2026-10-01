@@ -340,30 +340,26 @@ class TestForOf:
     def test_for_of_array(self):
         """Basic for...of with array."""
         ctx = Context()
-        result = ctx.eval(
-            """
+        result = ctx.eval("""
             var sum = 0;
             var arr = [1, 2, 3, 4, 5];
             for (var x of arr) {
                 sum += x;
             }
             sum
-        """
-        )
+        """)
         assert result == 15
 
     def test_for_of_string(self):
         """for...of with string iterates characters."""
         ctx = Context()
-        result = ctx.eval(
-            """
+        result = ctx.eval("""
             var chars = [];
             for (var c of "abc") {
                 chars.push(c);
             }
             chars.join(",")
-        """
-        )
+        """)
         assert result == "a,b,c"
 
 
@@ -376,37 +372,32 @@ class TestGetterSetter:
     def test_getter(self):
         """Basic getter."""
         ctx = Context()
-        result = ctx.eval(
-            """
+        result = ctx.eval("""
             var obj = {
                 _x: 10,
                 get x() { return this._x; }
             };
             obj.x
-        """
-        )
+        """)
         assert result == 10
 
     def test_setter(self):
         """Basic setter."""
         ctx = Context()
-        result = ctx.eval(
-            """
+        result = ctx.eval("""
             var obj = {
                 _x: 0,
                 set x(v) { this._x = v; }
             };
             obj.x = 42;
             obj._x
-        """
-        )
+        """)
         assert result == 42
 
     def test_getter_setter_combined(self):
         """Getter and setter together."""
         ctx = Context()
-        result = ctx.eval(
-            """
+        result = ctx.eval("""
             var obj = {
                 _value: 5,
                 get value() { return this._value * 2; },
@@ -414,8 +405,7 @@ class TestGetterSetter:
             };
             obj.value = 10;
             obj.value
-        """
-        )
+        """)
         assert result == 20  # 10 * 2
 
 
@@ -425,8 +415,7 @@ class TestTryFinallyBreak:
     def test_break_in_try_finally(self):
         """Break inside try should run finally block first."""
         ctx = Context()
-        result = ctx.eval(
-            """
+        result = ctx.eval("""
             var s = '';
             for(;;) {
                 try {
@@ -437,8 +426,7 @@ class TestTryFinallyBreak:
                 }
             }
             s
-        """
-        )
+        """)
         assert result == "tf"
 
 
@@ -488,8 +476,7 @@ class TestASI:
         """break followed by identifier on new line should not consume identifier as label."""
         ctx = Context()
         # break should get ASI, i++ should be a separate statement
-        result = ctx.eval(
-            """
+        result = ctx.eval("""
             var i = 0;
             while (i < 3) {
                 if (i > 0)
@@ -497,15 +484,13 @@ class TestASI:
                 i++
             }
             i
-        """
-        )
+        """)
         assert result == 1
 
     def test_continue_asi_newline(self):
         """continue followed by identifier on new line should not consume identifier as label."""
         ctx = Context()
-        result = ctx.eval(
-            """
+        result = ctx.eval("""
             var sum = 0;
             for (var i = 0; i < 5; i++) {
                 if (i == 2)
@@ -513,8 +498,7 @@ class TestASI:
                 sum += i
             }
             sum
-        """
-        )
+        """)
         # 0 + 1 + 3 + 4 = 8 (skipping 2)
         assert result == 8
 
@@ -525,52 +509,44 @@ class TestMemberUpdate:
     def test_object_property_postfix_increment(self):
         """a.x++ returns old value and increments."""
         ctx = Context()
-        result = ctx.eval(
-            """
+        result = ctx.eval("""
             var a = {x: 5};
             var r = a.x++;
             [r, a.x]
-        """
-        )
+        """)
         assert result[0] == 5
         assert result[1] == 6
 
     def test_object_property_prefix_increment(self):
         """++a.x returns new value."""
         ctx = Context()
-        result = ctx.eval(
-            """
+        result = ctx.eval("""
             var a = {x: 5};
             var r = ++a.x;
             [r, a.x]
-        """
-        )
+        """)
         assert result[0] == 6
         assert result[1] == 6
 
     def test_array_element_postfix_increment(self):
         """arr[0]++ works."""
         ctx = Context()
-        result = ctx.eval(
-            """
+        result = ctx.eval("""
             var arr = [10];
             var r = arr[0]++;
             [r, arr[0]]
-        """
-        )
+        """)
         assert result[0] == 10
         assert result[1] == 11
 
     def test_object_property_decrement(self):
         """a.x-- works."""
         ctx = Context()
-        result = ctx.eval(
-            """
+        result = ctx.eval("""
             var a = {x: 5};
             var r = a.x--;
             [r, a.x]
-        """
-        )
+        """)
         assert result[0] == 5
         assert result[1] == 4
 

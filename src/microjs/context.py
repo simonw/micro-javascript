@@ -3,12 +3,20 @@
 import json
 import math
 import random
+import sys
 import time
 from typing import Any, Dict, Optional
 
 from .parser import Parser
 from .compiler import Compiler
-from .vm import VM
+from .vm import (
+    ARRAY_METHODS,
+    NUMBER_METHODS,
+    STRING_METHODS,
+    VM,
+    JSThrow,
+    heap_size,
+)
 from .values import (
     UNDEFINED,
     NULL,
@@ -21,8 +29,96 @@ from .values import (
     JSBoundMethod,
     to_string,
     to_number,
+    to_array_length,
+    own_enumerable_keys,
+    CURRENT_VM,
 )
-from .errors import JSError, MemoryLimitError, TimeLimitError
+from .ast_nodes import ExpressionStatement, FunctionExpression
+from .errors import (
+    JSError,
+    JSRangeError,
+    JSSyntaxError,
+    JSTypeError,
+    MemoryLimitError,
+    TimeLimitError,
+)
+from .numbers import (
+    BINARY_MATH,
+    MAX_SAFE_INTEGER,
+    UNARY_MATH,
+    VARIADIC_MATH,
+    int_from_digits,
+    js_number,
+    number_to_string,
+    parse_float,
+    parse_int,
+)
+
+# Characters encodeURIComponent leaves alone, and those encodeURI also keeps
+URI_UNRESERVED = (
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.!~*'()"
+)
+URI_RESERVED = ";/?:@&=+$,"
+
+
+def uri_encoder(keep: str):
+    """Build encodeURI or encodeURIComponent: %-encode UTF-8 except keep."""
+
+    def encode(*args):
+        text = to_string(args[0]) if args else "undefined"
+        try:
+            data = text.encode("utf-8")
+        except UnicodeEncodeError:
+            raise JSError("URI malformed", "URIError")
+        return "".join(
+            chr(byte) if chr(byte) in keep else f"%{byte:02X}" for byte in data
+        )
+
+    return encode
+
+
+def uri_decoder(reserved: str):
+    """Build decodeURI or decodeURIComponent: escapes of reserved stay as-is."""
+
+    def decode(*args):
+        text = to_string(args[0]) if args else "undefined"
+        out = []
+        i = 0
+        while i < len(text):
+            if text[i] != "%":
+                out.append(text[i])
+                i += 1
+                continue
+            # Collect one UTF-8 sequence of %XX escapes
+            data = bytearray()
+            start = i
+            while True:
+                hex_digits = text[i + 1 : i + 3]
+                if len(hex_digits) < 2 or not all(
+                    c in "0123456789abcdefABCDEF" for c in hex_digits
+                ):
+                    raise JSError("URI malformed", "URIError")
+                data.append(int(hex_digits, 16))
+                i += 3
+                lead = data[0]
+                needed = (
+                    1
+                    if lead < 0x80
+                    else 2 if lead >> 5 == 6 else 3 if lead >> 4 == 14 else 4
+                )
+                if len(data) == needed or i >= len(text) or text[i] != "%":
+                    break
+            try:
+                decoded = data.decode("utf-8")
+            except UnicodeDecodeError:
+                raise JSError("URI malformed", "URIError")
+            if len(decoded) == 1 and decoded in reserved:
+                out.append(text[start:i])
+            else:
+                out.append(decoded)
+        return "".join(out)
+
+    return decode
 
 
 class Context:
@@ -36,14 +132,21 @@ class Context:
         """Create a new JavaScript context.
 
         Args:
-            memory_limit: Maximum memory usage in bytes (approximate)
-            time_limit: Maximum execution time in seconds
+            memory_limit: Maximum bytes of live script data, not counting the
+                built-ins. Value sizes are estimated, so this is approximate.
+            time_limit: Maximum execution time in seconds, per eval() call
         """
         self.memory_limit = memory_limit
         self.time_limit = time_limit
         self._globals: Dict[str, JSValue] = {}
         self._current_vm = None  # Set during eval() for timeout checking
+        # The original built-in prototypes, shared with every VM
+        self.intrinsics: Dict[str, JSObject] = {}
         self._setup_globals()
+        # Memory used by the built-ins, which does not count against the limit
+        self._baseline_bytes = (
+            heap_size(list(self._globals.values())) if memory_limit else 0
+        )
 
     def _setup_globals(self) -> None:
         """Set up built-in global objects and functions."""
@@ -76,7 +179,9 @@ class Context:
         # JSON object
         self._globals["JSON"] = self._create_json_object()
 
-        # Number constructor and methods
+        # Number constructor and methods (Number.parseInt is the global parseInt)
+        self._parse_int = self._global_parseint
+        self._parse_float = self._global_parsefloat
         self._globals["Number"] = self._create_number_constructor()
 
         # String constructor and methods
@@ -119,13 +224,109 @@ class Context:
         self._globals["ArrayBuffer"] = self._create_arraybuffer_constructor()
 
         # Global number functions
+        self._globals["encodeURIComponent"] = uri_encoder(URI_UNRESERVED)
+        self._globals["encodeURI"] = uri_encoder(URI_UNRESERVED + URI_RESERVED + "#")
+        self._globals["decodeURIComponent"] = uri_decoder("")
+        self._globals["decodeURI"] = uri_decoder(URI_RESERVED + "#")
         self._globals["isNaN"] = self._global_isnan
         self._globals["isFinite"] = self._global_isfinite
-        self._globals["parseInt"] = self._global_parseint
-        self._globals["parseFloat"] = self._global_parsefloat
+        self._globals["parseInt"] = self._parse_int
+        self._globals["parseFloat"] = self._parse_float
 
         # eval function
         self._globals["eval"] = self._create_eval_function()
+
+        self._install_prototypes()
+
+    def _install_prototypes(self) -> None:
+        """Link constructors with their prototypes and add built-in methods."""
+        intrinsics = self.intrinsics
+        object_prototype = intrinsics["ObjectPrototype"]
+        function_prototype = intrinsics["FunctionPrototype"]
+        globals_ = self._globals
+
+        def link(constructor, prototype):
+            constructor._prototype = function_prototype
+            constructor.set_hidden("prototype", prototype)
+            prototype.set_hidden("constructor", constructor)
+
+        def native(kind, name):
+            def call(this, *args):
+                vm = CURRENT_VM.get()
+                if vm is None:
+                    raise JSTypeError(f"{name}() called outside a running script")
+                return vm.call_builtin(kind, name, this, args)
+
+            return JSBoundMethod(call, name)
+
+        def install(prototype, kind, names):
+            for name in names:
+                prototype.set_hidden(name, native(kind, name))
+
+        def new_prototype(name):
+            prototype = JSObject(object_prototype)
+            intrinsics[name] = prototype
+            return prototype
+
+        link(globals_["Object"], object_prototype)
+        for name in (
+            "toString",
+            "hasOwnProperty",
+            "valueOf",
+            "isPrototypeOf",
+            "propertyIsEnumerable",
+            "toLocaleString",
+        ):
+            object_prototype.set_hidden(name, object_prototype.get(name))
+
+        link(globals_["Function"], function_prototype)
+        install(function_prototype, "function", ("call", "apply", "bind", "toString"))
+
+        intrinsics["ArrayPrototype"] = self._array_prototype
+        link(globals_["Array"], self._array_prototype)
+        install(self._array_prototype, "array", ARRAY_METHODS)
+
+        string_prototype = new_prototype("StringPrototype")
+        link(globals_["String"], string_prototype)
+        install(string_prototype, "string", STRING_METHODS)
+
+        number_prototype = new_prototype("NumberPrototype")
+        link(globals_["Number"], number_prototype)
+        install(number_prototype, "number", NUMBER_METHODS)
+
+        boolean_prototype = new_prototype("BooleanPrototype")
+        link(globals_["Boolean"], boolean_prototype)
+        install(boolean_prototype, "boolean", ("toString", "valueOf"))
+
+        regexp_prototype = new_prototype("RegExpPrototype")
+        link(globals_["RegExp"], regexp_prototype)
+        install(regexp_prototype, "regexp", ("test", "exec", "toString"))
+
+        # Error types inherit from Error
+        error = globals_["Error"]
+        error_prototype = error.get("prototype")
+        error_prototype._prototype = object_prototype
+        intrinsics["ErrorPrototype"] = error_prototype
+        link(error, error_prototype)
+        install(error_prototype, "error", ("toString",))
+        for name in (
+            "TypeError",
+            "SyntaxError",
+            "ReferenceError",
+            "RangeError",
+            "URIError",
+            "EvalError",
+        ):
+            constructor = globals_[name]
+            prototype = constructor.get("prototype")
+            prototype._prototype = error_prototype
+            link(constructor, prototype)
+            constructor._prototype = error
+
+        # Remaining constructors are functions too
+        for name, value in globals_.items():
+            if isinstance(value, JSCallableObject) and value._prototype is None:
+                value._prototype = function_prototype
 
     def _console_log(self, *args: JSValue) -> None:
         """Console.log implementation."""
@@ -162,7 +363,17 @@ class Context:
                 return "[object String]"
             if isinstance(this_val, JSArray):
                 return "[object Array]"
-            if callable(this_val) or isinstance(this_val, JSCallableObject):
+            if isinstance(this_val, JSRegExp):
+                return "[object RegExp]"
+            error_prototype = self.intrinsics.get("ErrorPrototype")
+            proto = getattr(this_val, "_prototype", None)
+            while proto is not None:
+                if proto is error_prototype:
+                    return "[object Error]"
+                proto = proto._prototype
+            if callable(this_val) or isinstance(
+                this_val, (JSCallableObject, JSFunction)
+            ):
                 return "[object Function]"
             return "[object Object]"
 
@@ -211,34 +422,55 @@ class Context:
         object_prototype.set("valueOf", JSBoundMethod(proto_valueOf))
         object_prototype.set("isPrototypeOf", JSBoundMethod(proto_isPrototypeOf))
 
+        def proto_propertyIsEnumerable(this_val, *args):
+            key = to_string(args[0]) if args else "undefined"
+            if isinstance(this_val, JSArray):
+                if key.isdigit() and int(key) < len(this_val._elements):
+                    return True
+            if not isinstance(this_val, JSObject):
+                return False
+            return key in this_val._properties and key not in this_val._hidden
+
+        def proto_toLocaleString(this_val, *args):
+            vm = CURRENT_VM.get()
+            return vm._call_callback(
+                vm._get_property(this_val, "toString"), [], this_val
+            )
+
+        object_prototype.set(
+            "propertyIsEnumerable", JSBoundMethod(proto_propertyIsEnumerable)
+        )
+        object_prototype.set("toLocaleString", JSBoundMethod(proto_toLocaleString))
+
         # Store for other constructors to use
         self._object_prototype = object_prototype
+        self.intrinsics["ObjectPrototype"] = object_prototype
+
+        # Function.prototype is itself a function, which returns undefined
+        function_prototype = JSCallableObject(lambda *args: UNDEFINED, object_prototype)
+        self.intrinsics["FunctionPrototype"] = function_prototype
+        obj_constructor._prototype = function_prototype
 
         def keys_fn(*args):
             obj = args[0] if args else UNDEFINED
-            if not isinstance(obj, JSObject):
-                return JSArray()
             arr = JSArray()
-            arr._elements = list(obj.keys())
+            arr._elements = own_enumerable_keys(obj)
             return arr
 
         def values_fn(*args):
             obj = args[0] if args else UNDEFINED
-            if not isinstance(obj, JSObject):
-                return JSArray()
+            vm = CURRENT_VM.get()
             arr = JSArray()
-            arr._elements = [obj.get(k) for k in obj.keys()]
+            arr._elements = [vm._get_property(obj, k) for k in own_enumerable_keys(obj)]
             return arr
 
         def entries_fn(*args):
             obj = args[0] if args else UNDEFINED
-            if not isinstance(obj, JSObject):
-                return JSArray()
+            vm = CURRENT_VM.get()
             arr = JSArray()
-            arr._elements = []
-            for k in obj.keys():
+            for k in own_enumerable_keys(obj):
                 entry = JSArray()
-                entry._elements = [k, obj.get(k)]
+                entry._elements = [k, vm._get_property(obj, k)]
                 arr._elements.append(entry)
             return arr
 
@@ -248,11 +480,10 @@ class Context:
             target = args[0]
             if not isinstance(target, JSObject):
                 return target
-            for i in range(1, len(args)):
-                source = args[i]
-                if isinstance(source, JSObject):
-                    for k in source.keys():
-                        target.set(k, source.get(k))
+            vm = CURRENT_VM.get()
+            for source in args[1:]:
+                for k in own_enumerable_keys(source):
+                    vm._set_property(target, k, vm._get_property(source, k))
             return target
 
         def get_prototype_of(*args):
@@ -339,29 +570,119 @@ class Context:
                 return UNDEFINED
             prop_name = to_string(prop)
 
-            if (
-                not obj.has(prop_name)
-                and prop_name not in obj._getters
-                and prop_name not in obj._setters
-            ):
-                return UNDEFINED
-
-            descriptor = JSObject()
-
+            descriptor = JSObject(object_prototype)
             getter = obj._getters.get(prop_name)
             setter = obj._setters.get(prop_name)
-
             if getter or setter:
                 descriptor.set("get", getter if getter else UNDEFINED)
                 descriptor.set("set", setter if setter else UNDEFINED)
-            else:
+            elif isinstance(obj, JSArray) and prop_name in array_own_keys(obj):
+                value = (
+                    obj.length
+                    if prop_name == "length"
+                    else obj._elements[int(prop_name)]
+                )
+                descriptor.set("value", value)
+                descriptor.set("writable", not obj._frozen)
+            elif obj.has(prop_name):
                 descriptor.set("value", obj.get(prop_name))
-                descriptor.set("writable", True)
-
-            descriptor.set("enumerable", True)
-            descriptor.set("configurable", True)
-
+                descriptor.set("writable", not obj._frozen)
+            else:
+                return UNDEFINED
+            enumerable = prop_name not in obj._hidden and prop_name != "length"
+            descriptor.set("enumerable", enumerable)
+            descriptor.set("configurable", not obj._sealed and prop_name != "length")
             return descriptor
+
+        def array_own_keys(arr):
+            return [str(i) for i in range(len(arr._elements))] + ["length"]
+
+        def own_property_names(*args):
+            """Object.getOwnPropertyNames(obj): all own keys, enumerable or not."""
+            obj = args[0] if args else UNDEFINED
+            if isinstance(obj, str):
+                names = [str(i) for i in range(len(obj))] + ["length"]
+            elif not isinstance(obj, JSObject):
+                names = []
+            else:
+                names = array_own_keys(obj) if isinstance(obj, JSArray) else []
+                for key in list(obj._properties) + list(obj._getters):
+                    if key not in names:
+                        names.append(key)
+            result = JSArray()
+            result._elements = names
+            return result
+
+        def own_property_descriptors(*args):
+            obj = args[0] if args else UNDEFINED
+            result = JSObject(object_prototype)
+            for name in own_property_names(obj)._elements:
+                result.set(name, get_own_property_descriptor(obj, name))
+            return result
+
+        def is_fn(*args):
+            """Object.is: SameValue (NaN is NaN, 0 is not -0)."""
+            a = args[0] if args else UNDEFINED
+            b = args[1] if len(args) > 1 else UNDEFINED
+            if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+                if isinstance(a, bool) or isinstance(b, bool):
+                    return a is b
+                if a != a and b != b:
+                    return True
+                if a == 0 and b == 0:
+                    return math.copysign(1, a) == math.copysign(1, b)
+                return a == b
+            if isinstance(a, str) and isinstance(b, str):
+                return a == b
+            return a is b
+
+        def from_entries(*args):
+            entries = args[0] if args else UNDEFINED
+            if not isinstance(entries, JSArray):
+                raise JSTypeError("Object.fromEntries requires an array of entries")
+            result = JSObject(object_prototype)
+            for entry in entries._elements:
+                if not isinstance(entry, JSArray):
+                    raise JSTypeError("Object.fromEntries entries must be arrays")
+                key = entry.get_index(0)
+                result.set(to_string(key), entry.get_index(1))
+            return result
+
+        def restrict(level):
+            """Object.preventExtensions (1), seal (2) and freeze (3)."""
+
+            def restrict_fn(*args):
+                obj = args[0] if args else UNDEFINED
+                if isinstance(obj, JSObject):
+                    obj._extensible = False
+                    if level >= 2:
+                        obj._sealed = True
+                    if level >= 3:
+                        obj._frozen = True
+                return obj
+
+            return restrict_fn
+
+        def has_no_own_properties(obj):
+            if isinstance(obj, JSArray) and obj._elements:
+                return False
+            return not obj._properties and not obj._getters and not obj._setters
+
+        def is_frozen(*args):
+            obj = args[0] if args else UNDEFINED
+            if not isinstance(obj, JSObject):
+                return True
+            return obj._frozen or (not obj._extensible and has_no_own_properties(obj))
+
+        def is_sealed(*args):
+            obj = args[0] if args else UNDEFINED
+            if not isinstance(obj, JSObject):
+                return True
+            return obj._sealed or (not obj._extensible and has_no_own_properties(obj))
+
+        def is_extensible(*args):
+            obj = args[0] if args else UNDEFINED
+            return isinstance(obj, JSObject) and obj._extensible
 
         obj_constructor.set("keys", keys_fn)
         obj_constructor.set("values", values_fn)
@@ -373,6 +694,16 @@ class Context:
         obj_constructor.set("defineProperties", define_properties)
         obj_constructor.set("create", create_fn)
         obj_constructor.set("getOwnPropertyDescriptor", get_own_property_descriptor)
+        obj_constructor.set("getOwnPropertyDescriptors", own_property_descriptors)
+        obj_constructor.set("getOwnPropertyNames", own_property_names)
+        obj_constructor.set("is", is_fn)
+        obj_constructor.set("fromEntries", from_entries)
+        obj_constructor.set("preventExtensions", restrict(1))
+        obj_constructor.set("seal", restrict(2))
+        obj_constructor.set("freeze", restrict(3))
+        obj_constructor.set("isFrozen", is_frozen)
+        obj_constructor.set("isSealed", is_sealed)
+        obj_constructor.set("isExtensible", is_extensible)
         obj_constructor.set("prototype", object_prototype)
 
         return obj_constructor
@@ -385,7 +716,7 @@ class Context:
 
         def array_constructor(*args):
             if len(args) == 1 and isinstance(args[0], (int, float)):
-                arr = JSArray(int(args[0]))
+                arr = JSArray(to_array_length(args[0]))
             else:
                 arr = JSArray()
                 for arg in args:
@@ -394,54 +725,9 @@ class Context:
             return arr
 
         arr_constructor = JSCallableObject(array_constructor)
-        arr_constructor._prototype = array_prototype
-        array_prototype.set("constructor", arr_constructor)
 
         # Store for other uses
         self._array_prototype = array_prototype
-
-        # Array.prototype.sort() - sort in-place
-        def array_sort(this, *args):
-            if not isinstance(this, JSArray):
-                return this
-            comparator = args[0] if args else None
-
-            # Default string comparison
-            def default_compare(a, b):
-                # undefined values sort to the end
-                if a is UNDEFINED and b is UNDEFINED:
-                    return 0
-                if a is UNDEFINED:
-                    return 1
-                if b is UNDEFINED:
-                    return -1
-                # Convert to strings and compare
-                str_a = to_string(a)
-                str_b = to_string(b)
-                if str_a < str_b:
-                    return -1
-                if str_a > str_b:
-                    return 1
-                return 0
-
-            def compare_fn(a, b):
-                if comparator and callable(comparator):
-                    if isinstance(comparator, JSFunction):
-                        result = self._call_function(comparator, [a, b])
-                    else:
-                        result = comparator(a, b)
-                    # Convert to integer for cmp_to_key
-                    num = to_number(result) if result is not UNDEFINED else 0
-                    return int(num) if isinstance(num, (int, float)) else 0
-                return default_compare(a, b)
-
-            # Sort using Python's sort with custom key
-            from functools import cmp_to_key
-
-            this._elements.sort(key=cmp_to_key(compare_fn))
-            return this
-
-        array_prototype.set("sort", JSBoundMethod(array_sort))
 
         # Array.isArray()
         def is_array(*args):
@@ -449,6 +735,32 @@ class Context:
             return isinstance(obj, JSArray)
 
         arr_constructor.set("isArray", is_array)
+
+        def array_from(*args):
+            """Array.from(arrayLike or string, mapFn, thisArg)."""
+            source = args[0] if args else UNDEFINED
+            map_fn = args[1] if len(args) > 1 and args[1] is not UNDEFINED else None
+            this_arg = args[2] if len(args) > 2 else UNDEFINED
+            vm = CURRENT_VM.get()
+            if source is UNDEFINED or source is NULL:
+                raise JSTypeError("Array.from requires an array-like object")
+            items, _ = vm._array_receiver(source)
+            result = JSArray()
+            result._elements = items._elements[:]
+            if map_fn is not None:
+                result._elements = [
+                    vm._call_callback(map_fn, [value, i], this_arg)
+                    for i, value in enumerate(result._elements)
+                ]
+            return result
+
+        def array_of(*args):
+            result = JSArray()
+            result._elements = list(args)
+            return result
+
+        arr_constructor.set("from", array_from)
+        arr_constructor.set("of", array_of)
 
         return arr_constructor
 
@@ -491,202 +803,27 @@ class Context:
         math_obj.set("SQRT2", math.sqrt(2))
         math_obj.set("SQRT1_2", math.sqrt(0.5))
 
-        # Basic functions
-        def abs_fn(*args):
-            x = to_number(args[0]) if args else float("nan")
-            return abs(x)
+        def unary(fn):
+            return lambda *args: fn(to_number(args[0]) if args else float("nan"))
 
-        def floor_fn(*args):
-            x = to_number(args[0]) if args else float("nan")
-            return math.floor(x)
+        def binary(fn):
+            def call(*args):
+                a = to_number(args[0]) if args else float("nan")
+                b = to_number(args[1]) if len(args) > 1 else float("nan")
+                return fn(a, b)
 
-        def ceil_fn(*args):
-            x = to_number(args[0]) if args else float("nan")
-            return math.ceil(x)
+            return call
 
-        def round_fn(*args):
-            x = to_number(args[0]) if args else float("nan")
-            # JavaScript-style round (round half towards positive infinity)
-            return math.floor(x + 0.5)
+        def variadic(fn):
+            return lambda *args: fn([to_number(arg) for arg in args])
 
-        def trunc_fn(*args):
-            x = to_number(args[0]) if args else float("nan")
-            return math.trunc(x)
-
-        def min_fn(*args):
-            if not args:
-                return float("inf")
-            nums = [to_number(a) for a in args]
-            return min(nums)
-
-        def max_fn(*args):
-            if not args:
-                return float("-inf")
-            nums = [to_number(a) for a in args]
-            return max(nums)
-
-        def pow_fn(*args):
-            x = to_number(args[0]) if args else float("nan")
-            y = to_number(args[1]) if len(args) > 1 else float("nan")
-            return math.pow(x, y)
-
-        def sqrt_fn(*args):
-            x = to_number(args[0]) if args else float("nan")
-            if x < 0:
-                return float("nan")
-            return math.sqrt(x)
-
-        def sin_fn(*args):
-            x = to_number(args[0]) if args else float("nan")
-            return math.sin(x)
-
-        def cos_fn(*args):
-            x = to_number(args[0]) if args else float("nan")
-            return math.cos(x)
-
-        def tan_fn(*args):
-            x = to_number(args[0]) if args else float("nan")
-            return math.tan(x)
-
-        def asin_fn(*args):
-            x = to_number(args[0]) if args else float("nan")
-            if x < -1 or x > 1:
-                return float("nan")
-            return math.asin(x)
-
-        def acos_fn(*args):
-            x = to_number(args[0]) if args else float("nan")
-            if x < -1 or x > 1:
-                return float("nan")
-            return math.acos(x)
-
-        def atan_fn(*args):
-            x = to_number(args[0]) if args else float("nan")
-            return math.atan(x)
-
-        def atan2_fn(*args):
-            y = to_number(args[0]) if args else float("nan")
-            x = to_number(args[1]) if len(args) > 1 else float("nan")
-            return math.atan2(y, x)
-
-        def log_fn(*args):
-            x = to_number(args[0]) if args else float("nan")
-            if x <= 0:
-                return float("-inf") if x == 0 else float("nan")
-            return math.log(x)
-
-        def exp_fn(*args):
-            x = to_number(args[0]) if args else float("nan")
-            return math.exp(x)
-
-        def random_fn(*args):
-            return random.random()
-
-        def sign_fn(*args):
-            x = to_number(args[0]) if args else float("nan")
-            if math.isnan(x):
-                return float("nan")
-            if x > 0:
-                return 1
-            if x < 0:
-                return -1
-            return 0
-
-        def imul_fn(*args):
-            # 32-bit integer multiplication
-            a = int(to_number(args[0])) if args else 0
-            b = int(to_number(args[1])) if len(args) > 1 else 0
-            # Convert to 32-bit signed integers
-            a = a & 0xFFFFFFFF
-            b = b & 0xFFFFFFFF
-            if a >= 0x80000000:
-                a -= 0x100000000
-            if b >= 0x80000000:
-                b -= 0x100000000
-            result = (a * b) & 0xFFFFFFFF
-            if result >= 0x80000000:
-                result -= 0x100000000
-            return result
-
-        def fround_fn(*args):
-            # Convert to 32-bit float
-            import struct
-
-            x = to_number(args[0]) if args else float("nan")
-            # Pack as 32-bit float and unpack as 64-bit
-            packed = struct.pack("f", x)
-            return struct.unpack("f", packed)[0]
-
-        def clz32_fn(*args):
-            # Count leading zeros in 32-bit integer
-            x = int(to_number(args[0])) if args else 0
-            x = x & 0xFFFFFFFF
-            if x == 0:
-                return 32
-            count = 0
-            while (x & 0x80000000) == 0:
-                count += 1
-                x <<= 1
-            return count
-
-        def hypot_fn(*args):
-            if not args:
-                return 0
-            nums = [to_number(a) for a in args]
-            return math.hypot(*nums)
-
-        def cbrt_fn(*args):
-            x = to_number(args[0]) if args else float("nan")
-            if x < 0:
-                return -((-x) ** (1 / 3))
-            return x ** (1 / 3)
-
-        def log2_fn(*args):
-            x = to_number(args[0]) if args else float("nan")
-            return math.log2(x) if x > 0 else float("nan")
-
-        def log10_fn(*args):
-            x = to_number(args[0]) if args else float("nan")
-            return math.log10(x) if x > 0 else float("nan")
-
-        def expm1_fn(*args):
-            x = to_number(args[0]) if args else float("nan")
-            return math.expm1(x)
-
-        def log1p_fn(*args):
-            x = to_number(args[0]) if args else float("nan")
-            return math.log1p(x) if x > -1 else float("nan")
-
-        # Set all methods
-        math_obj.set("abs", abs_fn)
-        math_obj.set("floor", floor_fn)
-        math_obj.set("ceil", ceil_fn)
-        math_obj.set("round", round_fn)
-        math_obj.set("trunc", trunc_fn)
-        math_obj.set("min", min_fn)
-        math_obj.set("max", max_fn)
-        math_obj.set("pow", pow_fn)
-        math_obj.set("sqrt", sqrt_fn)
-        math_obj.set("sin", sin_fn)
-        math_obj.set("cos", cos_fn)
-        math_obj.set("tan", tan_fn)
-        math_obj.set("asin", asin_fn)
-        math_obj.set("acos", acos_fn)
-        math_obj.set("atan", atan_fn)
-        math_obj.set("atan2", atan2_fn)
-        math_obj.set("log", log_fn)
-        math_obj.set("exp", exp_fn)
-        math_obj.set("random", random_fn)
-        math_obj.set("sign", sign_fn)
-        math_obj.set("imul", imul_fn)
-        math_obj.set("fround", fround_fn)
-        math_obj.set("clz32", clz32_fn)
-        math_obj.set("hypot", hypot_fn)
-        math_obj.set("cbrt", cbrt_fn)
-        math_obj.set("log2", log2_fn)
-        math_obj.set("log10", log10_fn)
-        math_obj.set("expm1", expm1_fn)
-        math_obj.set("log1p", log1p_fn)
+        for name, fn in UNARY_MATH.items():
+            math_obj.set(name, unary(fn))
+        for name, fn in BINARY_MATH.items():
+            math_obj.set(name, binary(fn))
+        for name, fn in VARIADIC_MATH.items():
+            math_obj.set(name, variadic(fn))
+        math_obj.set("random", lambda *args: random.random())
 
         return math_obj
 
@@ -695,10 +832,22 @@ class Context:
         json_obj = JSObject()
         ctx = self  # Reference for closures
 
+        def reject_constant(name):
+            # Python's json accepts NaN and Infinity; JSON does not
+            raise json.JSONDecodeError(f"Unexpected token {name}", name, 0)
+
+        def parse_json_int(text):
+            n = int_from_digits(text.lstrip("-"))
+            if text.startswith("-"):
+                return -n if n else -0.0
+            return n
+
         def parse_fn(*args):
             text = to_string(args[0]) if args else ""
             try:
-                py_value = json.loads(text)
+                py_value = json.loads(
+                    text, parse_constant=reject_constant, parse_int=parse_json_int
+                )
                 return ctx._to_js(py_value)
             except json.JSONDecodeError as e:
                 from .errors import JSSyntaxError
@@ -709,9 +858,26 @@ class Context:
             value = args[0] if args else UNDEFINED
 
             # Convert JS value to Python for json.dumps, handling undefined specially
+            in_progress = set()  # ids of the arrays and objects being serialized
+
             def to_json_value(v):
+                if isinstance(v, JSFunction) or (
+                    callable(v) and not isinstance(v, JSObject)
+                ):
+                    return UNDEFINED
+                if isinstance(v, JSObject):
+                    if id(v) in in_progress:
+                        raise JSTypeError("Converting circular structure to JSON")
+                    in_progress.add(id(v))
+                    try:
+                        return container_to_json(v)
+                    finally:
+                        in_progress.discard(id(v))
+                return scalar_to_json(v)
+
+            def scalar_to_json(v):
                 if v is UNDEFINED:
-                    return None  # Will be filtered out for object properties
+                    return UNDEFINED  # Skipped in objects, null in arrays
                 if v is NULL:
                     return None
                 if isinstance(v, bool):
@@ -720,28 +886,45 @@ class Context:
                     return v
                 if isinstance(v, str):
                     return v
+                return None
+
+            def container_to_json(v):
                 if isinstance(v, JSArray):
-                    # For arrays, undefined becomes null
-                    return [
-                        None if elem is UNDEFINED else to_json_value(elem)
-                        for elem in v._elements
-                    ]
+                    # For arrays, undefined and functions become null
+                    items = [to_json_value(elem) for elem in v._elements]
+                    return [None if item is UNDEFINED else item for item in items]
                 if isinstance(v, JSObject):
-                    # For objects, skip undefined values
+                    # For objects, skip undefined values and functions
                     result = {}
-                    for k, val in v._properties.items():
-                        if val is not UNDEFINED:
-                            result[k] = to_json_value(val)
+                    for k in v.keys():
+                        item = to_json_value(v._properties[k])
+                        if item is not UNDEFINED:
+                            result[k] = item
                     return result
                 return None
 
-            py_value = to_json_value(value)
-            try:
-                return json.dumps(py_value, separators=(",", ":"))
-            except (TypeError, ValueError) as e:
-                from .errors import JSTypeError
+            def dump(v):
+                # Numbers use JavaScript formatting; NaN and Infinity are null
+                if isinstance(v, bool) or v is None:
+                    return json.dumps(v)
+                if isinstance(v, (int, float)):
+                    return number_to_string(v) if math.isfinite(v) else "null"
+                if isinstance(v, list):
+                    return "[" + ",".join(dump(item) for item in v) + "]"
+                if isinstance(v, dict):
+                    return (
+                        "{"
+                        + ",".join(
+                            f"{json.dumps(k)}:{dump(val)}" for k, val in v.items()
+                        )
+                        + "}"
+                    )
+                return json.dumps(v, ensure_ascii=False)
 
-                raise JSTypeError(f"JSON.stringify: {e}")
+            py_value = to_json_value(value)
+            if py_value is UNDEFINED:
+                return UNDEFINED
+            return dump(py_value)
 
         json_obj.set("parse", parse_fn)
         json_obj.set("stringify", stringify_fn)
@@ -759,100 +942,40 @@ class Context:
 
         num_constructor = JSCallableObject(number_call)
 
+        def is_number(x):
+            return isinstance(x, (int, float)) and not isinstance(x, bool)
+
         def isNaN_fn(*args):
             x = args[0] if args else UNDEFINED
             # Number.isNaN only returns true for actual NaN
-            if not isinstance(x, (int, float)):
-                return False
-            return math.isnan(x)
+            return is_number(x) and math.isnan(x)
 
         def isFinite_fn(*args):
             x = args[0] if args else UNDEFINED
-            if not isinstance(x, (int, float)):
-                return False
-            return not (math.isnan(x) or math.isinf(x))
+            return is_number(x) and math.isfinite(x)
 
         def isInteger_fn(*args):
             x = args[0] if args else UNDEFINED
-            if not isinstance(x, (int, float)):
-                return False
-            if math.isnan(x) or math.isinf(x):
-                return False
-            return x == int(x)
+            return is_number(x) and math.isfinite(x) and x == math.floor(x)
 
-        def parseInt_fn(*args):
-            s = to_string(args[0]) if args else ""
-            radix = int(to_number(args[1])) if len(args) > 1 else 10
-            if radix == 0:
-                radix = 10
-            s = s.strip()
-            if not s:
-                return float("nan")
-            # Handle leading sign
-            sign = 1
-            if s.startswith("-"):
-                sign = -1
-                s = s[1:]
-            elif s.startswith("+"):
-                s = s[1:]
-            # Handle 0x prefix for hex
-            if s.startswith("0x") or s.startswith("0X"):
-                radix = 16
-                s = s[2:]
-            # Parse digits
-            result = 0
-            found = False
-            for ch in s:
-                if ch.isdigit():
-                    digit = ord(ch) - ord("0")
-                elif ch.isalpha():
-                    digit = ord(ch.lower()) - ord("a") + 10
-                else:
-                    break
-                if digit >= radix:
-                    break
-                result = result * radix + digit
-                found = True
-            if not found:
-                return float("nan")
-            return sign * result
-
-        def parseFloat_fn(*args):
-            s = to_string(args[0]) if args else ""
-            s = s.strip()
-            if not s:
-                return float("nan")
-            # Find the longest valid float prefix
-            i = 0
-            has_dot = False
-            has_exp = False
-            if s[i] in "+-":
-                i += 1
-            while i < len(s):
-                if s[i].isdigit():
-                    i += 1
-                elif s[i] == "." and not has_dot:
-                    has_dot = True
-                    i += 1
-                elif s[i] in "eE" and not has_exp:
-                    has_exp = True
-                    i += 1
-                    if i < len(s) and s[i] in "+-":
-                        i += 1
-                else:
-                    break
-            if i == 0:
-                return float("nan")
-            try:
-                return float(s[:i])
-            except ValueError:
-                return float("nan")
+        def isSafeInteger_fn(*args):
+            x = args[0] if args else UNDEFINED
+            return isInteger_fn(x) and abs(x) <= MAX_SAFE_INTEGER
 
         num_constructor.set("isNaN", isNaN_fn)
         num_constructor.set("isFinite", isFinite_fn)
         num_constructor.set("isInteger", isInteger_fn)
-        num_constructor.set("parseInt", parseInt_fn)
-        num_constructor.set("parseFloat", parseFloat_fn)
+        num_constructor.set("isSafeInteger", isSafeInteger_fn)
+        num_constructor.set("parseInt", self._parse_int)
+        num_constructor.set("parseFloat", self._parse_float)
+        num_constructor.set("MAX_SAFE_INTEGER", MAX_SAFE_INTEGER)
+        num_constructor.set("MIN_SAFE_INTEGER", -MAX_SAFE_INTEGER)
+        num_constructor.set("EPSILON", 2.0**-52)
+        num_constructor.set("MAX_VALUE", sys.float_info.max)
+        num_constructor.set("MIN_VALUE", 5e-324)
+        num_constructor.set("POSITIVE_INFINITY", float("inf"))
+        num_constructor.set("NEGATIVE_INFINITY", float("-inf"))
+        num_constructor.set("NaN", float("nan"))
 
         return num_constructor
 
@@ -872,6 +995,17 @@ class Context:
             return "".join(chr(int(to_number(arg))) for arg in args)
 
         string_constructor.set("fromCharCode", fromCharCode_fn)
+
+        def fromCodePoint_fn(*args):
+            chars = []
+            for arg in args:
+                code = to_number(arg)
+                if code != code or code < 0 or code > 0x10FFFF or code != int(code):
+                    raise JSRangeError(f"Invalid code point {to_string(arg)}")
+                chars.append(chr(int(code)))
+            return "".join(chars)
+
+        string_constructor.set("fromCodePoint", fromCodePoint_fn)
 
         return string_constructor
 
@@ -950,40 +1084,30 @@ class Context:
 
             # Create a function expression to parse
             param_str = ", ".join(params)
-            source = f"(function({param_str}) {{ {body} }})"
+            source = f"(function({param_str}) {{\n{body}\n}})"
 
-            # Parse and compile
-            try:
-                parser = Parser(source)
-                ast = parser.parse()
-                compiler = Compiler()
-                bytecode_module = compiler.compile(ast)
+            # Parse errors propagate as JSSyntaxError, which the VM throws
+            # as a JavaScript SyntaxError
+            ast = Parser(source).parse()
+            # Reject bodies that close the wrapper early, such as
+            # "}); code(); (function() {", rather than running them
+            if not (
+                len(ast.body) == 1
+                and isinstance(ast.body[0], ExpressionStatement)
+                and isinstance(ast.body[0].expression, FunctionExpression)
+            ):
+                raise JSSyntaxError("Invalid function body")
+            bytecode_module = Compiler().compile(ast)
 
-                # The result should be a function expression wrapped in a program
-                # We need to extract the function from the bytecode
-                # Execute the expression to get the function object
-                vm = VM(self.memory_limit, self.time_limit)
-                vm.globals = self._globals
-                result = vm.run(bytecode_module)
-
-                if isinstance(result, JSFunction):
-                    return result
-                else:
-                    # Fallback: return a simple empty function
-                    return JSFunction("anonymous", params, bytes(), {})
-            except Exception as e:
-                from .errors import JSError
-
-                raise JSError(f"SyntaxError: {str(e)}")
+            # Evaluating the program creates the function object (no
+            # user code runs)
+            return self._new_vm().run(bytecode_module)
 
         fn_constructor = JSCallableObject(function_constructor_fn)
-
-        # Function.prototype - add basic methods
-        fn_prototype = JSObject()
-
-        # These are implemented in VM's _get_property for JSFunction
-        # but we still set them here for completeness
+        fn_prototype = self.intrinsics["FunctionPrototype"]
+        fn_prototype.set_hidden("constructor", fn_constructor)
         fn_constructor.set("prototype", fn_prototype)
+        fn_constructor._prototype = fn_prototype
 
         return fn_constructor
 
@@ -1095,19 +1219,14 @@ class Context:
                 # If not a string, return the argument unchanged
                 return code
 
-            try:
-                parser = Parser(code)
-                ast = parser.parse()
-                compiler = Compiler()
-                bytecode_module = compiler.compile(ast)
-
-                vm = VM(ctx.memory_limit, ctx.time_limit)
-                vm.globals = ctx._globals
-                return vm.run(bytecode_module)
-            except Exception as e:
-                from .errors import JSError
-
-                raise JSError(f"EvalError: {str(e)}")
+            # Parse errors propagate as JSSyntaxError, which the VM throws
+            # as a JavaScript SyntaxError
+            compiled = Compiler().compile(Parser(code).parse())
+            if ctx._current_vm is not None:
+                # Run inside the current execution so that the time limit
+                # keeps counting and throws reach the caller's handlers
+                return ctx._current_vm.run_nested(compiled)
+            return ctx._new_vm().run(compiled)
 
         return eval_fn
 
@@ -1123,78 +1242,13 @@ class Context:
 
     def _global_parseint(self, *args):
         """Global parseInt."""
-        s = to_string(args[0]) if args else ""
-        radix = int(to_number(args[1])) if len(args) > 1 else 10
-        if radix == 0:
-            radix = 10
-        s = s.strip()
-        if not s:
-            return float("nan")
-        sign = 1
-        if s.startswith("-"):
-            sign = -1
-            s = s[1:]
-        elif s.startswith("+"):
-            s = s[1:]
-        if s.startswith("0x") or s.startswith("0X"):
-            radix = 16
-            s = s[2:]
-        result = 0
-        found = False
-        for ch in s:
-            if ch.isdigit():
-                digit = ord(ch) - ord("0")
-            elif ch.isalpha():
-                digit = ord(ch.lower()) - ord("a") + 10
-            else:
-                break
-            if digit >= radix:
-                break
-            result = result * radix + digit
-            found = True
-        if not found:
-            return float("nan")
-        return sign * result
+        s = to_string(args[0]) if args else "undefined"
+        radix = to_number(args[1]) if len(args) > 1 else 0
+        return parse_int(s, radix)
 
     def _global_parsefloat(self, *args):
         """Global parseFloat."""
-        s = to_string(args[0]) if args else ""
-        s = s.strip()
-        if not s:
-            return float("nan")
-
-        # Handle Infinity
-        if s.startswith("Infinity"):
-            return float("inf")
-        if s.startswith("-Infinity"):
-            return float("-inf")
-        if s.startswith("+Infinity"):
-            return float("inf")
-
-        i = 0
-        has_dot = False
-        has_exp = False
-        if s[i] in "+-":
-            i += 1
-        while i < len(s):
-            if s[i].isdigit():
-                i += 1
-            elif s[i] == "." and not has_dot:
-                has_dot = True
-                i += 1
-            elif s[i] in "eE" and not has_exp:
-                has_exp = True
-                i += 1
-                if i < len(s) and s[i] in "+-":
-                    i += 1
-            else:
-                break
-        if i == 0:
-            return float("nan")
-        try:
-            return float(s[:i])
-        except ValueError:
-            return float("nan")
+        return parse_float(to_string(args[0]) if args else "undefined")
 
     def eval(self, code: str) -> Any:
         """Evaluate JavaScript code and return the result.
@@ -1220,30 +1274,46 @@ class Context:
         compiled = compiler.compile(ast)
 
         # Execute
-        vm = VM(memory_limit=self.memory_limit, time_limit=self.time_limit)
+        vm = self._new_vm()
 
-        # Share globals with VM (don't copy - allows nested eval to modify globals)
-        vm.globals = self._globals
-
-        # Store current VM for timeout checking in RegExp constructor
+        # Store current VM for timeout checking and nested calls; restore the
+        # previous one afterwards in case eval() was called re-entrantly
+        previous_vm = self._current_vm
         self._current_vm = vm
         try:
             result = vm.run(compiled)
+        except JSError as e:
+            e.value = self._to_python(e.value)
+            raise
         finally:
-            self._current_vm = None
+            self._current_vm = previous_vm
 
         return self._to_python(result)
+
+    def _new_vm(self) -> VM:
+        """Create a VM sharing this context's globals and limits."""
+        vm = VM(memory_limit=self.memory_limit, time_limit=self.time_limit)
+        # Share globals with the VM (not a copy, so eval can modify them)
+        vm.globals = self._globals
+        vm.baseline_bytes = self._baseline_bytes
+        vm.intrinsics = self.intrinsics
+        return vm
 
     def _call_function(self, func: JSFunction, args: list) -> Any:
         """Call a JavaScript function with the given arguments.
 
         This is used internally to invoke JSFunction objects from Python code.
         """
-        vm = VM(memory_limit=self.memory_limit, time_limit=self.time_limit)
-        vm.globals.update(self._globals)
-        result = vm._call_callback(func, args, UNDEFINED)
-        self._globals.update(vm.globals)
-        return result
+        if self._current_vm is not None:
+            # Run on the active VM so throws unwind into the caller's handlers
+            # and the time limit keeps counting from the start of eval()
+            return self._current_vm._call_callback(func, args, UNDEFINED)
+        vm = self._new_vm()
+        vm.start_time = time.monotonic()
+        try:
+            return vm._call_callback(func, args, UNDEFINED)
+        except JSThrow as e:
+            raise vm._uncaught_error(e.value) from None
 
     def get(self, name: str) -> Any:
         """Get a global variable.
@@ -1267,31 +1337,96 @@ class Context:
         self._globals[name] = self._to_js(value)
 
     def _to_python(self, value: JSValue) -> Any:
-        """Convert a JavaScript value to Python."""
-        if value is UNDEFINED:
+        """Convert a JavaScript value to Python.
+
+        Arrays become lists and objects dicts. Shared and cyclic references
+        are preserved, and nesting depth is not limited by Python's stack.
+        """
+        if not isinstance(value, JSObject) or isinstance(value, JSFunction):
+            return self._primitive_to_python(value)
+        converted: Dict[int, Any] = {}
+        root = self._empty_python_container(value, converted)
+        pending = [value]
+        while pending:
+            js_value = pending.pop()
+            target = converted[id(js_value)]
+            if isinstance(js_value, JSArray):
+                items = js_value._elements
+                target.extend([None] * len(items))
+                slots = enumerate(items)
+            else:
+                slots = ((k, js_value._properties[k]) for k in js_value.keys())
+            for key, item in slots:
+                if not isinstance(item, JSObject) or isinstance(item, JSFunction):
+                    target[key] = self._primitive_to_python(item)
+                elif id(item) in converted:
+                    target[key] = converted[id(item)]
+                else:
+                    target[key] = self._empty_python_container(item, converted)
+                    pending.append(item)
+        return root
+
+    @staticmethod
+    def _empty_python_container(value: JSObject, converted: Dict[int, Any]) -> Any:
+        container = [] if isinstance(value, JSArray) else {}
+        converted[id(value)] = container
+        return container
+
+    @staticmethod
+    def _primitive_to_python(value: JSValue) -> Any:
+        if value is UNDEFINED or value is NULL:
             return None
-        if value is NULL:
-            return None
-        if isinstance(value, bool):
-            return value
-        if isinstance(value, (int, float)):
-            return value
-        if isinstance(value, str):
-            return value
-        if isinstance(value, JSArray):
-            return [self._to_python(elem) for elem in value._elements]
-        if isinstance(value, JSObject):
-            return {k: self._to_python(v) for k, v in value._properties.items()}
         return value
 
     def _to_js(self, value: Any) -> JSValue:
-        """Convert a Python value to JavaScript."""
+        """Convert a Python value to JavaScript.
+
+        Lists become arrays and dicts objects, preserving shared and cyclic
+        references without recursion.
+        """
+        if not isinstance(value, (list, dict)):
+            return self._primitive_to_js(value)
+        converted: Dict[int, JSValue] = {}
+        root = self._empty_js_container(value, converted)
+        pending = [value]
+        while pending:
+            py_value = pending.pop()
+            target = converted[id(py_value)]
+            if isinstance(py_value, list):
+                slots = enumerate(py_value)
+            else:
+                slots = ((str(k), v) for k, v in py_value.items())
+            for key, item in slots:
+                if not isinstance(item, (list, dict)):
+                    js_item = self._primitive_to_js(item)
+                elif id(item) in converted:
+                    js_item = converted[id(item)]
+                else:
+                    js_item = self._empty_js_container(item, converted)
+                    pending.append(item)
+                if isinstance(target, JSArray):
+                    target._elements.append(js_item)
+                else:
+                    target.set(key, js_item)
+        return root
+
+    def _empty_js_container(self, value: Any, converted: Dict[int, JSValue]):
+        if isinstance(value, list):
+            container = JSArray()
+            container._prototype = self._array_prototype
+        else:
+            container = JSObject(self._object_prototype)
+        converted[id(value)] = container
+        return container
+
+    @staticmethod
+    def _primitive_to_js(value: Any) -> JSValue:
         if value is None:
             return NULL
         if isinstance(value, bool):
             return value
         if isinstance(value, (int, float)):
-            return value
+            return js_number(value)
         if isinstance(value, str):
             return value
         # Already JS values - pass through
@@ -1299,16 +1434,6 @@ class Context:
             return value
         if value is UNDEFINED:
             return value
-        if isinstance(value, list):
-            arr = JSArray()
-            for elem in value:
-                arr.push(self._to_js(elem))
-            return arr
-        if isinstance(value, dict):
-            obj = JSObject()
-            for k, v in value.items():
-                obj.set(str(k), self._to_js(v))
-            return obj
         # Python callables become JS functions
         if callable(value):
             return value

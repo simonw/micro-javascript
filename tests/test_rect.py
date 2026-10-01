@@ -95,12 +95,10 @@ class TestRectangle:
         ctx.set("Rectangle", rect_constructor)
 
         # Test from JavaScript
-        result = ctx.eval(
-            """
+        result = ctx.eval("""
             var r = new Rectangle(100, 200);
             r.x + ',' + r.y;
-        """
-        )
+        """)
         assert result == "100,200"
 
     def test_rectangle_x_y_properties(self):
@@ -129,12 +127,10 @@ class TestRectangle:
         ctx.set("Rectangle", rect_constructor)
         ctx.set("FilledRectangle", filled_constructor)
 
-        result = ctx.eval(
-            """
+        result = ctx.eval("""
             var r2 = new FilledRectangle(100, 200, 0x123456);
             r2.x + ',' + r2.y + ',' + r2.color;
-        """
-        )
+        """)
         assert result == "100,200,1193046"
 
     def test_rectangle_get_closure(self):
@@ -146,12 +142,10 @@ class TestRectangle:
         )
         ctx.set("Rectangle", rect_constructor)
 
-        result = ctx.eval(
-            """
+        result = ctx.eval("""
             var func = Rectangle.getClosure("abcd");
             func();
-        """
-        )
+        """)
         assert result == "abcd"
 
     def test_rectangle_call_callback(self):
@@ -163,12 +157,10 @@ class TestRectangle:
         )
         ctx.set("Rectangle", rect_constructor)
 
-        result = ctx.eval(
-            """
+        result = ctx.eval("""
             function cb(param) {
                 return "test" + param;
             }
             Rectangle.call(cb, "abc");
-        """
-        )
+        """)
         assert result == "testabc"

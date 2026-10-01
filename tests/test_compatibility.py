@@ -98,16 +98,14 @@ class TestFunctions:
         assert run_js("function add(a, b) { return a + b; } add(3, 4)") == 7
 
     def test_closure(self):
-        result = run_js(
-            """
+        result = run_js("""
             function makeCounter() {
                 var count = 0;
                 return function() { return ++count; };
             }
             var counter = makeCounter();
             counter(); counter(); counter()
-        """
-        )
+        """)
         assert result == 3
 
     def test_arrow_function(self):

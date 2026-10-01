@@ -1,10 +1,110 @@
 """JavaScript value types."""
 
-from typing import Any, Dict, List, Optional, Union, TYPE_CHECKING
+from types import MappingProxyType
+from typing import Any, Dict, List, Optional, Sequence, Union, TYPE_CHECKING
+import contextvars
 import math
+
+from .errors import JSRangeError, JSTypeError
+from .numbers import number_to_string, string_to_number
 
 if TYPE_CHECKING:
     from .context import Context
+
+# The VM executing on this thread. Converting an object to a primitive can
+# call its valueOf() or toString(), which needs the running VM, as does
+# accounting for memory and time inside native functions.
+CURRENT_VM: contextvars.ContextVar = contextvars.ContextVar(
+    "microjs_current_vm", default=None
+)
+
+# The longest string a script can build (V8's limit) and the largest array
+# length; exceeding either is a RangeError whatever the memory limit.
+MAX_STRING_LENGTH = 2**29 - 24
+MAX_ARRAY_LENGTH = 2**32 - 1
+
+
+def intrinsic(name: str) -> Optional["JSObject"]:
+    """The running VM's built-in object called name ("ArrayPrototype", ...)."""
+    vm = CURRENT_VM.get()
+    return vm.intrinsics.get(name) if vm is not None else None
+
+
+def own_enumerable_keys(value: "JSValue") -> List[str]:
+    """Keys of value's own enumerable properties: array or string indexes
+    first, then properties (including accessors) in insertion order."""
+    if isinstance(value, str):
+        return [str(i) for i in range(len(value))]
+    if not isinstance(value, JSObject):
+        return []
+    keys = []
+    if isinstance(value, JSArray):
+        keys = [str(i) for i in range(len(value._elements))]
+    if value._key_order is not None:
+        keys.extend(k for k in value._key_order if k not in value._hidden)
+    else:
+        keys.extend(value.keys())
+    return keys
+
+
+def charge_memory(nbytes: int) -> None:
+    """Account for allocating about nbytes against the memory limit.
+
+    Call before allocating: raises MemoryLimitError if it will not fit.
+    """
+    vm = CURRENT_VM.get()
+    if vm is not None:
+        vm.charge(nbytes)
+
+
+def check_deadline() -> None:
+    """Raise TimeLimitError if the running script is out of time."""
+    vm = CURRENT_VM.get()
+    if vm is not None:
+        vm.check_deadline()
+
+
+def reserve_string(length: int) -> None:
+    """Check that a string of this length may be created, before creating it."""
+    if length > MAX_STRING_LENGTH:
+        raise JSRangeError("Invalid string length")
+    charge_memory(length + 49)
+
+
+def to_array_length(value: "JSValue") -> int:
+    """Validate a new array length, as new Array(n) and length = n do."""
+    n = to_number(value)
+    if n != n or n < 0 or n > MAX_ARRAY_LENGTH or n != int(n):
+        raise JSRangeError("Invalid array length")
+    return int(n)
+
+
+class OutputBudget:
+    """Checks a string being assembled from parts as it grows.
+
+    Natives that build their result piece by piece (join, replace, ...)
+    add each piece's length; the total is checked against the maximum
+    string length and the memory limit each time it doubles, and the
+    deadline is checked every few thousand pieces.
+    """
+
+    def __init__(self) -> None:
+        self.length = 0
+        self._pieces = 0
+        self._next_check = 4096
+
+    def add(self, length: int) -> None:
+        self.length += length
+        self._pieces += 1
+        if self.length >= self._next_check:
+            reserve_string(self.length)
+            self._next_check = self.length * 2
+        if not self._pieces & 4095:
+            check_deadline()
+
+    def finish(self) -> None:
+        """Check the complete length, just before joining the parts."""
+        reserve_string(self.length)
 
 
 class JSUndefined:
@@ -118,7 +218,7 @@ def to_boolean(value: JSValue) -> bool:
 
 
 def to_number(value: JSValue) -> Union[int, float]:
-    """Convert a JavaScript value to number."""
+    """Convert a JavaScript value to number (ToNumber)."""
     if value is UNDEFINED:
         return float("nan")
     if value is NULL:
@@ -128,63 +228,53 @@ def to_number(value: JSValue) -> Union[int, float]:
     if isinstance(value, (int, float)):
         return value
     if isinstance(value, str):
-        s = value.strip()
-        if s == "":
-            return 0
-        try:
-            if "." in s or "e" in s.lower():
-                return float(s)
-            if s.startswith("0x") or s.startswith("0X"):
-                return int(s, 16)
-            if s.startswith("0o") or s.startswith("0O"):
-                return int(s, 8)
-            if s.startswith("0b") or s.startswith("0B"):
-                return int(s, 2)
-            return int(s)
-        except ValueError:
-            return float("nan")
-    # TODO: Handle objects with valueOf
+        return string_to_number(value)
+    if isinstance(value, JSObject):
+        vm = CURRENT_VM.get()
+        if vm is not None:
+            return to_number(vm._to_primitive(value, "number"))
     return float("nan")
 
 
 def to_string(value: JSValue) -> str:
-    """Convert a JavaScript value to string."""
+    """Convert a JavaScript value to string (ToString)."""
     if value is UNDEFINED:
         return "undefined"
     if value is NULL:
         return "null"
     if isinstance(value, bool):
         return "true" if value else "false"
-    if isinstance(value, int):
-        return str(value)
-    if isinstance(value, float):
-        if is_nan(value):
-            return "NaN"
-        if value == float("inf"):
-            return "Infinity"
-        if value == float("-inf"):
-            return "-Infinity"
-        # Handle -0
-        if value == 0 and math.copysign(1, value) < 0:
-            return "0"
-        # Format float nicely
-        s = repr(value)
-        if s.endswith(".0"):
-            return s[:-2]
-        return s
+    if isinstance(value, (int, float)):
+        return number_to_string(value)
     if isinstance(value, str):
         return value
-    # TODO: Handle objects with toString
+    if isinstance(value, JSObject):
+        vm = CURRENT_VM.get()
+        if vm is not None:
+            return to_string(vm._to_primitive(value, "string"))
     return "[object Object]"
 
 
 class JSObject:
     """JavaScript object."""
 
+    # Keys of non-enumerable properties (built-in methods, constructor, ...)
+    _hidden: frozenset = frozenset()
+    # Object.preventExtensions / seal / freeze state
+    _extensible: bool = True
+    _sealed: bool = False
+    _frozen: bool = False
+
+    # Getters and setters are rare, so objects share an empty read-only
+    # mapping until define_getter/define_setter gives them their own
+    _getters: Any = MappingProxyType({})  # property name -> getter function
+    _setters: Any = MappingProxyType({})  # property name -> setter function
+    # Creation order of data and accessor properties together, kept only
+    # once an object has accessors (otherwise _properties' order suffices)
+    _key_order: Optional[List[str]] = None
+
     def __init__(self, prototype: Optional["JSObject"] = None):
         self._properties: Dict[str, JSValue] = {}
-        self._getters: Dict[str, Any] = {}  # property name -> getter function
-        self._setters: Dict[str, Any] = {}  # property name -> setter function
         self._prototype = prototype
 
     def get(self, key: str) -> JSValue:
@@ -211,17 +301,48 @@ class JSObject:
             return self._prototype.get_setter(key)
         return None
 
+    def _record_accessor_key(self, key: str) -> None:
+        if self._key_order is None:
+            self._key_order = list(self._properties)
+        if key not in self._key_order:
+            self._key_order.append(key)
+
     def define_getter(self, key: str, getter: Any) -> None:
         """Define a getter for a property."""
+        if type(self._getters) is not dict:
+            self._getters = {}
+        self._record_accessor_key(key)
         self._getters[key] = getter
 
     def define_setter(self, key: str, setter: Any) -> None:
         """Define a setter for a property."""
+        if type(self._setters) is not dict:
+            self._setters = {}
+        self._record_accessor_key(key)
         self._setters[key] = setter
+
+    def check_writable(self, key: str) -> None:
+        """Throw TypeError if key cannot be assigned (frozen or not extensible)."""
+        if self._frozen:
+            raise JSTypeError(f"Cannot assign to read only property '{key}' of object")
+        if not self._extensible and key not in self._properties:
+            raise JSTypeError(f"Cannot add property {key}, object is not extensible")
 
     def set(self, key: str, value: JSValue) -> None:
         """Set a property value."""
+        if not self._extensible:
+            self.check_writable(key)
+        if self._key_order is not None and key not in self._key_order:
+            self._key_order.append(key)
         self._properties[key] = value
+
+    def set_hidden(self, key: str, value: JSValue) -> None:
+        """Set a property that for-in and Object.keys() do not list."""
+        if not self._extensible:
+            self.check_writable(key)
+        self._properties[key] = value
+        if key not in self._hidden:
+            self._hidden = self._hidden | {key}
 
     def has(self, key: str) -> bool:
         """Check if object has own property."""
@@ -230,12 +351,19 @@ class JSObject:
     def delete(self, key: str) -> bool:
         """Delete a property."""
         if key in self._properties:
+            if self._sealed:
+                raise JSTypeError(f"Cannot delete property '{key}' of object")
             del self._properties[key]
+            if self._key_order is not None and key not in self._getters:
+                if key not in self._setters:
+                    self._key_order.remove(key)
             return True
         return False
 
     def keys(self) -> List[str]:
         """Get own enumerable property keys."""
+        if self._hidden:
+            return [k for k in self._properties if k not in self._hidden]
         return list(self._properties.keys())
 
     def __repr__(self) -> str:
@@ -256,12 +384,24 @@ class JSCallableObject(JSObject):
         return f"JSCallableObject({self._properties})"
 
 
+def grow_array(elements: List["JSValue"], count: int) -> None:
+    """Append count undefined elements, checking memory and time as it goes."""
+    charge_memory(8 * count)
+    while count > 0:
+        chunk = min(count, 1 << 20)
+        elements.extend([UNDEFINED] * chunk)
+        count -= chunk
+        check_deadline()
+
+
 class JSArray(JSObject):
     """JavaScript array."""
 
     def __init__(self, length: int = 0):
-        super().__init__()
-        self._elements: List[JSValue] = [UNDEFINED] * length
+        super().__init__(intrinsic("ArrayPrototype"))
+        self._elements: List[JSValue] = []
+        if length:
+            grow_array(self._elements, length)
 
     @property
     def length(self) -> int:
@@ -270,9 +410,9 @@ class JSArray(JSObject):
     @length.setter
     def length(self, value: int) -> None:
         if value < len(self._elements):
-            self._elements = self._elements[:value]
+            del self._elements[value:]
         else:
-            self._elements.extend([UNDEFINED] * (value - len(self._elements)))
+            grow_array(self._elements, value - len(self._elements))
 
     def get_index(self, index: int) -> JSValue:
         if 0 <= index < len(self._elements):
@@ -287,7 +427,11 @@ class JSArray(JSObject):
             if index == len(self._elements):
                 self._elements.append(value)
             else:
-                raise IndexError("Array index out of bounds (stricter mode)")
+                # Arrays are dense: only appending at the end can grow them
+                raise JSTypeError(
+                    f"Cannot write index {index} of an array of length "
+                    f"{len(self._elements)}"
+                )
         else:
             self._elements[index] = value
 
@@ -304,16 +448,22 @@ class JSArray(JSObject):
         return f"JSArray({self._elements})"
 
 
-class JSFunction:
-    """JavaScript function (closure)."""
+class JSFunction(JSObject):
+    """JavaScript function (closure).
+
+    Functions are objects: they can have properties, and their prototype
+    (the [[Prototype]], _prototype) is Function.prototype. The object that
+    instances created with 'new' inherit from is their "prototype" property.
+    """
 
     def __init__(
         self,
         name: str,
         params: List[str],
-        bytecode: bytes,
+        bytecode: Sequence[int],
         closure_vars: Optional[Dict[str, JSValue]] = None,
     ):
+        super().__init__()
         self.name = name
         self.params = params
         self.bytecode = bytecode
@@ -327,7 +477,7 @@ class JSRegExp(JSObject):
     """JavaScript RegExp object."""
 
     def __init__(self, pattern: str, flags: str = "", poll_callback=None):
-        super().__init__()
+        super().__init__(intrinsic("RegExpPrototype"))
         from .regex import RegExp as InternalRegExp, MatchResult
 
         self._internal = InternalRegExp(pattern, flags, poll_callback)
@@ -390,10 +540,11 @@ class JSRegExp(JSObject):
 
 
 class JSBoundMethod:
-    """A method that expects 'this' as the first argument when called."""
+    """A native method that expects 'this' as the first argument when called."""
 
-    def __init__(self, fn):
+    def __init__(self, fn, name: str = ""):
         self._fn = fn
+        self.name = name
 
     def __call__(self, this_val, *args):
         return self._fn(this_val, *args)

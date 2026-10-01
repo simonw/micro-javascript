@@ -121,46 +121,51 @@ class OpCode(IntEnum):
     STORE_CELL = auto()  # Store to cell: arg = cell slot (for outer function)
 
 
-def disassemble(bytecode: bytes, constants: list) -> str:
+# Opcodes followed by one operand slot in the bytecode. Bytecode is a
+# sequence of ints, so an operand can be any size.
+OPCODES_WITH_ARG = frozenset(
+    [
+        OpCode.LOAD_CONST,
+        OpCode.LOAD_NAME,
+        OpCode.STORE_NAME,
+        OpCode.LOAD_LOCAL,
+        OpCode.STORE_LOCAL,
+        OpCode.LOAD_CLOSURE,
+        OpCode.STORE_CLOSURE,
+        OpCode.LOAD_CELL,
+        OpCode.STORE_CELL,
+        OpCode.JUMP,
+        OpCode.JUMP_IF_FALSE,
+        OpCode.JUMP_IF_TRUE,
+        OpCode.TRY_START,
+        OpCode.CALL,
+        OpCode.CALL_METHOD,
+        OpCode.NEW,
+        OpCode.BUILD_ARRAY,
+        OpCode.BUILD_OBJECT,
+        OpCode.BUILD_REGEX,
+        OpCode.MAKE_CLOSURE,
+        OpCode.TYPEOF_NAME,
+    ]
+)
+
+
+def disassemble(bytecode, constants: list) -> str:
     """Disassemble bytecode for debugging."""
     lines = []
     i = 0
     while i < len(bytecode):
         op = OpCode(bytecode[i])
         line = f"{i:4d}: {op.name}"
-
-        if op in (
-            OpCode.LOAD_CONST,
-            OpCode.LOAD_NAME,
-            OpCode.STORE_NAME,
-            OpCode.LOAD_LOCAL,
-            OpCode.STORE_LOCAL,
-            OpCode.JUMP,
-            OpCode.JUMP_IF_FALSE,
-            OpCode.JUMP_IF_TRUE,
-            OpCode.CALL,
-            OpCode.CALL_METHOD,
-            OpCode.NEW,
-            OpCode.BUILD_ARRAY,
-            OpCode.BUILD_OBJECT,
-            OpCode.BUILD_REGEX,
-            OpCode.TRY_START,
-            OpCode.MAKE_CLOSURE,
-            OpCode.TYPEOF_NAME,
-        ):
-            # Has argument
-            if i + 1 < len(bytecode):
-                arg = bytecode[i + 1]
-                if op == OpCode.LOAD_CONST and arg < len(constants):
-                    line += f" {arg} ({constants[arg]!r})"
-                else:
-                    line += f" {arg}"
-                i += 2
+        if op in OPCODES_WITH_ARG:
+            arg = bytecode[i + 1]
+            if op == OpCode.LOAD_CONST and arg < len(constants):
+                line += f" {arg} ({constants[arg]!r})"
             else:
-                i += 1
+                line += f" {arg}"
+            i += 2
         else:
             i += 1
-
         lines.append(line)
 
     return "\n".join(lines)
